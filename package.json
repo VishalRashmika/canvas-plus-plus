@@ -1,0 +1,38 @@
+{
+  "name": "canvas-plus-plus",
+  "version": "1.0.0",
+  "description": "Professional UML 2.x diagrams, hardware schematics, and freehand shape recognition on a high-performance visual canvas with AI coding agent integration.",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "lint": "eslint src --ext .ts,.tsx"
+  },
+  "keywords": [
+    "canvas",
+    "canvas-plus-plus",
+    "uml",
+    "schematic",
+    "diagramming",
+    "whiteboard",
+    "obsidian-plugin"
+  ],
+  "author": "J.M. Vishal Rashmika Perera",
+  "license": "GPL-3.0-only",
+  "devDependencies": {
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.11.30",
+    "@typescript-eslint/eslint-plugin": "^7.4.0",
+    "@typescript-eslint/parser": "^7.4.0",
+    "builtin-modules": "^3.3.0",
+    "esbuild": "^0.20.2",
+    "eslint": "^8.57.0",
+    "jest": "^29.7.0",
+    "obsidian": "latest",
+    "ts-jest": "^29.1.2",
+    "tslib": "^2.6.2",
+    "typescript": "^5.4.3"
+  }
+}

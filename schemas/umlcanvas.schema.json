@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://example.com/schemas/umlcanvas.schema.json",
+  "title": "UmlCanvas Diagram (schema v1)",
+  "description": "Companion machine-readable schema for docs/07-FILE-FORMAT-SPEC.md. Keep these two in sync — implement F-020 against this file, not just the markdown.",
+  "type": "object",
+  "required": ["schemaVersion", "id", "diagramType", "nodes", "edges"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "id": { "type": "string" },
+    "diagramType": { "type": "string" },
+    "title": { "type": "string" },
+    "nodes": { "type": "array", "items": { "type": "object" } },
+    "edges": { "type": "array", "items": { "type": "object" } },
+    "layers": { "type": "array", "items": { "type": "object" } },
+    "groups": { "type": "array", "items": { "type": "object" } },
+    "editPermissions": {
+      "type": "object",
+      "properties": {
+        "default": {
+          "type": "string",
+          "enum": ["user", "antigravity", "both", "none"]
+        },
+        "overrides": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "enum": ["user", "antigravity", "both", "none"]
+          }
+        }
+      }
+    }
+  },
+  "$comment": "This is intentionally loose (nodes/edges as generic objects) at scaffold time. Tighten node/edge sub-schemas as DiagramNode/DiagramEdge stabilize in Phase 0-1 — see docs/02-DOMAIN-MODEL.md. Do not let this file silently drift from that doc."
+}

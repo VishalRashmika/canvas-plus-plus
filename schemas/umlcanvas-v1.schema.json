@@ -1,0 +1,252 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://obsidian.md/schemas/umlcanvas-v1.schema.json",
+  "title": "UmlCanvasDiagramV1",
+  "description": "Schema definition for Canvas++ diagram files (.umlcanvas v1)",
+  "type": "object",
+  "required": [
+    "id",
+    "diagramType",
+    "title",
+    "nodes",
+    "edges",
+    "schemaVersion"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique identifier for the diagram"
+    },
+    "diagramType": {
+      "type": "string",
+      "description": "Identifier of the UML or schematic diagram type (e.g. uml.class, uml.package, schematic)"
+    },
+    "title": {
+      "type": "string",
+      "description": "Human-readable title of the diagram"
+    },
+    "schemaVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1,
+      "description": "Version of the diagram schema format (v1)"
+    },
+    "nodes": {
+      "type": "array",
+      "description": "Collection of diagram nodes",
+      "items": {
+        "$ref": "#/definitions/DiagramNode"
+      }
+    },
+    "edges": {
+      "type": "array",
+      "description": "Collection of diagram edges connecting nodes",
+      "items": {
+        "$ref": "#/definitions/DiagramEdge"
+      }
+    },
+    "layers": {
+      "type": "array",
+      "description": "Display layers for organizing node visibility and edit lock states",
+      "items": {
+        "$ref": "#/definitions/Layer"
+      }
+    },
+    "groups": {
+      "type": "array",
+      "description": "Logical boundary boxes grouping sets of nodes",
+      "items": {
+        "$ref": "#/definitions/Group"
+      }
+    },
+    "editPermissions": {
+      "$ref": "#/definitions/EditPermissionMap"
+    }
+  },
+  "additionalProperties": true,
+  "definitions": {
+    "Point": {
+      "type": "object",
+      "required": ["x", "y"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" }
+      },
+      "additionalProperties": false
+    },
+    "Size": {
+      "type": "object",
+      "required": ["width", "height"],
+      "properties": {
+        "width": { "type": "number", "minimum": 0 },
+        "height": { "type": "number", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "Side": {
+      "type": "string",
+      "enum": ["top", "right", "bottom", "left"]
+    },
+    "Port": {
+      "type": "object",
+      "required": ["id", "ownerNodeId", "name", "side", "offset", "direction"],
+      "properties": {
+        "id": { "type": "string" },
+        "ownerNodeId": { "type": "string" },
+        "name": { "type": "string" },
+        "side": { "$ref": "#/definitions/Side" },
+        "offset": { "type": "number", "minimum": 0, "maximum": 1 },
+        "direction": { "type": "string", "enum": ["in", "out", "inout"] },
+        "dataType": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "Label": {
+      "type": "object",
+      "required": ["id", "text", "anchor", "position"],
+      "properties": {
+        "id": { "type": "string" },
+        "text": { "type": "string" },
+        "anchor": { "type": "string", "enum": ["node", "edge", "port"] },
+        "position": { "$ref": "#/definitions/Point" },
+        "style": {
+          "type": "object",
+          "properties": {
+            "fontSize": { "type": "number" },
+            "bold": { "type": "boolean" },
+            "italic": { "type": "boolean" },
+            "color": { "type": "string" }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "CompartmentItem": {
+      "type": "object",
+      "required": ["text"],
+      "properties": {
+        "visibility": { "type": "string", "enum": ["+", "-", "#", "~"] },
+        "text": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "Compartment": {
+      "type": "object",
+      "required": ["title", "items"],
+      "properties": {
+        "title": { "type": "string" },
+        "items": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/CompartmentItem" }
+        }
+      },
+      "additionalProperties": true
+    },
+    "DiagramNode": {
+      "type": "object",
+      "required": ["id", "kind", "position", "size", "ports", "labels"],
+      "properties": {
+        "id": { "type": "string" },
+        "kind": { "type": "string" },
+        "position": { "$ref": "#/definitions/Point" },
+        "size": { "$ref": "#/definitions/Size" },
+        "ports": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Port" }
+        },
+        "labels": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Label" }
+        },
+        "compartments": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Compartment" }
+        },
+        "stereotype": { "type": "string" },
+        "taggedValues": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "childDiagramId": { "type": "string" },
+        "customData": { "type": "object" },
+        "metadata": { "type": "object" }
+      },
+      "additionalProperties": true
+    },
+    "DiagramEdge": {
+      "type": "object",
+      "required": ["id", "kind", "fromNodeId", "toNodeId", "routing", "labels"],
+      "properties": {
+        "id": { "type": "string" },
+        "kind": { "type": "string" },
+        "fromNodeId": { "type": "string" },
+        "fromPortId": { "type": "string" },
+        "fromSide": { "$ref": "#/definitions/Side" },
+        "toNodeId": { "type": "string" },
+        "toPortId": { "type": "string" },
+        "toSide": { "$ref": "#/definitions/Side" },
+        "routing": { "type": "string", "enum": ["straight", "orthogonal", "curved"] },
+        "waypoints": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Point" }
+        },
+        "labels": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Label" }
+        },
+        "sequenceOrder": { "type": "number" },
+        "multiplicitySource": { "type": "string" },
+        "multiplicityTarget": { "type": "string" },
+        "style": { "type": "object" }
+      },
+      "additionalProperties": true
+    },
+    "Layer": {
+      "type": "object",
+      "required": ["id", "name", "visible", "locked", "nodeIds"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "visible": { "type": "boolean" },
+        "locked": { "type": "boolean" },
+        "nodeIds": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": true
+    },
+    "Group": {
+      "type": "object",
+      "required": ["id", "title", "nodeIds", "collapsed"],
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "nodeIds": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "collapsed": { "type": "boolean" },
+        "color": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "EditPermission": {
+      "type": "string",
+      "enum": ["user", "antigravity", "both", "none"]
+    },
+    "EditPermissionMap": {
+      "type": "object",
+      "required": ["default", "overrides"],
+      "properties": {
+        "default": { "$ref": "#/definitions/EditPermission" },
+        "overrides": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/definitions/EditPermission" }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,94 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://obsidian.md/schemas/umlcanvas-patch.schema.json",
+  "title": "UmlCanvasDiagramPatch",
+  "description": "Schema definition for Antigravity CLI patches applied to .umlcanvas files",
+  "type": "object",
+  "required": [
+    "targetDiagramId",
+    "baseSchemaVersion",
+    "expectedFileHash",
+    "operations"
+  ],
+  "properties": {
+    "targetDiagramId": {
+      "type": "string",
+      "description": "Diagram identifier targeted by this patch"
+    },
+    "baseSchemaVersion": {
+      "type": "integer",
+      "description": "Schema version expected on the target diagram (must match target's schemaVersion)"
+    },
+    "expectedFileHash": {
+      "type": "string",
+      "description": "SHA-256 hex hash of the diagram/file when the external patch was generated"
+    },
+    "operations": {
+      "type": "array",
+      "description": "Atomic sequence of patch operations to apply",
+      "items": {
+        "$ref": "#/definitions/PatchOperation"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "PatchOperation": {
+      "type": "object",
+      "required": ["op"],
+      "discriminator": { "propertyName": "op" },
+      "oneOf": [
+        {
+          "properties": {
+            "op": { "const": "addNode" },
+            "node": { "type": "object", "required": ["id", "kind"] }
+          },
+          "required": ["op", "node"],
+          "additionalProperties": false
+        },
+        {
+          "properties": {
+            "op": { "const": "updateNode" },
+            "nodeId": { "type": "string" },
+            "changes": { "type": "object" }
+          },
+          "required": ["op", "nodeId", "changes"],
+          "additionalProperties": false
+        },
+        {
+          "properties": {
+            "op": { "const": "deleteNode" },
+            "nodeId": { "type": "string" }
+          },
+          "required": ["op", "nodeId"],
+          "additionalProperties": false
+        },
+        {
+          "properties": {
+            "op": { "const": "addEdge" },
+            "edge": { "type": "object", "required": ["id", "fromNodeId", "toNodeId"] }
+          },
+          "required": ["op", "edge"],
+          "additionalProperties": false
+        },
+        {
+          "properties": {
+            "op": { "const": "updateEdge" },
+            "edgeId": { "type": "string" },
+            "changes": { "type": "object" }
+          },
+          "required": ["op", "edgeId", "changes"],
+          "additionalProperties": false
+        },
+        {
+          "properties": {
+            "op": { "const": "deleteEdge" },
+            "edgeId": { "type": "string" }
+          },
+          "required": ["op", "edgeId"],
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,2737 @@
+/* ==========================================================================
+   Canvas++ Plugin Styles
+   Scoped under .umlcanvas-* per community plugin compliance guidelines.
+   ========================================================================== */
+
+.umlcanvas-view-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--background-primary);
+  user-select: none;
+}
+
+/* --- Floating Toolbar --- */
+
+.umlcanvas-toolbar {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 6px;
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m, 8px);
+  box-shadow: var(--shadow-s, 0 4px 12px rgba(0, 0, 0, 0.15));
+  max-width: calc(100% - 24px);
+  pointer-events: auto;
+}
+
+.umlcanvas-toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.umlcanvas-toolbar-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 6px);
+}
+
+.umlcanvas-toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px 8px;
+  min-width: 28px;
+  height: 28px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-normal);
+  background-color: transparent;
+  border: none;
+  border-radius: var(--radius-s, 4px);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+  transition: background-color 0.15s ease, color 0.15s ease, transform 0.08s ease;
+}
+
+.umlcanvas-toolbar-btn.is-icon-only {
+  padding: 4px;
+  width: 28px;
+  min-width: 28px;
+}
+
+.umlcanvas-toolbar-btn .umlcanvas-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+
+.umlcanvas-toolbar-btn .umlcanvas-btn-icon svg,
+.umlcanvas-toolbar-btn svg,
+.umlcanvas-toolbar-btn .svg-icon {
+  width: 15px;
+  height: 15px;
+  stroke-width: 2px;
+  stroke: currentColor;
+}
+
+.umlcanvas-toolbar-btn:hover:not(:disabled) {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-accent);
+}
+
+.umlcanvas-toolbar-btn:active:not(:disabled) {
+  background-color: var(--background-modifier-active-hover);
+  transform: translateY(1px);
+}
+
+.umlcanvas-toolbar-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.umlcanvas-toolbar-btn.is-active {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent, #ffffff);
+  font-weight: 600;
+}
+
+.umlcanvas-toolbar-btn.is-active:hover {
+  background-color: var(--interactive-accent-hover, var(--interactive-accent));
+  color: var(--text-on-accent, #ffffff);
+}
+
+.umlcanvas-toolbar-btn.umlcanvas-toolbar-btn-danger:hover:not(:disabled) {
+  background-color: var(--text-error, #e53935);
+  color: #ffffff;
+}
+
+.umlcanvas-toolbar-divider {
+  width: 1px;
+  height: 18px;
+  background-color: var(--background-modifier-border);
+  margin: 0 2px;
+}
+
+.umlcanvas-type-select {
+  height: 28px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-normal);
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 4px);
+  cursor: pointer;
+  outline: none;
+}
+
+.umlcanvas-type-select:hover {
+  border-color: var(--text-muted);
+}
+
+.umlcanvas-type-select:focus {
+  border-color: var(--interactive-accent);
+}
+
+.umlcanvas-zoom-label {
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  min-width: 38px;
+  text-align: center;
+  padding: 0 2px;
+}
+
+/* --- Canvas Surface & SVG --- */
+
+.umlcanvas-svg-container {
+  position: relative;
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  cursor: default;
+}
+
+.umlcanvas-svg-container.umlcanvas-panning {
+  cursor: grabbing !important;
+}
+
+.umlcanvas-svg-container.umlcanvas-space-pressed {
+  cursor: grab;
+}
+
+.umlcanvas-view-container.umlcanvas-freehand-mode,
+.umlcanvas-view-container.umlcanvas-freehand-mode .umlcanvas-svg-container,
+.umlcanvas-view-container.umlcanvas-freehand-mode .umlcanvas-svg {
+  cursor: crosshair !important;
+}
+
+.umlcanvas-moving,
+.umlcanvas-moving * {
+  cursor: grabbing !important;
+}
+
+.umlcanvas-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* --- Grid Pattern --- */
+
+.umlcanvas-grid-dot {
+  fill: var(--text-faint);
+  opacity: 0.45;
+}
+
+/* --- Nodes --- */
+
+.umlcanvas-node {
+  cursor: move;
+}
+
+.umlcanvas-node-hitbox {
+  fill: transparent;
+  stroke: none;
+  pointer-events: all;
+  cursor: move;
+}
+
+.umlcanvas-node-body {
+  fill: var(--background-primary);
+  stroke: var(--text-muted);
+  stroke-width: 1.5;
+  transition: stroke 0.15s ease, filter 0.15s ease;
+}
+
+.umlcanvas-node:hover .umlcanvas-node-body {
+  stroke: var(--text-normal);
+}
+
+.umlcanvas-node-body.umlcanvas-node-selected {
+  stroke: var(--interactive-accent);
+  stroke-width: 2;
+  filter: drop-shadow(0 0 4px rgba(var(--interactive-accent-rgb, 120, 100, 255), 0.4));
+}
+
+.umlcanvas-node-title {
+  fill: var(--text-normal);
+  font-family: var(--font-text, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+  font-size: 13px;
+  font-weight: 600;
+  pointer-events: none;
+  user-select: none;
+}
+
+.umlcanvas-class-title {
+  font-weight: 700;
+}
+
+.umlcanvas-node-stereotype {
+  fill: var(--text-muted);
+  font-family: var(--font-text, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+  font-size: 10px;
+  font-style: italic;
+  pointer-events: none;
+  user-select: none;
+}
+
+.umlcanvas-node-tagged-values {
+  fill: var(--text-muted);
+  font-family: var(--font-text, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+  font-size: 9px;
+  pointer-events: none;
+  user-select: none;
+}
+
+.umlcanvas-compartment-divider {
+  stroke: var(--background-modifier-border);
+  stroke-width: 1;
+  pointer-events: none;
+}
+
+.umlcanvas-compartment-item {
+  fill: var(--text-normal);
+  font-family: var(--font-monospace, monospace);
+  font-size: 11px;
+  pointer-events: none;
+  user-select: none;
+}
+
+.umlcanvas-visibility-\+ {
+  fill: var(--text-success, #66bb6a);
+  font-weight: 600;
+}
+
+.umlcanvas-visibility-- {
+  fill: var(--text-error, #ef5350);
+  font-weight: 600;
+}
+
+.umlcanvas-visibility-\# {
+  fill: var(--text-warning, #ffa726);
+  font-weight: 600;
+}
+
+.umlcanvas-visibility-\~ {
+  fill: var(--text-muted);
+  font-weight: 600;
+}
+
+.umlcanvas-node-locked {
+  cursor: not-allowed;
+  opacity: 0.85;
+}
+
+/* --- Port Handles --- */
+
+.umlcanvas-port-handle {
+  fill: var(--interactive-accent);
+  stroke: var(--background-primary);
+  stroke-width: 2;
+  opacity: 0;
+  cursor: crosshair;
+  transition: opacity 0.15s ease, r 0.15s ease;
+}
+
+.umlcanvas-node:hover .umlcanvas-port-handle {
+  opacity: 0.75;
+}
+
+.umlcanvas-port-handle:hover {
+  opacity: 1 !important;
+  r: 7;
+}
+
+.umlcanvas-port-label {
+  fill: var(--text-muted);
+  font-family: var(--font-monospace, monospace);
+  font-size: 9px;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* --- Groups --- */
+
+.umlcanvas-groups-layer {
+  pointer-events: none;
+}
+
+.umlcanvas-group {
+  pointer-events: none;
+}
+
+.umlcanvas-group-box {
+  fill: rgba(var(--interactive-accent-rgb, 120, 100, 255), 0.04);
+  stroke: var(--interactive-accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 3;
+  rx: var(--radius-m, 6px);
+  pointer-events: stroke;
+  cursor: grab;
+  transition: stroke 0.15s ease, fill 0.15s ease, stroke-width 0.15s ease;
+}
+
+.umlcanvas-group:hover .umlcanvas-group-box {
+  fill: rgba(var(--interactive-accent-rgb, 120, 100, 255), 0.08);
+  stroke-width: 2;
+}
+
+.umlcanvas-group.is-selected .umlcanvas-group-box {
+  stroke: var(--interactive-accent);
+  stroke-width: 2.5;
+  stroke-dasharray: none;
+  fill: rgba(var(--interactive-accent-rgb, 120, 100, 255), 0.09);
+}
+
+.umlcanvas-group.is-locked .umlcanvas-group-box {
+  stroke-dasharray: 2 2;
+  cursor: default;
+}
+
+.umlcanvas-group-header-bg {
+  fill: rgba(var(--interactive-accent-rgb, 120, 100, 255), 0.12);
+  cursor: grab;
+  pointer-events: all;
+  transition: fill 0.15s ease;
+}
+
+.umlcanvas-group:hover .umlcanvas-group-header-bg {
+  fill: rgba(var(--interactive-accent-rgb, 120, 100, 255), 0.18);
+}
+
+.umlcanvas-group.is-selected .umlcanvas-group-header-bg {
+  fill: rgba(var(--interactive-accent-rgb, 120, 100, 255), 0.25);
+}
+
+.umlcanvas-group.is-locked .umlcanvas-group-header-bg {
+  cursor: default;
+}
+
+.umlcanvas-group-collapse-btn {
+  fill: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  pointer-events: all;
+  user-select: none;
+  transition: fill 0.15s ease;
+}
+
+.umlcanvas-group-collapse-btn:hover {
+  fill: var(--text-normal);
+}
+
+.umlcanvas-group-title {
+  fill: var(--text-normal);
+  font-family: var(--font-text, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  pointer-events: all;
+  user-select: none;
+  cursor: text;
+}
+
+.umlcanvas-group-badge {
+  fill: var(--text-faint);
+  font-family: var(--font-text, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+  font-size: 10px;
+  font-weight: 500;
+  user-select: none;
+  pointer-events: all;
+}
+
+.umlcanvas-group-lock-icon {
+  font-size: 11px;
+  user-select: none;
+  pointer-events: none;
+}
+
+.umlcanvas-group-collapsed-card {
+  fill: var(--background-secondary);
+  stroke: var(--interactive-accent);
+  stroke-width: 1.5;
+  pointer-events: all;
+  cursor: grab;
+  filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.18));
+  transition: stroke 0.15s ease, fill 0.15s ease;
+}
+
+.umlcanvas-group.is-selected .umlcanvas-group-collapsed-card {
+  stroke-width: 2.5;
+}
+
+.umlcanvas-group.is-locked .umlcanvas-group-collapsed-card {
+  cursor: default;
+}
+
+.umlcanvas-group-resize-handle {
+  fill: var(--background-primary);
+  stroke: var(--interactive-accent);
+  stroke-width: 1.5;
+  pointer-events: all;
+}
+
+.umlcanvas-group-resize-handle:hover {
+  fill: var(--interactive-accent);
+}
+
+.umlcanvas-group-resize-handle.handle-nw,
+.umlcanvas-group-resize-handle.handle-se {
+  cursor: nwse-resize;
+}
+
+.umlcanvas-group-resize-handle.handle-ne,
+.umlcanvas-group-resize-handle.handle-sw {
+  cursor: nesw-resize;
+}
+
+.umlcanvas-group-resize-handle.handle-n,
+.umlcanvas-group-resize-handle.handle-s {
+  cursor: ns-resize;
+}
+
+.umlcanvas-group-resize-handle.handle-w,
+.umlcanvas-group-resize-handle.handle-e {
+  cursor: ew-resize;
+}
+
+.umlcanvas-group-inline-editor {
+  min-width: 140px;
+  font-size: 12px;
+  padding: 3px 6px;
+  text-align: left;
+}
+
+/* --- Edges --- */
+
+.umlcanvas-edge-hitbox {
+  stroke: transparent;
+  stroke-width: 14;
+  fill: none;
+  cursor: pointer;
+}
+
+.umlcanvas-edge-line {
+  stroke: var(--text-muted);
+  stroke-width: 2px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+  transition: stroke 0.15s ease;
+}
+
+.umlcanvas-edge:hover .umlcanvas-edge-line {
+  stroke: var(--text-normal);
+}
+
+.umlcanvas-edge-line.umlcanvas-edge-selected,
+.umlcanvas-edge.umlcanvas-edge-selected .umlcanvas-edge-line {
+  stroke: var(--interactive-accent) !important;
+  stroke-width: 3px !important;
+  filter: drop-shadow(0 0 3px var(--interactive-accent)) !important;
+}
+
+.umlcanvas-arrow-head {
+  fill: var(--text-muted);
+}
+
+.umlcanvas-edge:hover .umlcanvas-arrow-head {
+  fill: var(--text-normal);
+}
+
+.umlcanvas-edge-line.umlcanvas-edge-selected + .umlcanvas-arrow-head,
+.umlcanvas-edge-selected ~ * .umlcanvas-arrow-head,
+.umlcanvas-edge.umlcanvas-edge-selected .umlcanvas-arrow-head {
+  fill: var(--interactive-accent) !important;
+}
+
+.umlcanvas-edge-label-group {
+  cursor: pointer;
+}
+
+.umlcanvas-edge-label-bg {
+  fill: var(--background-primary);
+  stroke: var(--background-modifier-border, var(--text-faint));
+  stroke-width: 1;
+  transition: fill 0.15s ease, stroke 0.15s ease;
+  cursor: pointer;
+}
+
+.umlcanvas-edge:hover .umlcanvas-edge-label-bg {
+  stroke: var(--interactive-accent);
+  fill: var(--background-secondary);
+}
+
+.umlcanvas-edge-line.umlcanvas-edge-selected ~ .umlcanvas-edge-label-group .umlcanvas-edge-label-bg,
+.umlcanvas-edge.umlcanvas-edge-selected .umlcanvas-edge-label-bg {
+  stroke: var(--interactive-accent);
+  fill: var(--background-secondary);
+}
+
+.umlcanvas-edge-label {
+  fill: var(--text-normal);
+  font-family: var(--font-text, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+  font-size: 11px;
+  font-weight: 500;
+  pointer-events: all;
+  cursor: pointer;
+  user-select: none;
+}
+
+.umlcanvas-edge:hover .umlcanvas-edge-label,
+.umlcanvas-edge-label-group:hover .umlcanvas-edge-label {
+  fill: var(--text-normal);
+}
+
+.umlcanvas-edge-line.umlcanvas-edge-selected ~ .umlcanvas-edge-label-group .umlcanvas-edge-label {
+  fill: var(--interactive-accent);
+}
+
+.umlcanvas-edge-multiplicity {
+  fill: var(--text-muted);
+  font-family: var(--font-text, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+  font-size: 10px;
+  font-weight: 500;
+  pointer-events: none;
+  user-select: none;
+}
+
+.umlcanvas-multiplicity-source {
+  text-anchor: middle;
+}
+
+.umlcanvas-multiplicity-target {
+  text-anchor: middle;
+}
+
+/* --- Alignment Guides --- */
+
+.umlcanvas-guide-line {
+  stroke: var(--interactive-accent);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+  pointer-events: none;
+}
+
+/* --- Interaction Overlays --- */
+
+.umlcanvas-selection-outline {
+  fill: none;
+  stroke: var(--interactive-accent);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+  pointer-events: none;
+}
+
+.umlcanvas-resize-handle {
+  fill: var(--background-primary);
+  stroke: var(--interactive-accent);
+  stroke-width: 1.5;
+}
+
+.umlcanvas-resize-handle.handle-nw { cursor: nwse-resize; }
+.umlcanvas-resize-handle.handle-se { cursor: nwse-resize; }
+.umlcanvas-resize-handle.handle-ne { cursor: nesw-resize; }
+.umlcanvas-resize-handle.handle-sw { cursor: nesw-resize; }
+.umlcanvas-resize-handle.handle-n  { cursor: ns-resize; }
+.umlcanvas-resize-handle.handle-s  { cursor: ns-resize; }
+.umlcanvas-resize-handle.handle-e  { cursor: ew-resize; }
+.umlcanvas-resize-handle.handle-w  { cursor: ew-resize; }
+
+.umlcanvas-edge-preview-line {
+  stroke: var(--interactive-accent);
+  stroke-width: 2;
+  stroke-dasharray: 4 3;
+  fill: none;
+  pointer-events: none;
+}
+
+/* Edge Interactive Handles & Reconnection */
+.umlcanvas-edge-handle {
+  cursor: grab;
+  stroke: #ffffff;
+  stroke-width: 1.5;
+  transition: r 0.12s ease, stroke-width 0.12s ease;
+}
+
+.umlcanvas-edge-endpoint-handle.handle-source {
+  fill: #10b981; /* emerald green for source */
+}
+
+.umlcanvas-edge-endpoint-handle.handle-target {
+  fill: var(--interactive-accent, #7864ff); /* accent for target */
+}
+
+.umlcanvas-edge-waypoint-handle {
+  fill: #f59e0b; /* amber for bend points */
+}
+
+.umlcanvas-edge-handle:hover {
+  r: 8;
+  stroke-width: 2.5;
+  cursor: crosshair;
+}
+
+.umlcanvas-edge-reconnect-line {
+  stroke-dasharray: 4 4;
+  stroke: var(--interactive-accent, #7864ff);
+  stroke-width: 2;
+}
+
+.umlcanvas-snap-highlight {
+  fill: rgba(var(--interactive-accent-rgb, 120, 100, 255), 0.15);
+  stroke: var(--interactive-accent, #7864ff);
+  stroke-width: 2;
+  stroke-dasharray: 4 4;
+  pointer-events: none;
+}
+
+.umlcanvas-marquee-rect {
+  fill: rgba(var(--interactive-accent-rgb, 120, 100, 255), 0.15);
+  stroke: var(--interactive-accent);
+  stroke-width: 1;
+  stroke-dasharray: 3 2;
+  pointer-events: none;
+}
+
+/* --- Inline Title Editor --- */
+
+.umlcanvas-inline-editor {
+  position: absolute;
+  z-index: 30;
+  box-sizing: border-box;
+  background-color: var(--background-secondary);
+  color: var(--text-normal);
+  border: 1px solid var(--interactive-accent);
+  border-radius: var(--radius-s, 4px);
+  font-family: var(--font-text, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+  padding: 4px 6px;
+  outline: none;
+  box-shadow: 0 0 6px rgba(var(--interactive-accent-rgb, 120, 100, 255), 0.5);
+}
+
+.umlcanvas-edge-inline-editor {
+  min-width: 120px;
+  font-size: 11px;
+  padding: 3px 6px;
+}
+
+/* --- UML Markers & Line Ends --- */
+
+.umlcanvas-marker-open-arrow {
+  stroke: var(--text-muted);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.umlcanvas-edge:hover .umlcanvas-marker-open-arrow,
+.umlcanvas-edge-selected ~ * .umlcanvas-marker-open-arrow {
+  stroke: var(--interactive-accent);
+}
+
+.umlcanvas-marker-triangle-hollow {
+  fill: var(--background-primary);
+  stroke: var(--text-muted);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+.umlcanvas-edge:hover .umlcanvas-marker-triangle-hollow,
+.umlcanvas-edge-selected ~ * .umlcanvas-marker-triangle-hollow {
+  stroke: var(--interactive-accent);
+}
+
+.umlcanvas-marker-diamond-hollow {
+  fill: var(--background-primary);
+  stroke: var(--text-muted);
+  stroke-width: 1.5;
+}
+
+.umlcanvas-edge:hover .umlcanvas-marker-diamond-hollow,
+.umlcanvas-edge-selected ~ * .umlcanvas-marker-diamond-hollow {
+  stroke: var(--interactive-accent);
+}
+
+.umlcanvas-marker-diamond-filled {
+  fill: var(--text-muted);
+  stroke: var(--text-muted);
+  stroke-width: 1.5;
+}
+
+.umlcanvas-edge:hover .umlcanvas-marker-diamond-filled,
+.umlcanvas-edge-selected ~ * .umlcanvas-marker-diamond-filled {
+  fill: var(--interactive-accent);
+  stroke: var(--interactive-accent);
+}
+
+/* --- Phase 2 Shapes --- */
+
+.umlcanvas-object-title {
+  text-decoration: underline;
+  font-weight: 600;
+}
+
+.umlcanvas-actor-glyph {
+  stroke: var(--text-normal);
+  stroke-width: 2;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: stroke 0.15s ease;
+}
+
+.umlcanvas-actor-glyph.umlcanvas-node-selected {
+  stroke: var(--interactive-accent);
+  stroke-width: 2.5;
+}
+
+.umlcanvas-actor-label {
+  fill: var(--text-normal);
+  font-family: var(--font-text, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+  font-size: 12px;
+  font-weight: 600;
+  pointer-events: none;
+  user-select: none;
+}
+
+.umlcanvas-usecase-title {
+  fill: var(--text-normal);
+  font-family: var(--font-text, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+  font-size: 12px;
+  font-weight: 600;
+  pointer-events: none;
+  user-select: none;
+}
+
+.umlcanvas-system-boundary-box {
+  fill: rgba(var(--background-secondary-rgb, 40, 40, 40), 0.25);
+  stroke: var(--text-muted);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+}
+
+.umlcanvas-system-boundary-title {
+  fill: var(--text-muted);
+  font-family: var(--font-text, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  pointer-events: none;
+}
+
+.umlcanvas-note-body {
+  fill: var(--background-secondary);
+  stroke: var(--text-muted);
+  stroke-width: 1.5;
+}
+
+.umlcanvas-note-fold {
+  fill: var(--background-modifier-border);
+  stroke: var(--text-muted);
+  stroke-width: 1;
+}
+
+.umlcanvas-note-text {
+  fill: var(--text-normal);
+  font-family: var(--font-text, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+  font-size: 11px;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* --- Obsidian Vault Note Card --- */
+/* --- Obsidian Vault Note Card --- */
+.umlcanvas-obsidian-note-card {
+  fill: var(--background-primary, var(--background-secondary));
+  stroke: var(--background-modifier-border, var(--text-muted));
+  stroke-width: 1.5;
+  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.1));
+  rx: 8;
+  ry: 8;
+  transition: stroke 0.15s ease, filter 0.15s ease;
+}
+
+.umlcanvas-obsidian-note-card:hover {
+  stroke: var(--interactive-accent-hover, var(--text-muted));
+}
+
+.umlcanvas-obsidian-note-card.umlcanvas-node-selected {
+  stroke: var(--interactive-accent);
+  stroke-width: 2;
+  filter: drop-shadow(0 0 0 2px var(--interactive-accent));
+}
+
+.umlcanvas-obsidian-note-header-bg {
+  fill: var(--background-secondary, var(--background-primary-alt));
+  cursor: grab;
+}
+
+.umlcanvas-moving .umlcanvas-obsidian-note-header-bg {
+  cursor: grabbing;
+}
+
+.umlcanvas-obsidian-note-header-sep {
+  stroke: var(--background-modifier-border);
+  stroke-width: 1;
+}
+
+.umlcanvas-obsidian-note-icon {
+  color: var(--text-muted);
+  pointer-events: none;
+  user-select: none;
+}
+
+.umlcanvas-obsidian-note-title {
+  fill: var(--text-normal);
+  font-family: var(--font-text, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  transition: fill 0.15s ease;
+}
+
+.umlcanvas-obsidian-note-title:hover {
+  fill: var(--interactive-accent);
+}
+
+.umlcanvas-obsidian-note-open-btn {
+  fill: var(--text-muted);
+  font-size: 15px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: fill 0.15s ease, transform 0.15s ease;
+}
+
+.umlcanvas-obsidian-note-open-btn:hover {
+  fill: var(--interactive-accent);
+  transform: scale(1.2);
+}
+
+/* Rich ForeignObject HTML Markdown View inside Note Card */
+.umlcanvas-obsidian-note-foreign {
+  overflow: hidden;
+}
+
+.umlcanvas-obsidian-note-body {
+  color: var(--text-normal);
+  font-family: var(--font-text, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+  font-size: var(--font-text-size, 13px);
+  line-height: var(--line-height-normal, 1.5);
+  overflow-y: auto;
+  overflow-x: hidden;
+  box-sizing: border-box;
+  padding: 10px 14px;
+  user-select: text;
+  cursor: auto;
+}
+
+.umlcanvas-obsidian-note-body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.umlcanvas-obsidian-note-body::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb-bg, rgba(128, 128, 128, 0.3));
+  border-radius: 3px;
+}
+
+.umlcanvas-obsidian-note-body::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-active-thumb-bg, rgba(128, 128, 128, 0.5));
+}
+
+.umlcanvas-obsidian-note-body h1,
+.umlcanvas-obsidian-note-body h2,
+.umlcanvas-obsidian-note-body h3,
+.umlcanvas-obsidian-note-body h4,
+.umlcanvas-obsidian-note-body h5,
+.umlcanvas-obsidian-note-body h6 {
+  margin: 0.6em 0 0.3em 0;
+  color: var(--text-normal);
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.umlcanvas-obsidian-note-body h1 {
+  font-size: 1.25em;
+  border-bottom: 1px solid var(--background-modifier-border);
+  padding-bottom: 3px;
+}
+
+.umlcanvas-obsidian-note-body h2 {
+  font-size: 1.15em;
+}
+
+.umlcanvas-obsidian-note-body h3 {
+  font-size: 1.05em;
+}
+
+.umlcanvas-obsidian-note-body p {
+  margin: 0.4em 0;
+}
+
+.umlcanvas-obsidian-note-body ul,
+.umlcanvas-obsidian-note-body ol {
+  margin: 0.4em 0;
+  padding-left: 1.4em;
+}
+
+.umlcanvas-obsidian-note-body li {
+  margin: 0.2em 0;
+}
+
+.umlcanvas-obsidian-note-body .task-list-item {
+  list-style-type: none;
+  margin-left: -1em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.umlcanvas-obsidian-note-body .task-list-item input[type="checkbox"] {
+  cursor: pointer;
+  accent-color: var(--interactive-accent);
+}
+
+.umlcanvas-obsidian-note-body .task-list-item.is-checked {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.umlcanvas-obsidian-note-body blockquote {
+  margin: 0.5em 0;
+  padding: 4px 10px;
+  border-left: 3px solid var(--interactive-accent);
+  background: var(--background-secondary);
+  border-radius: 0 4px 4px 0;
+  color: var(--text-muted);
+}
+
+.umlcanvas-obsidian-note-body pre {
+  margin: 0.5em 0;
+  padding: 8px 10px;
+  background: var(--code-background, var(--background-secondary));
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  overflow-x: auto;
+  font-family: var(--font-monospace, monospace);
+  font-size: 0.9em;
+}
+
+.umlcanvas-obsidian-note-body code {
+  font-family: var(--font-monospace, monospace);
+  font-size: 0.9em;
+  background: var(--code-background, var(--background-secondary));
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.umlcanvas-obsidian-note-body a.internal-link {
+  color: var(--link-color, var(--interactive-accent));
+  text-decoration: var(--link-decoration, underline);
+  cursor: pointer;
+}
+
+.umlcanvas-obsidian-note-body a.internal-link:hover {
+  color: var(--link-color-hover, var(--interactive-accent-hover));
+}
+
+.umlcanvas-obsidian-note-body a.external-link {
+  color: var(--link-external-color, var(--interactive-accent));
+  cursor: pointer;
+}
+
+.umlcanvas-obsidian-note-body hr {
+  border: none;
+  border-top: 1px solid var(--background-modifier-border);
+  margin: 0.8em 0;
+}
+
+.umlcanvas-obsidian-note-body-placeholder {
+  color: var(--text-faint);
+  font-style: italic;
+  font-size: 12px;
+  padding-top: 8px;
+}
+
+.umlcanvas-obsidian-note-svg-fallback {
+  display: none;
+}
+
+.umlcanvas-obsidian-note-body-line {
+  fill: var(--text-muted);
+  font-family: var(--font-text, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+  font-size: 11px;
+  line-height: 1.4;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* --- Behavioral Diagram Elements (Activity, State, Sequence - Phase 3) --- */
+
+/* Initial & Final Nodes (Activity & State) */
+.umlcanvas-activity-initial-body {
+  fill: var(--text-normal);
+  stroke: var(--text-normal);
+  stroke-width: 1;
+}
+
+.umlcanvas-activity-initial-body.umlcanvas-node-selected {
+  stroke: var(--interactive-accent);
+  stroke-width: 2.5;
+  filter: drop-shadow(0 0 4px rgba(var(--interactive-accent-rgb, 120, 100, 255), 0.5));
+}
+
+.umlcanvas-activity-final-outer {
+  fill: var(--background-primary);
+  stroke: var(--text-normal);
+  stroke-width: 1.5;
+}
+
+.umlcanvas-activity-final-outer.umlcanvas-node-selected {
+  stroke: var(--interactive-accent);
+  stroke-width: 2.5;
+  filter: drop-shadow(0 0 4px rgba(var(--interactive-accent-rgb, 120, 100, 255), 0.5));
+}
+
+.umlcanvas-activity-final-inner {
+  fill: var(--text-normal);
+  stroke: none;
+}
+
+/* Action & States */
+.umlcanvas-activity-action-body {
+  fill: var(--background-primary);
+  stroke: var(--text-muted);
+  stroke-width: 1.5;
+  rx: 14px;
+  ry: 14px;
+}
+
+.umlcanvas-state-body {
+  fill: var(--background-primary);
+  stroke: var(--text-muted);
+  stroke-width: 1.5;
+  rx: 10px;
+  ry: 10px;
+}
+
+.umlcanvas-state-composite-body {
+  fill: rgba(var(--background-secondary-rgb, 40, 40, 40), 0.2);
+  stroke: var(--text-muted);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 3;
+  rx: 12px;
+  ry: 12px;
+}
+
+/* Decision & Choice Diamonds */
+.umlcanvas-diamond-body {
+  fill: var(--background-primary);
+  stroke: var(--text-muted);
+  stroke-width: 1.5;
+}
+
+/* Fork / Join Synchronization Bar */
+.umlcanvas-forkjoin-body {
+  fill: var(--text-normal);
+  stroke: var(--text-normal);
+  stroke-width: 1;
+}
+
+.umlcanvas-forkjoin-body.umlcanvas-node-selected {
+  stroke: var(--interactive-accent);
+  stroke-width: 2;
+  filter: drop-shadow(0 0 4px rgba(var(--interactive-accent-rgb, 120, 100, 255), 0.5));
+}
+
+/* Activity Swimlane */
+.umlcanvas-swimlane-body {
+  fill: rgba(var(--background-secondary-rgb, 40, 40, 40), 0.1);
+  stroke: var(--background-modifier-border);
+  stroke-width: 1.5;
+}
+
+.umlcanvas-swimlane-header {
+  fill: var(--background-secondary);
+  stroke: var(--background-modifier-border);
+  stroke-width: 1;
+}
+
+/* Sequence Diagram Lifelines and Activation Bars */
+.umlcanvas-sequence-stem {
+  stroke: var(--text-muted);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 4;
+  pointer-events: none;
+}
+
+.umlcanvas-sequence-activation-body {
+  fill: var(--background-secondary);
+  stroke: var(--text-normal);
+  stroke-width: 1.5;
+  rx: 2px;
+  ry: 2px;
+}
+
+.umlcanvas-sequence-activation-body.umlcanvas-node-selected {
+  stroke: var(--interactive-accent);
+  stroke-width: 2;
+  filter: drop-shadow(0 0 4px rgba(var(--interactive-accent-rgb, 120, 100, 255), 0.4));
+}
+
+/* --- Diagram Type Switcher & Palette Panel (F-054) --- */
+
+.umlcanvas-type-select {
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 4px);
+  padding: 3px 6px;
+  font-size: 11px;
+  font-weight: 500;
+  outline: none;
+  cursor: pointer;
+}
+
+.umlcanvas-type-select:hover {
+  border-color: var(--interactive-accent);
+}
+
+/* --- Right-Side Shape Library Panel (draw.io & Lucidchart Style) --- */
+
+.umlcanvas-palette-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 320px;
+  min-width: 240px;
+  max-width: 85vw;
+  z-index: 25;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--background-secondary);
+  border-left: 1px solid var(--background-modifier-border);
+  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.15);
+  transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+  overflow: hidden;
+}
+
+.umlcanvas-palette-panel.is-resizing {
+  transition: none !important;
+  user-select: none;
+}
+
+.umlcanvas-palette-resize-handle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: ew-resize;
+  z-index: 30;
+  user-select: none;
+  background-color: transparent;
+  transition: background-color 0.15s ease;
+}
+
+.umlcanvas-palette-resize-handle:hover,
+.umlcanvas-palette-resize-handle.is-resizing {
+  background-color: var(--interactive-accent);
+}
+
+.umlcanvas-palette-panel.is-collapsed {
+  transform: translateX(100%);
+  pointer-events: none;
+}
+
+.umlcanvas-palette-toggle-tab {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  z-index: 22;
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-right: none;
+  border-radius: var(--radius-m, 6px) 0 0 var(--radius-m, 6px);
+  padding: 8px 5px;
+  cursor: pointer;
+  box-shadow: -2px 0 6px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  transition: background-color 0.15s ease, color 0.15s ease;
+  user-select: none;
+}
+
+.umlcanvas-palette-toggle-tab:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--interactive-accent);
+}
+
+.umlcanvas-palette-tab-text {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+
+.umlcanvas-palette-header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background-color: var(--background-secondary-alt);
+}
+
+.umlcanvas-palette-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-normal);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.umlcanvas-palette-close-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  color: var(--text-muted);
+  border-radius: 4px;
+  padding: 2px 6px;
+  line-height: 1;
+}
+
+.umlcanvas-palette-close-btn:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.umlcanvas-palette-search-container {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background-color: var(--background-secondary);
+}
+
+.umlcanvas-palette-search-input {
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 12px;
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 4px);
+  color: var(--text-normal);
+  transition: border-color 0.15s ease;
+}
+
+.umlcanvas-palette-search-input:focus {
+  border-color: var(--interactive-accent);
+  outline: none;
+}
+
+.umlcanvas-palette-content {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.umlcanvas-palette-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.umlcanvas-palette-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.umlcanvas-palette-content::-webkit-scrollbar-thumb {
+  background: var(--background-modifier-border);
+  border-radius: 3px;
+}
+
+.umlcanvas-palette-content::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+.umlcanvas-palette-category {
+  flex-shrink: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 4px);
+  overflow: hidden;
+  background-color: var(--background-primary);
+}
+
+.umlcanvas-palette-category-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  cursor: pointer;
+  background-color: var(--background-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-normal);
+  user-select: none;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.umlcanvas-palette-category-header:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-accent);
+}
+
+.umlcanvas-palette-category-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.umlcanvas-palette-category-chevron {
+  font-size: 9px;
+  color: var(--text-muted);
+  width: 12px;
+  text-align: center;
+}
+
+.umlcanvas-palette-category-count {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.umlcanvas-palette-category-body {
+  padding: 6px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(82px, 1fr));
+  gap: 5px;
+  background-color: var(--background-primary);
+}
+
+.umlcanvas-palette-category.is-collapsed .umlcanvas-palette-category-body {
+  display: none;
+}
+
+/* Shape Tile (Preview + Label) */
+.umlcanvas-shape-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 3px 4px 3px;
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 4px);
+  cursor: pointer;
+  user-select: none;
+  box-sizing: border-box;
+  transition: transform 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
+  min-height: 64px;
+  text-align: center;
+  overflow: hidden;
+}
+
+.umlcanvas-shape-tile:hover {
+  background-color: var(--background-modifier-hover);
+  border-color: var(--interactive-accent);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  transform: translateY(-1px);
+}
+
+.umlcanvas-shape-tile:active {
+  transform: translateY(0);
+}
+
+.umlcanvas-shape-tile-preview {
+  width: 100%;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.umlcanvas-shape-preview-svg {
+  width: 100%;
+  height: 100%;
+  max-width: 68px;
+  max-height: 38px;
+  overflow: hidden;
+}
+
+.umlcanvas-shape-tile-label {
+  font-size: 9.5px;
+  color: var(--text-normal);
+  margin-top: 3px;
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  line-height: 1.2;
+}
+
+/* Edge Tile */
+.umlcanvas-edge-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 3px 4px 3px;
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 4px);
+  cursor: pointer;
+  user-select: none;
+  transition: transform 0.12s ease, border-color 0.12s ease;
+  min-height: 48px;
+  text-align: center;
+}
+
+.umlcanvas-edge-tile:hover {
+  background-color: var(--background-modifier-hover);
+  border-color: var(--interactive-accent);
+}
+
+.umlcanvas-edge-tile.is-active {
+  background-color: rgba(var(--interactive-accent-rgb, 120, 100, 255), 0.15);
+  border-color: var(--interactive-accent);
+  color: var(--interactive-accent);
+  font-weight: 600;
+}
+
+.umlcanvas-edge-tile-preview {
+  width: 100%;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.umlcanvas-edge-preview-svg {
+  width: 100%;
+  height: 100%;
+  max-width: 50px;
+  max-height: 18px;
+  overflow: visible;
+}
+
+/* --- Phase 4 Elements --- */
+
+/* Component Diagram (F-048) */
+.umlcanvas-component-icon-box {
+  fill: var(--background-secondary);
+  stroke: var(--text-muted);
+  stroke-width: 1;
+}
+
+.umlcanvas-component-icon-tab {
+  fill: var(--background-secondary);
+  stroke: var(--text-muted);
+  stroke-width: 1;
+}
+
+.umlcanvas-lollipop-body {
+  fill: var(--background-primary);
+  stroke: var(--text-normal);
+  stroke-width: 2;
+}
+
+.umlcanvas-socket-body {
+  stroke: var(--text-normal);
+  stroke-width: 2;
+}
+
+.umlcanvas-shape-component-port rect {
+  fill: var(--interactive-accent);
+  stroke: var(--text-normal);
+  stroke-width: 1;
+}
+
+/* Deployment Diagram (F-049) */
+.umlcanvas-node3d-top {
+  fill: var(--background-secondary);
+  stroke: var(--text-muted);
+  stroke-width: 1.5;
+}
+
+.umlcanvas-node3d-side {
+  fill: var(--background-secondary-alt, rgba(0, 0, 0, 0.1));
+  stroke: var(--text-muted);
+  stroke-width: 1.5;
+}
+
+.umlcanvas-artifact-icon-doc {
+  fill: var(--background-secondary);
+  stroke: var(--text-muted);
+  stroke-width: 1;
+}
+
+.umlcanvas-artifact-icon-fold {
+  fill: none;
+  stroke: var(--text-muted);
+  stroke-width: 1;
+}
+
+/* Timing Diagram (F-047) */
+.umlcanvas-timing-divider {
+  stroke: var(--background-modifier-border);
+  stroke-width: 1.5;
+}
+
+.umlcanvas-timing-guideline {
+  stroke: var(--background-modifier-border);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+}
+
+.umlcanvas-timing-segment-body {
+  fill: rgba(var(--interactive-accent-rgb, 120, 100, 255), 0.2);
+  stroke: var(--interactive-accent);
+  stroke-width: 1.5;
+}
+
+.umlcanvas-timing-segment-text {
+  fill: var(--text-normal);
+  font-size: 11px;
+  font-weight: 500;
+  pointer-events: none;
+  user-select: none;
+}
+
+.umlcanvas-marker-timing-stop {
+  stroke: var(--text-normal);
+  stroke-width: 2;
+}
+
+/* Schematic & Chip System (F-060, F-061, F-062, F-063) */
+.umlcanvas-chip-body {
+  fill: var(--background-secondary);
+  stroke: var(--text-normal);
+  stroke-width: 2;
+}
+
+.umlcanvas-chip-notch {
+  fill: var(--background-primary);
+  stroke: var(--text-normal);
+  stroke-width: 1.5;
+}
+
+.umlcanvas-chip-title {
+  fill: var(--text-normal);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  pointer-events: none;
+  user-select: none;
+}
+
+.umlcanvas-chip-pin {
+  stroke: var(--text-muted);
+  stroke-width: 2;
+}
+
+.umlcanvas-chip-port-label {
+  fill: var(--text-muted);
+  font-size: 10px;
+  font-family: var(--font-monospace);
+  pointer-events: none;
+  user-select: none;
+}
+
+.umlcanvas-chip-drill-badge {
+  fill: var(--background-primary);
+  stroke: var(--interactive-accent);
+  stroke-width: 1;
+  cursor: pointer;
+}
+
+.umlcanvas-chip-drill-icon {
+  fill: var(--interactive-accent);
+  font-size: 11px;
+  font-weight: bold;
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Breadcrumbs Bar (F-062) */
+.umlcanvas-breadcrumbs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background-color: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+  font-size: 12px;
+}
+
+.umlcanvas-breadcrumb-item {
+  color: var(--text-accent);
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.umlcanvas-breadcrumb-item:hover {
+  text-decoration: underline;
+}
+
+.umlcanvas-breadcrumb-item.is-current {
+  color: var(--text-normal);
+  font-weight: 600;
+  cursor: default;
+  text-decoration: none;
+}
+
+.umlcanvas-breadcrumb-separator {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+/* --- Phase 5 Elements --- */
+
+/* Package Diagram (F-050) */
+.umlcanvas-package-tab {
+  fill: var(--background-secondary);
+  stroke: var(--text-muted);
+  stroke-width: 1.5;
+}
+
+/* Composite Structure Diagram (F-051) */
+.umlcanvas-shape-composite-classifier rect {
+  fill: rgba(var(--background-secondary-rgb, 40, 40, 40), 0.15);
+}
+
+.umlcanvas-shape-part rect {
+  fill: var(--background-primary);
+  stroke: var(--text-muted);
+  stroke-width: 1.5;
+}
+
+/* Interaction Overview Diagram (F-052) */
+.umlcanvas-interaction-tab {
+  fill: var(--background-secondary);
+  stroke: var(--text-muted);
+  stroke-width: 1.5;
+}
+
+.umlcanvas-interaction-tab-text {
+  fill: var(--text-normal);
+  font-size: 10px;
+  font-weight: 700;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Profile Diagram Extension Marker (F-053) */
+.umlcanvas-marker-triangle-filled {
+  fill: var(--text-normal);
+  stroke: var(--text-normal);
+}
+
+.umlcanvas-edge:hover .umlcanvas-marker-triangle-filled,
+.umlcanvas-edge-selected ~ * .umlcanvas-marker-triangle-filled {
+  fill: var(--interactive-accent);
+  stroke: var(--interactive-accent);
+}
+
+/* Schematic Symbols (F-064) & Bus (F-065) */
+.umlcanvas-schematic-junction-dot {
+  fill: var(--text-normal);
+  stroke: var(--text-normal);
+  stroke-width: 1;
+}
+
+.umlcanvas-schematic-junction-dot.umlcanvas-node-selected {
+  stroke: var(--interactive-accent);
+  fill: var(--interactive-accent);
+}
+
+.umlcanvas-schematic-line {
+  stroke: var(--text-normal);
+  stroke-linecap: round;
+}
+
+.umlcanvas-schematic-label {
+  fill: var(--text-normal);
+  font-size: 10px;
+  font-weight: 600;
+  font-family: var(--font-monospace);
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Minimap (F-011) */
+.umlcanvas-minimap-container {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  width: 180px;
+  height: 120px;
+  background-color: rgba(var(--background-secondary-rgb, 30, 30, 30), 0.85);
+  backdrop-filter: blur(4px);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m, 6px);
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  z-index: 25;
+  cursor: crosshair;
+  user-select: none;
+}
+
+.umlcanvas-minimap-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.umlcanvas-minimap-viewport-indicator {
+  fill: rgba(var(--interactive-accent-rgb, 120, 100, 255), 0.2);
+  stroke: var(--interactive-accent);
+  stroke-width: 1.5;
+  cursor: grab;
+}
+
+.umlcanvas-minimap-viewport-indicator:active {
+  cursor: grabbing;
+}
+
+.umlcanvas-minimap-node {
+  fill: var(--text-muted);
+  opacity: 0.7;
+}
+
+.umlcanvas-minimap-edge {
+  stroke: var(--text-muted);
+  stroke-width: 1;
+  opacity: 0.5;
+}
+
+/* Freehand Stroke Overlay (F-070) */
+.umlcanvas-freehand-stroke {
+  fill: none;
+  stroke: var(--interactive-accent);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+/* Freehand Rendered Stroke & Escape Hatch (F-073) */
+.umlcanvas-freehand-path {
+  fill: none;
+  stroke: var(--text-normal);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.umlcanvas-freehand-path.umlcanvas-node-selected {
+  stroke: var(--interactive-accent);
+  stroke-width: 2.5;
+}
+
+.umlcanvas-escape-hatch-toast {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  font-size: 13px;
+  color: var(--text-normal);
+  z-index: 1000;
+  animation: umlcanvas-toast-fade-in 0.2s ease-out;
+}
+
+.umlcanvas-escape-hatch-btn {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent, #ffffff);
+  border: none;
+  border-radius: 4px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.umlcanvas-escape-hatch-btn:hover {
+  filter: brightness(1.1);
+}
+
+@keyframes umlcanvas-toast-fade-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 10px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+/* --- Color Support (Obsidian Canvas Presets 1-6 & Custom Colors) --- */
+
+/* High-contrast theme-adaptive color palettes matching native Obsidian Canvas */
+:root, .theme-light {
+  --canvas-color-1: #e93147; /* Red */
+  --canvas-color-2: #ec7500; /* Orange */
+  --canvas-color-3: #d49b00; /* Amber-Gold Yellow (crisp & high-contrast on white/light backgrounds) */
+  --canvas-color-4: #08b94e; /* Green */
+  --canvas-color-5: #00bfbc; /* Teal-Cyan (crisp & high-contrast on white/light backgrounds) */
+  --canvas-color-6: #7852ee; /* Purple */
+}
+
+.theme-dark {
+  --canvas-color-1: #fb464c; /* Luminous Red */
+  --canvas-color-2: #e9973f; /* Luminous Orange */
+  --canvas-color-3: #e0de71; /* Luminous Yellow (high-contrast on dark backgrounds) */
+  --canvas-color-4: #44cf6e; /* Luminous Green */
+  --canvas-color-5: #53dfdd; /* Luminous Cyan */
+  --canvas-color-6: #a882ff; /* Luminous Purple */
+}
+
+/* Preset Mappings */
+.is-color-1, [data-color="1"] { --canvas-color: var(--canvas-color-1, #e93147); }
+.is-color-2, [data-color="2"] { --canvas-color: var(--canvas-color-2, #ec7500); }
+.is-color-3, [data-color="3"] { --canvas-color: var(--canvas-color-3, #d49b00); }
+.is-color-4, [data-color="4"] { --canvas-color: var(--canvas-color-4, #08b94e); }
+.is-color-5, [data-color="5"] { --canvas-color: var(--canvas-color-5, #00bfbc); }
+.is-color-6, [data-color="6"] { --canvas-color: var(--canvas-color-6, #7852ee); }
+
+.theme-dark .is-color-1, .theme-dark [data-color="1"] { --canvas-color: var(--canvas-color-1, #fb464c); }
+.theme-dark .is-color-2, .theme-dark [data-color="2"] { --canvas-color: var(--canvas-color-2, #e9973f); }
+.theme-dark .is-color-3, .theme-dark [data-color="3"] { --canvas-color: var(--canvas-color-3, #e0de71); }
+.theme-dark .is-color-4, .theme-dark [data-color="4"] { --canvas-color: var(--canvas-color-4, #44cf6e); }
+.theme-dark .is-color-5, .theme-dark [data-color="5"] { --canvas-color: var(--canvas-color-5, #53dfdd); }
+.theme-dark .is-color-6, .theme-dark [data-color="6"] { --canvas-color: var(--canvas-color-6, #a882ff); }
+
+/* Node Color Application */
+.umlcanvas-node[data-color] .umlcanvas-node-body,
+.umlcanvas-node[data-color] .umlcanvas-obsidian-note-card,
+.umlcanvas-node[data-color] .umlcanvas-note-body,
+.umlcanvas-node[data-color] .umlcanvas-swimlane-body,
+.umlcanvas-node[data-color] .umlcanvas-system-boundary-box,
+.umlcanvas-node[data-color] .umlcanvas-diamond-body,
+.umlcanvas-node[data-color] .umlcanvas-activity-action-body,
+.umlcanvas-node[data-color] .umlcanvas-state-body,
+.umlcanvas-node[data-color] .umlcanvas-state-composite-body {
+  stroke: var(--canvas-color) !important;
+  fill: color-mix(in srgb, var(--canvas-color) 10%, var(--background-primary)) !important;
+}
+
+.umlcanvas-node[data-color] .umlcanvas-actor-glyph,
+.umlcanvas-node[data-color] .umlcanvas-freehand-path {
+  stroke: var(--canvas-color) !important;
+}
+
+/* Node Selection Override: Selection always takes precedence over color */
+.umlcanvas-node[data-color] .umlcanvas-node-selected,
+.umlcanvas-node.umlcanvas-node-selected .umlcanvas-node-body,
+.umlcanvas-node[data-color] .umlcanvas-node-body.umlcanvas-node-selected,
+.umlcanvas-node[data-color] .umlcanvas-obsidian-note-card.umlcanvas-node-selected {
+  stroke: var(--interactive-accent) !important;
+  stroke-width: 2.5px !important;
+  filter: drop-shadow(0 0 4px rgba(var(--interactive-accent-rgb, 120, 100, 255), 0.5)) !important;
+}
+
+/* Edge Color Application */
+.umlcanvas-edge[data-color] .umlcanvas-edge-line {
+  stroke: var(--canvas-color) !important;
+  stroke-width: 2px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0.5px 1px rgba(0, 0, 0, 0.22));
+}
+
+.theme-dark .umlcanvas-edge[data-color] .umlcanvas-edge-line {
+  filter: drop-shadow(0 0.5px 1.5px rgba(0, 0, 0, 0.45));
+}
+
+.umlcanvas-edge[data-color] .umlcanvas-arrow-head,
+.umlcanvas-edge[data-color] .umlcanvas-marker-diamond-filled,
+.umlcanvas-edge[data-color] .umlcanvas-marker-triangle-filled {
+  fill: var(--canvas-color) !important;
+}
+
+.umlcanvas-edge[data-color] .umlcanvas-marker-open-arrow,
+.umlcanvas-edge[data-color] .umlcanvas-marker-diamond-hollow,
+.umlcanvas-edge[data-color] .umlcanvas-marker-triangle-hollow,
+.umlcanvas-edge[data-color] .umlcanvas-marker-timing-stop {
+  stroke: var(--canvas-color) !important;
+}
+
+/* Edge Selection Override: Selection always takes precedence over custom line color */
+.umlcanvas-edge[data-color].umlcanvas-edge-selected .umlcanvas-edge-line,
+.umlcanvas-edge[data-color] .umlcanvas-edge-line.umlcanvas-edge-selected,
+.umlcanvas-edge.umlcanvas-edge-selected .umlcanvas-edge-line {
+  stroke: var(--interactive-accent) !important;
+  stroke-width: 3px !important;
+  filter: drop-shadow(0 0 3px var(--interactive-accent)) !important;
+}
+
+.umlcanvas-edge[data-color].umlcanvas-edge-selected .umlcanvas-arrow-head,
+.umlcanvas-edge[data-color].umlcanvas-edge-selected .umlcanvas-marker-diamond-filled,
+.umlcanvas-edge[data-color].umlcanvas-edge-selected .umlcanvas-marker-triangle-filled {
+  fill: var(--interactive-accent) !important;
+}
+
+.umlcanvas-edge[data-color].umlcanvas-edge-selected .umlcanvas-marker-open-arrow,
+.umlcanvas-edge[data-color].umlcanvas-edge-selected .umlcanvas-marker-diamond-hollow,
+.umlcanvas-edge[data-color].umlcanvas-edge-selected .umlcanvas-marker-triangle-hollow,
+.umlcanvas-edge[data-color].umlcanvas-edge-selected .umlcanvas-marker-timing-stop {
+  stroke: var(--interactive-accent) !important;
+}
+
+/* Group Color Application */
+.umlcanvas-group[data-color] .umlcanvas-group-box {
+  stroke: var(--canvas-color) !important;
+  fill: color-mix(in srgb, var(--canvas-color) 7%, transparent) !important;
+}
+
+.umlcanvas-group[data-color] .umlcanvas-group-header-bg {
+  fill: color-mix(in srgb, var(--canvas-color) 16%, transparent) !important;
+}
+
+.umlcanvas-group[data-color] .umlcanvas-group-title {
+  fill: var(--canvas-color) !important;
+}
+
+.umlcanvas-group[data-color] .umlcanvas-group-collapsed-card {
+  stroke: var(--canvas-color) !important;
+}
+
+.umlcanvas-group[data-color] .umlcanvas-group-resize-handle {
+  stroke: var(--canvas-color) !important;
+}
+
+.umlcanvas-group[data-color].is-selected .umlcanvas-group-box {
+  stroke: var(--interactive-accent) !important;
+  stroke-width: 2.5px !important;
+}
+
+/* --- Color Palette Popover --- */
+.umlcanvas-color-palette-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 200px;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  padding: 6px 8px;
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m, 6px);
+  box-shadow: var(--shadow-m, 0 4px 14px rgba(0, 0, 0, 0.22));
+}
+
+.umlcanvas-color-swatches-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.umlcanvas-color-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: #ffffff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  padding: 0;
+  margin: 0;
+  box-sizing: border-box;
+  transition: transform 0.12s ease, border-color 0.12s ease;
+}
+
+.umlcanvas-color-swatch:hover {
+  transform: scale(1.15);
+  border-color: var(--text-normal);
+}
+
+.umlcanvas-color-swatch.is-active {
+  border-color: var(--text-normal);
+  box-shadow: 0 0 0 2px var(--interactive-accent);
+}
+
+.umlcanvas-color-swatch.is-none {
+  background-color: var(--background-primary);
+  color: var(--text-muted);
+  border: 1px dashed var(--text-muted);
+  font-size: 13px;
+}
+
+.umlcanvas-color-swatch.is-preset-1 { background-color: var(--canvas-color-1, #e93147); }
+.umlcanvas-color-swatch.is-preset-2 { background-color: var(--canvas-color-2, #ec7500); }
+.umlcanvas-color-swatch.is-preset-3 { background-color: var(--canvas-color-3, #d49b00); color: #2e3338; text-shadow: none; }
+.umlcanvas-color-swatch.is-preset-4 { background-color: var(--canvas-color-4, #08b94e); }
+.umlcanvas-color-swatch.is-preset-5 { background-color: var(--canvas-color-5, #00bfbc); color: #2e3338; text-shadow: none; }
+.umlcanvas-color-swatch.is-preset-6 { background-color: var(--canvas-color-6, #7852ee); }
+
+.theme-dark .umlcanvas-color-swatch.is-preset-1 { background-color: var(--canvas-color-1, #fb464c); }
+.theme-dark .umlcanvas-color-swatch.is-preset-2 { background-color: var(--canvas-color-2, #e9973f); }
+.theme-dark .umlcanvas-color-swatch.is-preset-3 { background-color: var(--canvas-color-3, #e0de71); }
+.theme-dark .umlcanvas-color-swatch.is-preset-4 { background-color: var(--canvas-color-4, #44cf6e); }
+.theme-dark .umlcanvas-color-swatch.is-preset-5 { background-color: var(--canvas-color-5, #53dfdd); }
+.theme-dark .umlcanvas-color-swatch.is-preset-6 { background-color: var(--canvas-color-6, #a882ff); }
+
+/* Active Selection Color Indicator in Toolbar */
+.umlcanvas-color-indicator {
+  display: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-left: 4px;
+  border: 1px solid var(--background-modifier-border, rgba(255, 255, 255, 0.4));
+  box-shadow: 0 0 2px rgba(0, 0, 0, 0.3);
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+.umlcanvas-color-swatch.is-custom {
+  position: relative;
+  overflow: hidden;
+  background: conic-gradient(red, yellow, green, cyan, blue, magenta, red);
+  border: 1px solid var(--background-modifier-border);
+  font-size: 12px;
+}
+
+.umlcanvas-color-picker-input,
+.umlcanvas-color-custom-input {
+  position: absolute;
+  top: -5px;
+  left: -5px;
+  width: 32px;
+  height: 32px;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.umlcanvas-color-swatch-custom-icon,
+.umlcanvas-color-swatch-none-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.umlcanvas-color-swatch-custom-icon svg,
+.umlcanvas-color-swatch-custom-icon .svg-icon {
+  width: 13px;
+  height: 13px;
+  stroke: #ffffff;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.7));
+}
+
+.umlcanvas-color-swatch-none-icon svg,
+.umlcanvas-color-swatch-none-icon .svg-icon {
+  width: 14px;
+  height: 14px;
+  stroke: var(--text-muted);
+}
+
+/* --- Align Popover Menu --- */
+.umlcanvas-align-popover {
+  position: absolute;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m, 6px);
+  box-shadow: var(--shadow-m, 0 4px 14px rgba(0, 0, 0, 0.22));
+  min-width: 190px;
+}
+
+.umlcanvas-align-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-normal);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-s, 4px);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.umlcanvas-align-item:hover:not(:disabled) {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-accent);
+}
+
+.umlcanvas-align-item:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.umlcanvas-align-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.umlcanvas-align-icon svg,
+.umlcanvas-align-icon .svg-icon {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2px;
+  stroke: currentColor;
+}
+
+.umlcanvas-align-item:hover:not(:disabled) .umlcanvas-align-icon {
+  color: var(--text-accent);
+}
+
+.umlcanvas-align-label {
+  flex: 1;
+}
+
+.umlcanvas-align-separator {
+  height: 1px;
+  background-color: var(--background-modifier-border);
+  margin: 4px 0;
+}
+
+
+/* ==========================================================================
+   Custom Chip Interface Definition Modal & Palette Styles (F-060, F-061)
+   ========================================================================== */
+
+.umlcanvas-chip-modal {
+  max-width: 680px;
+  width: 100%;
+  padding: 16px 20px 20px;
+  box-sizing: border-box;
+}
+
+.umlcanvas-chip-modal-header {
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  padding-bottom: 10px;
+}
+
+.umlcanvas-chip-modal-title {
+  margin: 0 0 4px;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.umlcanvas-chip-modal-desc {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.umlcanvas-chip-form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.umlcanvas-chip-form-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.umlcanvas-chip-input {
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 4px);
+  color: var(--text-normal);
+  padding: 6px 10px;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.umlcanvas-chip-input:focus {
+  border-color: var(--interactive-accent);
+}
+
+.umlcanvas-chip-name-input {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* Bus / Multi-pin Generator Box */
+.umlcanvas-chip-bus-generator {
+  background-color: var(--background-secondary);
+  border: 1px dashed var(--interactive-accent);
+  border-radius: var(--radius-m, 6px);
+  padding: 10px 12px;
+  margin-bottom: 16px;
+}
+
+.umlcanvas-chip-bus-header {
+  margin-bottom: 8px;
+}
+
+.umlcanvas-chip-bus-title {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-accent);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.umlcanvas-chip-bus-inputs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.umlcanvas-chip-input-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.umlcanvas-chip-input-group-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.umlcanvas-chip-bus-prefix {
+  width: 60px;
+  padding: 4px 6px;
+  font-size: 12px;
+}
+
+.umlcanvas-chip-bus-count {
+  width: 54px;
+  padding: 4px 6px;
+  font-size: 12px;
+}
+
+.umlcanvas-chip-select {
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 4px);
+  color: var(--text-normal);
+  padding: 4px 6px;
+  font-size: 12px;
+  outline: none;
+}
+
+.umlcanvas-chip-btn-accent {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent, #ffffff);
+  border: none;
+  border-radius: var(--radius-s, 4px);
+  padding: 5px 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-left: auto;
+  transition: background-color 0.15s ease;
+}
+
+.umlcanvas-chip-btn-accent:hover {
+  background-color: var(--interactive-accent-hover, var(--interactive-accent));
+}
+
+/* Pins Section Header */
+.umlcanvas-chip-pins-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.umlcanvas-chip-pins-title-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.umlcanvas-chip-pins-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.umlcanvas-chip-badge {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background-color: var(--background-secondary);
+  padding: 2px 6px;
+  border-radius: 10px;
+}
+
+.umlcanvas-chip-pins-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.umlcanvas-chip-btn-sm {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: var(--radius-s, 4px);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  cursor: pointer;
+}
+
+.umlcanvas-chip-btn-sm:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+/* Pin Rows Table */
+.umlcanvas-chip-pins-table {
+  max-height: 250px;
+  overflow-y: auto;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m, 6px);
+  background-color: var(--background-primary);
+  margin-bottom: 12px;
+}
+
+.umlcanvas-chip-pins-empty {
+  padding: 24px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.umlcanvas-chip-table-row {
+  display: grid;
+  grid-template-columns: 28px 1fr 100px 90px 85px 64px;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.umlcanvas-chip-table-row:last-child {
+  border-bottom: none;
+}
+
+.umlcanvas-chip-table-row.is-header {
+  background-color: var(--background-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.umlcanvas-chip-table-row .col-num {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.umlcanvas-chip-input-cell,
+.umlcanvas-chip-dt-cell {
+  width: 100%;
+  padding: 3px 6px;
+  font-size: 12px;
+  background-color: var(--background-secondary);
+  border: 1px solid transparent;
+  border-radius: var(--radius-s, 4px);
+  color: var(--text-normal);
+  box-sizing: border-box;
+}
+
+.umlcanvas-chip-input-cell:focus,
+.umlcanvas-chip-dt-cell:focus {
+  border-color: var(--interactive-accent);
+  background-color: var(--background-primary);
+}
+
+.umlcanvas-chip-select-cell {
+  width: 100%;
+  padding: 3px 4px;
+  font-size: 11px;
+  background-color: var(--background-secondary);
+  border: 1px solid transparent;
+  border-radius: var(--radius-s, 4px);
+  color: var(--text-normal);
+}
+
+.umlcanvas-chip-table-row .col-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.umlcanvas-chip-icon-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 4px;
+  font-size: 11px;
+  border-radius: var(--radius-s, 3px);
+  line-height: 1;
+}
+
+.umlcanvas-chip-icon-btn:hover:not(:disabled) {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.umlcanvas-chip-icon-btn:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+
+.umlcanvas-chip-icon-btn.is-danger:hover {
+  background-color: rgba(235, 87, 87, 0.15);
+  color: var(--text-error, #eb5757);
+}
+
+/* Error Notice */
+.umlcanvas-chip-error-msg {
+  padding: 6px 10px;
+  margin-bottom: 12px;
+  background-color: rgba(235, 87, 87, 0.12);
+  border: 1px solid var(--text-error, #eb5757);
+  border-radius: var(--radius-s, 4px);
+  color: var(--text-error, #eb5757);
+  font-size: 12px;
+}
+
+/* Options Box */
+.umlcanvas-chip-options-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+  padding: 8px 10px;
+  background-color: var(--background-secondary);
+  border-radius: var(--radius-s, 4px);
+}
+
+.umlcanvas-chip-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-normal);
+  cursor: pointer;
+}
+
+/* Modal Footer */
+.umlcanvas-chip-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.umlcanvas-chip-btn {
+  padding: 6px 14px;
+  font-size: 13px;
+  border-radius: var(--radius-s, 4px);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  cursor: pointer;
+}
+
+.umlcanvas-chip-btn:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+.umlcanvas-chip-save-btn {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent, #ffffff);
+  border-color: var(--interactive-accent);
+  font-weight: 600;
+}
+
+/* Palette: Category Add Button */
+.umlcanvas-palette-cat-add-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 0 4px;
+  border-radius: 3px;
+  margin-left: 6px;
+  line-height: 1;
+}
+
+.umlcanvas-palette-cat-add-btn:hover {
+  color: var(--text-accent);
+  background-color: var(--background-modifier-hover);
+}
+
+/* Palette: "+ Define Chip" Tile */
+.umlcanvas-tile-add-chip {
+  border: 1px dashed var(--interactive-accent) !important;
+  background-color: rgba(var(--interactive-accent-rgb, 120, 100, 240), 0.05) !important;
+}
+
+.umlcanvas-add-chip-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.umlcanvas-add-chip-icon {
+  font-size: 24px;
+  font-weight: 300;
+  color: var(--text-accent);
+}
+
+/* Palette: Custom Chip Tile & Badges */
+.umlcanvas-chip-tile {
+  position: relative;
+}
+
+.umlcanvas-chip-tile-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+
+.umlcanvas-chip-tile-pins {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.umlcanvas-chip-tile-actions {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: none;
+  align-items: center;
+  gap: 2px;
+  background-color: var(--background-secondary);
+  border-radius: var(--radius-s, 3px);
+  padding: 1px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+
+.umlcanvas-chip-tile:hover .umlcanvas-chip-tile-actions {
+  display: flex;
+}
+
+.umlcanvas-tile-action-btn {
+  background: transparent;
+  border: none;
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 2px;
+  line-height: 1;
+}
+
+.umlcanvas-tile-action-btn:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.umlcanvas-tile-action-btn.is-danger:hover {
+  background-color: rgba(235, 87, 87, 0.2);
+  color: var(--text-error, #eb5757);
+}
+
+/* ==========================================================================
+   File Explorer Tag Badge Customization
+   Displays "CANVAS++" tag near canvas files in the left sidebar tree structure
+   ========================================================================== */
+
+.nav-file-title[data-path$=".canvuspp" i] .nav-file-tag,
+.nav-file-title[data-path$=".canvaspp" i] .nav-file-tag,
+.nav-file-title[data-path$=".umlcanvas" i] .nav-file-tag,
+.tree-item-self[data-path$=".canvuspp" i] .nav-file-tag,
+.tree-item-self[data-path$=".canvaspp" i] .nav-file-tag,
+.tree-item-self[data-path$=".umlcanvas" i] .nav-file-tag,
+[data-path$=".canvuspp" i] > .nav-file-tag,
+[data-path$=".canvaspp" i] > .nav-file-tag,
+[data-path$=".umlcanvas" i] > .nav-file-tag,
+[data-path$=".canvuspp" i] .nav-file-tag,
+[data-path$=".canvaspp" i] .nav-file-tag,
+[data-path$=".umlcanvas" i] .nav-file-tag,
+.nav-file-title[data-path$=".canvuspp"] .nav-file-tag,
+.nav-file-title[data-path$=".canvaspp"] .nav-file-tag,
+.nav-file-title[data-path$=".umlcanvas"] .nav-file-tag,
+.tree-item-self[data-path$=".canvuspp"] .nav-file-tag,
+.tree-item-self[data-path$=".canvaspp"] .nav-file-tag,
+.tree-item-self[data-path$=".umlcanvas"] .nav-file-tag,
+[data-path$=".canvuspp"] > .nav-file-tag,
+[data-path$=".canvaspp"] > .nav-file-tag,
+[data-path$=".umlcanvas"] > .nav-file-tag,
+[data-path$=".canvuspp"] .nav-file-tag,
+[data-path$=".canvaspp"] .nav-file-tag,
+[data-path$=".umlcanvas"] .nav-file-tag {
+  font-size: 0 !important;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+}
+
+.nav-file-title[data-path$=".canvuspp" i] .nav-file-tag::after,
+.nav-file-title[data-path$=".canvaspp" i] .nav-file-tag::after,
+.nav-file-title[data-path$=".umlcanvas" i] .nav-file-tag::after,
+.tree-item-self[data-path$=".canvuspp" i] .nav-file-tag::after,
+.tree-item-self[data-path$=".canvaspp" i] .nav-file-tag::after,
+.tree-item-self[data-path$=".umlcanvas" i] .nav-file-tag::after,
+[data-path$=".canvuspp" i] > .nav-file-tag::after,
+[data-path$=".canvaspp" i] > .nav-file-tag::after,
+[data-path$=".umlcanvas" i] > .nav-file-tag::after,
+[data-path$=".canvuspp" i] .nav-file-tag::after,
+[data-path$=".canvaspp" i] .nav-file-tag::after,
+[data-path$=".umlcanvas" i] .nav-file-tag::after,
+.nav-file-title[data-path$=".canvuspp"] .nav-file-tag::after,
+.nav-file-title[data-path$=".canvaspp"] .nav-file-tag::after,
+.nav-file-title[data-path$=".umlcanvas"] .nav-file-tag::after,
+.tree-item-self[data-path$=".canvuspp"] .nav-file-tag::after,
+.tree-item-self[data-path$=".canvaspp"] .nav-file-tag::after,
+.tree-item-self[data-path$=".umlcanvas"] .nav-file-tag::after,
+[data-path$=".canvuspp"] > .nav-file-tag::after,
+[data-path$=".canvaspp"] > .nav-file-tag::after,
+[data-path$=".umlcanvas"] > .nav-file-tag::after,
+[data-path$=".canvuspp"] .nav-file-tag::after,
+[data-path$=".canvaspp"] .nav-file-tag::after,
+[data-path$=".umlcanvas"] .nav-file-tag::after {
+  content: "CANVAS++";
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  line-height: 1;
+}
+
+
+

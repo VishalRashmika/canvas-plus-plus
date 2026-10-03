@@ -275,7 +275,7 @@ export class SvgSceneRenderer {
     };
     this.onDropBound = (e: DragEvent) => {
       e.preventDefault();
-      const clientPoint = this.getClientCoords(e as unknown as MouseEvent);
+      const clientPoint = this.getClientCoords(e);
       const canvasPoint = screenToCanvas(clientPoint, this.transform);
 
       // Check custom chip drop

@@ -1,7 +1,7 @@
 # Canvas++
 
 <p align="center">
-  <a href="https://github.com/VishalRashmika/canvas-plus-plus/releases"><img src="https://img.shields.io/badge/version-v1.0.0-blue.svg?style=flat-square" alt="Version"></a>
+  <a href="https://github.com/VishalRashmika/canvas-plus-plus/releases"><img src="https://img.shields.io/badge/version-v1.0.1-blue.svg?style=flat-square" alt="Version"></a>
   <a href="https://github.com/VishalRashmika/canvas-plus-plus"><img src="https://img.shields.io/badge/status-stable-brightgreen.svg?style=flat-square" alt="Status"></a>
   <a href="https://obsidian.md"><img src="https://img.shields.io/badge/Obsidian-v1.5.0+-7C3AED.svg?style=flat-square&logo=obsidian&logoColor=white" alt="Obsidian"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-blue.svg?style=flat-square" alt="License: GPLv3"></a>
@@ -12,7 +12,7 @@
 </p>
 
 > [!NOTE]
-> **Version: `v1.0.0`**  
+> **Version: `v1.0.1`**  
 > All 15 UML 2.x diagram types, digital hardware schematics, freehand recognition, and AI agent patch bridges are available. If you encounter bugs, rough edges, or have feature suggestions, please open an issue on the [GitHub Issues](https://github.com/VishalRashmika/canvas-plus-plus/issues) page.
 
 A high-performance, local-first visual modeling, UML, and hardware schematic canvas engine for [Obsidian](https://obsidian.md).

@@ -1,9 +1,102 @@
-import { App, PluginSettingTab, Setting } from "obsidian";
+import { App, PluginSettingTab, Setting, SettingDefinitionItem } from "obsidian";
 import type CanvasPlusPlusPlugin from "../../main";
 
 export class UmlCanvasSettingTab extends PluginSettingTab {
   constructor(app: App, private readonly plugin: CanvasPlusPlusPlugin) {
     super(app, plugin);
+  }
+
+  override getSettingDefinitions(): SettingDefinitionItem[] {
+    return [
+      {
+        name: "Default diagram type",
+        desc: "The initial diagram type when creating a new canvas.",
+        control: {
+          type: "dropdown",
+          key: "defaultDiagramType",
+          options: {
+            "uml.class": "UML Class Diagram",
+            "uml.usecase": "UML Use Case Diagram",
+            "uml.sequence": "UML Sequence Diagram",
+            "schematic": "Schematic / Chip Diagram",
+            "generic": "Generic Diagram",
+          },
+        },
+      },
+      {
+        name: "Default node width",
+        desc: "Default width in pixels for newly created nodes.",
+        control: {
+          type: "number",
+          key: "defaultNodeWidth",
+          placeholder: "140",
+          min: 20,
+        },
+      },
+      {
+        name: "Default node height",
+        desc: "Default height in pixels for newly created nodes.",
+        control: {
+          type: "number",
+          key: "defaultNodeHeight",
+          placeholder: "80",
+          min: 20,
+        },
+      },
+      {
+        name: "Show grid by default",
+        desc: "Display background grid pattern on open canvases.",
+        control: {
+          type: "toggle",
+          key: "showGrid",
+        },
+      },
+      {
+        name: "Grid size",
+        desc: "Grid dot/cell spacing in pixels.",
+        control: {
+          type: "number",
+          key: "gridSize",
+          placeholder: "20",
+          min: 5,
+        },
+      },
+      {
+        name: "Autosave debounce delay (ms)",
+        desc: "Milliseconds to wait after changes before automatically saving to disk.",
+        control: {
+          type: "number",
+          key: "autosaveDelayMs",
+          placeholder: "500",
+          min: 100,
+        },
+      },
+      {
+        name: "Enable Antigravity CLI bridge",
+        desc: "Allow external Antigravity agent CLI patches under editPermission scoping.",
+        control: {
+          type: "toggle",
+          key: "enableCliBridge",
+        },
+      },
+      {
+        name: "Enable freehand drawing",
+        desc: "Allow freehand sketching and shape recognition on the canvas. When disabled, the canvas stays strictly in select/move mode.",
+        control: {
+          type: "toggle",
+          key: "enableFreehand",
+        },
+      },
+    ];
+  }
+
+  override getControlValue(key: string): unknown {
+    return (this.plugin.settings as unknown as Record<string, unknown>)[key];
+  }
+
+  override async setControlValue(key: string, value: unknown): Promise<void> {
+    (this.plugin.settings as unknown as Record<string, unknown>)[key] = value;
+    await this.plugin.saveSettings();
   }
 
   display(): void {

@@ -945,8 +945,11 @@ export class PalettePanel {
 
   private loadSavedWidth(): number {
     try {
-      if (this.app) {
-        const saved = this.app.loadLocalStorage(STORAGE_KEY_PALETTE_WIDTH);
+      const appWithStorage = this.app as unknown as {
+        loadLocalStorage?(key: string): unknown;
+      } | null;
+      if (typeof appWithStorage?.loadLocalStorage === "function") {
+        const saved: unknown = appWithStorage.loadLocalStorage(STORAGE_KEY_PALETTE_WIDTH);
         if (typeof saved === "string" || typeof saved === "number") {
           const parsed = typeof saved === "number" ? saved : parseInt(saved, 10);
           if (!isNaN(parsed) && parsed >= MIN_PALETTE_WIDTH && parsed <= MAX_PALETTE_WIDTH) {
@@ -962,8 +965,11 @@ export class PalettePanel {
 
   private saveWidth(width: number): void {
     try {
-      if (this.app) {
-        this.app.saveLocalStorage(STORAGE_KEY_PALETTE_WIDTH, String(Math.round(width)));
+      const appWithStorage = this.app as unknown as {
+        saveLocalStorage?(key: string, value: string): void;
+      } | null;
+      if (typeof appWithStorage?.saveLocalStorage === "function") {
+        appWithStorage.saveLocalStorage(STORAGE_KEY_PALETTE_WIDTH, String(Math.round(width)));
       }
     } catch {
       // Ignore storage errors in sandbox

@@ -1,6 +1,6 @@
 {
   "name": "canvas-plus-plus",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Professional UML 2.x diagrams, hardware schematics, and freehand shape recognition on a high-performance visual canvas with AI coding agent integration.",
   "main": "main.js",
   "scripts": {

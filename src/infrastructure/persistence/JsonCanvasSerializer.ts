@@ -211,7 +211,7 @@ export class JsonCanvasSerializer {
                 : undefined,
             style:
               nr.style && typeof nr.style === "object"
-                ? (nr.style as NodeStyle)
+                ? nr.style
                 : undefined,
             childDiagramId:
               typeof nr.childDiagramId === "string"
@@ -293,7 +293,7 @@ export class JsonCanvasSerializer {
                 ? er.multiplicityTarget
                 : undefined,
             style:
-              er.style && typeof er.style === "object" ? (er.style as EdgeStyle) : undefined,
+              er.style && typeof er.style === "object" ? er.style : undefined,
           })
         );
       }

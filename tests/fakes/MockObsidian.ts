@@ -21,7 +21,12 @@ export class PluginSettingTab {
   }
   display() {}
   hide() {}
+  getSettingDefinitions(): any[] { return []; }
+  getControlValue(_key: string): any {}
+  setControlValue(_key: string, _value: any): any {}
 }
+
+export type SettingDefinitionItem<K extends string = string> = any;
 
 export class Setting {
   settingEl: HTMLElement = document.createElement("div");

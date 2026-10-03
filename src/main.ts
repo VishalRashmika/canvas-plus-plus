@@ -205,8 +205,8 @@ export default class CanvasPlusPlusPlugin extends Plugin {
   }
 
   async loadSettings(): Promise<void> {
-    const loadedData = await this.loadData();
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, loadedData);
+    const loadedData = (await this.loadData()) as Partial<UmlCanvasSettings> | null;
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, loadedData ?? {});
   }
 
   async saveSettings(): Promise<void> {
@@ -302,7 +302,7 @@ export default class CanvasPlusPlusPlugin extends Plugin {
     const updateTags = () => {
       const leaves = this.app.workspace.getLeavesOfType("file-explorer");
       for (const leaf of leaves) {
-        const container = (leaf.view as any)?.containerEl as HTMLElement | undefined;
+        const container = leaf.view?.containerEl;
         if (!container) continue;
         const items = container.querySelectorAll<HTMLElement>(".nav-file-title, .tree-item-self");
         items.forEach((titleEl) => {
@@ -325,7 +325,7 @@ export default class CanvasPlusPlusPlugin extends Plugin {
       updateTags();
       const leaves = this.app.workspace.getLeavesOfType("file-explorer");
       for (const leaf of leaves) {
-        const container = (leaf.view as any)?.containerEl as HTMLElement | undefined;
+        const container = leaf.view?.containerEl;
         if (container) {
           const observer = new MutationObserver(() => updateTags());
           observer.observe(container, { childList: true, subtree: true });
@@ -334,8 +334,8 @@ export default class CanvasPlusPlusPlugin extends Plugin {
       }
     });
 
-    this.registerEvent(this.app.vault.on("create", () => setTimeout(updateTags, 50)));
-    this.registerEvent(this.app.vault.on("rename", () => setTimeout(updateTags, 50)));
+    this.registerEvent(this.app.vault.on("create", () => window.setTimeout(updateTags, 50)));
+    this.registerEvent(this.app.vault.on("rename", () => window.setTimeout(updateTags, 50)));
     this.registerEvent(this.app.workspace.on("layout-change", () => updateTags()));
   }
 

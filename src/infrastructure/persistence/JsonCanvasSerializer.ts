@@ -166,8 +166,9 @@ export class JsonCanvasSerializer {
       if (!Array.isArray(record.nodes)) {
         throw new InvalidDiagramJsonError("'nodes' must be an array");
       }
-      for (let i = 0; i < record.nodes.length; i++) {
-        const rawNode = record.nodes[i];
+      const rawNodes = record.nodes as unknown[];
+      for (let i = 0; i < rawNodes.length; i++) {
+        const rawNode: unknown = rawNodes[i];
         if (!rawNode || typeof rawNode !== "object" || Array.isArray(rawNode)) {
           throw new InvalidDiagramJsonError(`Node at index ${i} must be an object`);
         }
@@ -231,8 +232,9 @@ export class JsonCanvasSerializer {
       if (!Array.isArray(record.edges)) {
         throw new InvalidDiagramJsonError("'edges' must be an array");
       }
-      for (let i = 0; i < record.edges.length; i++) {
-        const rawEdge = record.edges[i];
+      const rawEdges = record.edges as unknown[];
+      for (let i = 0; i < rawEdges.length; i++) {
+        const rawEdge: unknown = rawEdges[i];
         if (!rawEdge || typeof rawEdge !== "object" || Array.isArray(rawEdge)) {
           throw new InvalidDiagramJsonError(`Edge at index ${i} must be an object`);
         }

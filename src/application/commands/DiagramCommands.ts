@@ -643,9 +643,9 @@ export class UpdateCompartmentsCommand implements Command {
     const node = this.diagram.nodes.find((n) => n.id === this.nodeId);
     if (node) {
       this.previousCompartments = node.compartments
-        ? JSON.parse(JSON.stringify(node.compartments))
+        ? (JSON.parse(JSON.stringify(node.compartments)) as Compartment[])
         : undefined;
-      node.compartments = JSON.parse(JSON.stringify(this.newCompartments));
+      node.compartments = JSON.parse(JSON.stringify(this.newCompartments)) as Compartment[];
     }
   }
 
@@ -653,7 +653,7 @@ export class UpdateCompartmentsCommand implements Command {
     const node = this.diagram.nodes.find((n) => n.id === this.nodeId);
     if (node) {
       node.compartments = this.previousCompartments
-        ? JSON.parse(JSON.stringify(this.previousCompartments))
+        ? (JSON.parse(JSON.stringify(this.previousCompartments)) as Compartment[])
         : undefined;
     }
   }

@@ -213,7 +213,7 @@ export class SvgExporter {
         const url = URL.createObjectURL(svgBlob);
 
         img.onload = () => {
-          const canvas = document.createElement("canvas");
+          const canvas = createEl("canvas");
           canvas.width = img.width;
           canvas.height = img.height;
           const ctx = canvas.getContext("2d");
@@ -229,7 +229,7 @@ export class SvgExporter {
 
         img.onerror = (err) => {
           URL.revokeObjectURL(url);
-          reject(err);
+          reject(new Error(typeof err === "string" ? err : "Failed to load SVG for PNG conversion"));
         };
 
         img.src = url;

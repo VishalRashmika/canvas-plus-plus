@@ -1,4 +1,4 @@
-import { setIcon, IconName } from "obsidian";
+import { setIcon } from "obsidian";
 import { DiagramEditor } from "../../application/use-cases/DiagramEditor";
 import { SvgSceneRenderer } from "../renderer/SvgSceneRenderer";
 import { ViewportTransform } from "../renderer/ViewportMath";
@@ -12,7 +12,7 @@ import {
 
 function renderIcon(parent: HTMLElement, iconId: string): void {
   try {
-    setIcon(parent, iconId as IconName);
+    setIcon(parent, iconId);
   } catch {
     // Graceful fallback for non-Obsidian environments
   }
@@ -34,11 +34,12 @@ export class Toolbar {
   private labelBtn!: HTMLButtonElement;
   private alignBtn!: HTMLButtonElement;
   private alignPopoverEl: HTMLElement | null = null;
-  private alignCloseTimer: ReturnType<typeof setTimeout> | null = null;
+  private alignCloseTimer: number | null = null;
   private alignWinClickBound: ((e: MouseEvent) => void) | null = null;
   private duplicateBtn!: HTMLButtonElement;
   private colorBtn!: HTMLButtonElement;
   private colorPaletteEl: HTMLElement | null = null;
+  private colorIndicatorEl!: HTMLElement;
   private onWindowClickBound: ((e: MouseEvent) => void) | null = null;
   private typeSelect!: HTMLSelectElement;
   private paletteBtn?: HTMLButtonElement;
@@ -61,13 +62,10 @@ export class Toolbar {
   ) {
     this.freehandEnabled = this.renderer.isFreehandEnabled;
 
-    this.breadcrumbsEl = document.createElement("div");
-    this.breadcrumbsEl.className = "umlcanvas-breadcrumbs";
-    this.breadcrumbsEl.style.display = "none";
+    this.breadcrumbsEl = createDiv({ cls: "umlcanvas-breadcrumbs" });
     this.container.prepend(this.breadcrumbsEl);
 
-    this.toolbarEl = document.createElement("div");
-    this.toolbarEl.className = "umlcanvas-toolbar";
+    this.toolbarEl = this.container.createDiv({ cls: "umlcanvas-toolbar" });
 
     this.createControls();
     this.container.appendChild(this.toolbarEl);
@@ -80,16 +78,11 @@ export class Toolbar {
   }
 
   private createGroup(parentRow: HTMLElement): HTMLElement {
-    const group = document.createElement("div");
-    group.className = "umlcanvas-toolbar-group";
-    parentRow.appendChild(group);
-    return group;
+    return parentRow.createDiv({ cls: "umlcanvas-toolbar-group" });
   }
 
   private addDivider(parent: HTMLElement): void {
-    const div = document.createElement("div");
-    div.className = "umlcanvas-toolbar-divider";
-    parent.appendChild(div);
+    parent.createDiv({ cls: "umlcanvas-toolbar-divider" });
   }
 
   private createButton(
@@ -99,29 +92,25 @@ export class Toolbar {
     iconId?: string,
     extraClass?: string
   ): HTMLButtonElement {
-    const btn = document.createElement("button");
-    btn.className = "umlcanvas-toolbar-btn";
+    const btn = createEl("button", {
+      cls: "umlcanvas-toolbar-btn",
+      title,
+      attr: { "aria-label": title },
+    });
     if (extraClass) {
       btn.classList.add(extraClass);
     }
     if (!text && iconId) {
       btn.classList.add("is-icon-only");
     }
-    btn.title = title;
-    btn.setAttribute("aria-label", title);
 
     if (iconId) {
-      const iconSpan = document.createElement("span");
-      iconSpan.className = "umlcanvas-btn-icon";
+      const iconSpan = btn.createSpan({ cls: "umlcanvas-btn-icon" });
       renderIcon(iconSpan, iconId);
-      btn.appendChild(iconSpan);
     }
 
     if (text) {
-      const textSpan = document.createElement("span");
-      textSpan.className = "umlcanvas-btn-text";
-      textSpan.textContent = text;
-      btn.appendChild(textSpan);
+      btn.createSpan({ cls: "umlcanvas-btn-text", text });
     }
 
     btn.addEventListener("click", onClick);
@@ -130,14 +119,14 @@ export class Toolbar {
 
   private createControls(): void {
     // Row 1: Document, View & File Bar
-    const topRow = document.createElement("div");
-    topRow.className = "umlcanvas-toolbar-row umlcanvas-toolbar-top-row";
-    this.toolbarEl.appendChild(topRow);
+    const topRow = this.toolbarEl.createDiv({
+      cls: "umlcanvas-toolbar-row umlcanvas-toolbar-top-row",
+    });
 
     // Row 2: Tools, Creation & Editing Bar
-    const bottomRow = document.createElement("div");
-    bottomRow.className = "umlcanvas-toolbar-row umlcanvas-toolbar-bottom-row";
-    this.toolbarEl.appendChild(bottomRow);
+    const bottomRow = this.toolbarEl.createDiv({
+      cls: "umlcanvas-toolbar-row umlcanvas-toolbar-bottom-row",
+    });
 
     // ==========================================
     // ROW 1 - GROUP 1: Document & Shape Library
@@ -145,20 +134,21 @@ export class Toolbar {
     const docGroup = this.createGroup(topRow);
 
     // Diagram-Type Switcher (F-054)
-    this.typeSelect = document.createElement("select");
-    this.typeSelect.className = "umlcanvas-type-select";
-    this.typeSelect.title = "Switch UML Diagram Type";
-    this.typeSelect.setAttribute("aria-label", "Switch UML Diagram Type");
+    this.typeSelect = docGroup.createEl("select", {
+      cls: "umlcanvas-type-select",
+      title: "Switch UML Diagram Type",
+      attr: { "aria-label": "Switch UML Diagram Type" },
+    });
 
     const allTypes = defaultDiagramTypeRegistry.getAll();
     for (const t of allTypes) {
-      const opt = document.createElement("option");
-      opt.value = t.id;
-      opt.textContent = t.displayName;
+      const opt = this.typeSelect.createEl("option", {
+        value: t.id,
+        text: t.displayName,
+      });
       if (t.id === this.editor.diagram.diagramType) {
         opt.selected = true;
       }
-      this.typeSelect.appendChild(opt);
     }
 
     this.typeSelect.addEventListener("change", () => {
@@ -186,25 +176,23 @@ export class Toolbar {
     const canvasGroup = this.createGroup(topRow);
 
     // Edge Routing Mode Toggle Button (F-005)
-    this.routingBtn = document.createElement("button");
-    this.routingBtn.className = "umlcanvas-toolbar-btn";
-    this.routingBtn.title = "Default Edge Routing: Orthogonal";
-    this.routingBtn.setAttribute("aria-label", "Default Edge Routing: Orthogonal");
+    this.routingBtn = canvasGroup.createEl("button", {
+      cls: "umlcanvas-toolbar-btn",
+      title: "Default Edge Routing: Orthogonal",
+      attr: { "aria-label": "Default Edge Routing: Orthogonal" },
+    });
 
-    const routingIcon = document.createElement("span");
-    routingIcon.className = "umlcanvas-btn-icon";
+    const routingIcon = this.routingBtn.createSpan({ cls: "umlcanvas-btn-icon" });
     renderIcon(routingIcon, "git-branch");
-    this.routingBtn.appendChild(routingIcon);
 
-    this.routingTextSpan = document.createElement("span");
-    this.routingTextSpan.className = "umlcanvas-btn-text";
-    this.routingTextSpan.textContent = "Route: Ortho";
-    this.routingBtn.appendChild(this.routingTextSpan);
+    this.routingTextSpan = this.routingBtn.createSpan({
+      cls: "umlcanvas-btn-text",
+      text: "Route: Ortho",
+    });
 
     this.routingBtn.addEventListener("click", () => {
       this.cycleRoutingMode();
     });
-    canvasGroup.appendChild(this.routingBtn);
 
     this.addDivider(canvasGroup);
 
@@ -253,11 +241,11 @@ export class Toolbar {
     zoomGroup.appendChild(zoomOutBtn);
 
     // Zoom Label
-    this.zoomLabel = document.createElement("span");
-    this.zoomLabel.className = "umlcanvas-zoom-label";
-    this.zoomLabel.textContent = "100%";
-    this.zoomLabel.title = "Current Zoom";
-    zoomGroup.appendChild(this.zoomLabel);
+    this.zoomLabel = zoomGroup.createSpan({
+      cls: "umlcanvas-zoom-label",
+      text: "100%",
+      title: "Current Zoom",
+    });
 
     // Zoom In
     const zoomInBtn = this.createButton(
@@ -311,8 +299,7 @@ export class Toolbar {
           const svgContent = this.editor.exportToSvg();
           const blob = new Blob([svgContent], { type: "image/svg+xml;charset=utf-8" });
           const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url;
+          const a = createEl("a", { href: url });
           a.download = `${this.editor.diagram.title || "diagram"}.svg`;
           a.click();
           URL.revokeObjectURL(url);
@@ -333,8 +320,7 @@ export class Toolbar {
           const jsonCanvas = this.editor.exportToJsonCanvas();
           const blob = new Blob([jsonCanvas], { type: "application/json" });
           const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url;
+          const a = createEl("a", { href: url });
           a.download = `${this.editor.diagram.title || "diagram"}.canvas`;
           a.click();
           URL.revokeObjectURL(url);
@@ -502,9 +488,9 @@ export class Toolbar {
       },
       "palette"
     );
-    const colorIndicator = document.createElement("span");
-    colorIndicator.className = "umlcanvas-color-indicator";
-    this.colorBtn.appendChild(colorIndicator);
+    this.colorIndicatorEl = this.colorBtn.createSpan({
+      cls: "umlcanvas-color-indicator",
+    });
     arrangeGroup.appendChild(this.colorBtn);
 
     // Label Selection Button (Enter / F2)
@@ -641,12 +627,9 @@ export class Toolbar {
         this.closeColorPalette();
       }
 
-      const indicator = this.colorBtn.querySelector(
-        ".umlcanvas-color-indicator"
-      ) as HTMLElement | null;
-      if (indicator) {
+      if (this.colorIndicatorEl) {
         if (!hasSelection) {
-          indicator.style.display = "none";
+          this.colorIndicatorEl.classList.remove("is-visible");
           this.colorBtn.title = "Assign Color to Selection (1-6)";
         } else {
           const selectedNodes = this.editor.diagram.nodes.filter((n) =>
@@ -664,15 +647,15 @@ export class Toolbar {
             selectedGroups[0]?.color;
 
           if (firstColor) {
-            indicator.style.display = "inline-block";
+            this.colorIndicatorEl.classList.add("is-visible");
             const resolved = resolveCanvasColor(firstColor);
-            indicator.style.backgroundColor = resolved ?? firstColor;
+            this.colorIndicatorEl.setCssStyles({ backgroundColor: resolved ?? firstColor });
             const preset = CANVAS_COLOR_PRESETS.find((p) => p.id === firstColor);
             this.colorBtn.title = `Assign Color to Selection (Current: ${
               preset ? preset.label : firstColor
             })`;
           } else {
-            indicator.style.display = "none";
+            this.colorIndicatorEl.classList.remove("is-visible");
             this.colorBtn.title = "Assign Color to Selection (1-6)";
           }
         }
@@ -717,37 +700,39 @@ export class Toolbar {
     }
 
     if (this.seqLayoutBtn) {
-      this.seqLayoutBtn.style.display =
-        this.editor.diagram.diagramType === "uml.sequence" ? "inline-flex" : "none";
+      this.seqLayoutBtn.classList.toggle(
+        "is-hidden",
+        this.editor.diagram.diagramType !== "uml.sequence"
+      );
     }
 
     // Update Breadcrumbs (F-062)
     if (this.editor.breadcrumbs.length > 0) {
-      this.breadcrumbsEl.style.display = "flex";
-      this.breadcrumbsEl.innerHTML = "";
+      this.breadcrumbsEl.classList.add("is-visible");
+      this.breadcrumbsEl.textContent = "";
       this.editor.breadcrumbs.forEach((crumb, idx) => {
-        const link = document.createElement("a");
-        link.className = "umlcanvas-breadcrumb-item";
-        link.textContent = crumb.title;
+        const link = this.breadcrumbsEl.createEl("a", {
+          cls: "umlcanvas-breadcrumb-item",
+          text: crumb.title,
+        });
         link.addEventListener("click", () => {
           if (this.onNavigateBreadcrumb) {
             this.onNavigateBreadcrumb(idx);
           }
         });
-        this.breadcrumbsEl.appendChild(link);
 
-        const sep = document.createElement("span");
-        sep.className = "umlcanvas-breadcrumb-separator";
-        sep.textContent = " / ";
-        this.breadcrumbsEl.appendChild(sep);
+        this.breadcrumbsEl.createSpan({
+          cls: "umlcanvas-breadcrumb-separator",
+          text: " / ",
+        });
       });
 
-      const current = document.createElement("span");
-      current.className = "umlcanvas-breadcrumb-item is-current";
-      current.textContent = this.editor.diagram.title || "Diagram";
-      this.breadcrumbsEl.appendChild(current);
+      this.breadcrumbsEl.createSpan({
+        cls: "umlcanvas-breadcrumb-item is-current",
+        text: this.editor.diagram.title || "Diagram",
+      });
     } else {
-      this.breadcrumbsEl.style.display = "none";
+      this.breadcrumbsEl.classList.remove("is-visible");
     }
 
     this.updateToolMode();
@@ -764,10 +749,10 @@ export class Toolbar {
     }
     if (this.drawBtn) {
       if (!this.freehandEnabled) {
-        this.drawBtn.style.display = "none";
+        this.drawBtn.classList.add("is-hidden");
         this.drawBtn.classList.remove("is-active");
       } else {
-        this.drawBtn.style.display = "inline-flex";
+        this.drawBtn.classList.remove("is-hidden");
         if (isFreehand) {
           this.drawBtn.classList.add("is-active");
         } else {
@@ -803,28 +788,26 @@ export class Toolbar {
   openColorPalette(): void {
     if (this.colorPaletteEl) return;
 
-    const popover = document.createElement("div");
-    popover.className = "umlcanvas-color-palette-popover";
+    const popover = createDiv({ cls: "umlcanvas-color-palette-popover" });
 
     // Row of color swatches
-    const row = document.createElement("div");
-    row.className = "umlcanvas-color-swatches-row";
+    const row = popover.createDiv({ cls: "umlcanvas-color-swatches-row" });
 
     // 1. None / Reset button
-    const noneBtn = document.createElement("button");
-    noneBtn.className = "umlcanvas-color-swatch is-none";
-    noneBtn.title = "Default / No color (Alt+0)";
-    noneBtn.setAttribute("aria-label", "Default / No color");
-    const noneIcon = document.createElement("span");
-    noneIcon.className = "umlcanvas-color-swatch-none-icon";
+    const noneBtn = row.createEl("button", {
+      cls: "umlcanvas-color-swatch is-none",
+      title: "Default / No color (Alt+0)",
+      attr: { "aria-label": "Default / No color" },
+    });
+    const noneIcon = noneBtn.createSpan({
+      cls: "umlcanvas-color-swatch-none-icon",
+    });
     renderIcon(noneIcon, "ban");
-    noneBtn.appendChild(noneIcon);
     noneBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       this.editor.setColorForSelection(undefined);
       this.closeColorPalette();
     });
-    row.appendChild(noneBtn);
 
     // Current selection color (if unique)
     const selectedNodes = this.editor.diagram.nodes.filter((n) =>
@@ -838,11 +821,11 @@ export class Toolbar {
 
     // 2. 6 Presets
     for (const preset of CANVAS_COLOR_PRESETS) {
-      const swatch = document.createElement("button");
-      swatch.className = `umlcanvas-color-swatch is-preset-${preset.id}`;
-      swatch.title = `${preset.label} (${preset.id}) [Alt+${preset.id}]`;
-      swatch.style.backgroundColor = `var(--canvas-color-${preset.id}, ${preset.hex})`;
-      swatch.textContent = preset.id;
+      const swatch = row.createEl("button", {
+        cls: `umlcanvas-color-swatch is-preset-${preset.id}`,
+        title: `${preset.label} (${preset.id}) [Alt+${preset.id}]`,
+        text: preset.id,
+      });
       if (activeColor === preset.id) {
         swatch.classList.add("is-active");
       }
@@ -851,19 +834,20 @@ export class Toolbar {
         this.editor.setColorForSelection(preset.id);
         this.closeColorPalette();
       });
-      row.appendChild(swatch);
     }
 
     // 3. Custom color input
-    const customLabel = document.createElement("label");
-    customLabel.className = "umlcanvas-color-swatch is-custom";
-    customLabel.title = "Custom Color...";
+    const customLabel = row.createEl("label", {
+      cls: "umlcanvas-color-swatch is-custom",
+      title: "Custom Color...",
+    });
 
-    const customInput = document.createElement("input");
-    customInput.type = "color";
-    customInput.className = "umlcanvas-color-custom-input";
-    customInput.value =
-      activeColor && activeColor.startsWith("#") ? activeColor : "#7b68ee";
+    const customInput = customLabel.createEl("input", {
+      type: "color",
+      cls: "umlcanvas-color-custom-input",
+      value:
+        activeColor && activeColor.startsWith("#") ? activeColor : "#7b68ee",
+    });
     customInput.addEventListener("input", (e) => {
       e.stopPropagation();
       this.editor.setColorForSelection(customInput.value);
@@ -874,12 +858,10 @@ export class Toolbar {
       this.closeColorPalette();
     });
 
-    const customIcon = document.createElement("span");
-    customIcon.className = "umlcanvas-color-swatch-custom-icon";
+    const customIcon = customLabel.createSpan({
+      cls: "umlcanvas-color-swatch-custom-icon",
+    });
     renderIcon(customIcon, "pipette");
-    customLabel.appendChild(customInput);
-    customLabel.appendChild(customIcon);
-    row.appendChild(customLabel);
 
     popover.appendChild(row);
 
@@ -891,7 +873,7 @@ export class Toolbar {
     const btnRect = this.colorBtn.getBoundingClientRect();
     const toolbarRect = this.toolbarEl.getBoundingClientRect();
     const leftOffset = Math.max(0, btnRect.left - toolbarRect.left);
-    popover.style.left = `${leftOffset}px`;
+    popover.setCssStyles({ left: `${leftOffset}px` });
 
     // Close on outside click
     this.onWindowClickBound = (e: MouseEvent) => {
@@ -938,37 +920,27 @@ export class Toolbar {
     if (this.alignPopoverEl) return;
     if (this.colorPaletteEl) this.closeColorPalette();
 
-    const popover = document.createElement("div");
-    popover.className = "umlcanvas-align-popover";
+    const popover = createDiv({ cls: "umlcanvas-align-popover" });
 
     const createItem = (label: string, iconId: string, action: () => void, disabled?: boolean) => {
-      const btn = document.createElement("button");
-      btn.className = "umlcanvas-align-item";
+      const btn = popover.createEl("button", { cls: "umlcanvas-align-item" });
       if (disabled) {
         btn.disabled = true;
       }
-      const iconSpan = document.createElement("span");
-      iconSpan.className = "umlcanvas-align-icon";
+      const iconSpan = btn.createSpan({ cls: "umlcanvas-align-icon" });
       renderIcon(iconSpan, iconId);
-      btn.appendChild(iconSpan);
 
-      const labelSpan = document.createElement("span");
-      labelSpan.className = "umlcanvas-align-label";
-      labelSpan.textContent = label;
-      btn.appendChild(labelSpan);
+      btn.createSpan({ cls: "umlcanvas-align-label", text: label });
 
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
         action();
         this.closeAlignMenu();
       });
-      popover.appendChild(btn);
     };
 
     const addSeparator = () => {
-      const sep = document.createElement("div");
-      sep.className = "umlcanvas-align-separator";
-      popover.appendChild(sep);
+      popover.createDiv({ cls: "umlcanvas-align-separator" });
     };
 
     // Alignment Options
@@ -1013,10 +985,7 @@ export class Toolbar {
     const containerRect = this.container.getBoundingClientRect();
     const left = Math.max(10, btnRect.left - containerRect.left);
     const top = btnRect.bottom - containerRect.top + 6;
-    popover.style.position = "absolute";
-    popover.style.left = `${left}px`;
-    popover.style.top = `${top}px`;
-    popover.style.zIndex = "100";
+    popover.setCssStyles({ left: `${left}px`, top: `${top}px` });
 
     const onWinClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
@@ -1025,7 +994,7 @@ export class Toolbar {
       }
     };
     this.alignWinClickBound = onWinClick;
-    this.alignCloseTimer = setTimeout(() => {
+    this.alignCloseTimer = window.setTimeout(() => {
       this.alignCloseTimer = null;
       if (typeof window !== "undefined" && window?.addEventListener && this.alignWinClickBound) {
         window.addEventListener("mousedown", this.alignWinClickBound);
@@ -1035,7 +1004,7 @@ export class Toolbar {
 
   closeAlignMenu(): void {
     if (this.alignCloseTimer !== null) {
-      clearTimeout(this.alignCloseTimer);
+      window.clearTimeout(this.alignCloseTimer);
       this.alignCloseTimer = null;
     }
     if (this.alignWinClickBound) {

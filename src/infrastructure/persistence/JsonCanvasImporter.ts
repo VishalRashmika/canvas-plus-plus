@@ -46,7 +46,7 @@ export class JsonCanvasImporter {
   ): Diagram {
     let data: PlainCanvasData;
     try {
-      data = JSON.parse(jsonString);
+      data = JSON.parse(jsonString) as PlainCanvasData;
     } catch {
       throw new Error("Failed to parse .canvas file: invalid JSON format");
     }

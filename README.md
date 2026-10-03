@@ -1,18 +1,19 @@
 # Canvas++
 
-[![Version](https://img.shields.io/badge/version-v0.1.0--beta-blue.svg?style=flat-square)](https://github.com/VishalRashmika/canvas-plus-plus/releases)
-[![Status](https://img.shields.io/badge/status-beta-orange.svg?style=flat-square)](https://github.com/VishalRashmika/canvas-plus-plus)
-[![Obsidian](https://img.shields.io/badge/Obsidian-v1.5.0+-7C3AED.svg?style=flat-square&logo=obsidian&logoColor=white)](https://obsidian.md)
-[![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue.svg?style=flat-square)](LICENSE)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.4+-3178C6.svg?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![JSON Canvas](https://img.shields.io/badge/JSON%20Canvas-1.0-5856D6.svg?style=flat-square)](https://jsoncanvas.org/)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](https://github.com/VishalRashmika/canvas-plus-plus/pulls)
-
-`obsidian` · `obsidian-plugin` · `uml` · `schematics` · `diagrams` · `whiteboard` · `json-canvas` · `ai-agent`
+<p align="center">
+  <a href="https://github.com/VishalRashmika/canvas-plus-plus/releases"><img src="https://img.shields.io/badge/version-v1.0.0-blue.svg?style=flat-square" alt="Version"></a>
+  <a href="https://github.com/VishalRashmika/canvas-plus-plus"><img src="https://img.shields.io/badge/status-stable-brightgreen.svg?style=flat-square" alt="Status"></a>
+  <a href="https://obsidian.md"><img src="https://img.shields.io/badge/Obsidian-v1.5.0+-7C3AED.svg?style=flat-square&logo=obsidian&logoColor=white" alt="Obsidian"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-blue.svg?style=flat-square" alt="License: GPLv3"></a>
+  <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5.4+-3178C6.svg?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript"></a>
+  <a href="https://jsoncanvas.org/"><img src="https://img.shields.io/badge/JSON%20Canvas-1.0-5856D6.svg?style=flat-square" alt="JSON Canvas"></a>
+  <a href="https://github.com/VishalRashmika/canvas-plus-plus/pulls"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square" alt="PRs Welcome"></a>
+  <a href="https://buymeacoffee.com/vishalrashmika"><img src="https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Donate-yellow.svg?style=flat-square&logo=buymeacoffee" alt="Buy Me A Coffee"></a>
+</p>
 
 > [!NOTE]
-> **Version: `v0.1.0-beta`**  
-> Canvas++ is currently in public beta. All 15 UML 2.x diagram types, digital hardware schematics, freehand recognition, and AI agent patch bridges are available for testing. If you encounter bugs, rough edges, or have feature suggestions, please open an issue on the [GitHub Issues](https://github.com/VishalRashmika/canvas-plus-plus/issues) page.
+> **Version: `v1.0.0`**  
+> All 15 UML 2.x diagram types, digital hardware schematics, freehand recognition, and AI agent patch bridges are available. If you encounter bugs, rough edges, or have feature suggestions, please open an issue on the [GitHub Issues](https://github.com/VishalRashmika/canvas-plus-plus/issues) page.
 
 A high-performance, local-first visual modeling, UML, and hardware schematic canvas engine for [Obsidian](https://obsidian.md).
 
@@ -174,6 +175,16 @@ npm run lint
 # Compile production bundle (main.js)
 npm run build
 ```
+
+---
+
+## Support
+
+If you find Canvas++ helpful for your diagrams and workflows, consider supporting its maintenance and development:
+
+<p align="center">
+  <a href="https://buymeacoffee.com/vishalrashmika" target="_blank"><img src="https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Donate-yellow.svg?style=for-the-badge&logo=buymeacoffee" alt="Buy Me A Coffee"></a>
+</p>
 
 ---
 

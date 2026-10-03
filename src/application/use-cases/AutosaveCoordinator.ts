@@ -2,7 +2,7 @@ import { Diagram } from "../../domain/entities/Diagram";
 import { DiagramEditor } from "./DiagramEditor";
 
 export class AutosaveCoordinator {
-  private timer: ReturnType<typeof setTimeout> | null = null;
+  private timer: number | null = null;
   private unsubscribe: (() => void) | null = null;
   private isSaving = false;
   private pendingSaveAfterCurrent = false;
@@ -25,7 +25,7 @@ export class AutosaveCoordinator {
 
   scheduleAutosave(): void {
     this.cancelPendingTimer();
-    this.timer = setTimeout(() => {
+    this.timer = window.setTimeout(() => {
       this.timer = null;
       void this.performSave();
     }, this.delayMs);
@@ -57,7 +57,7 @@ export class AutosaveCoordinator {
 
   private cancelPendingTimer(): void {
     if (this.timer !== null) {
-      clearTimeout(this.timer);
+      window.clearTimeout(this.timer);
       this.timer = null;
     }
   }

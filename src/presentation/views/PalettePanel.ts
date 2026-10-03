@@ -1,3 +1,4 @@
+import { App } from "obsidian";
 import { DiagramEditor } from "../../application/use-cases/DiagramEditor";
 import { SvgSceneRenderer } from "../renderer/SvgSceneRenderer";
 import { ShapeRegistry, ShapeDefinition } from "../renderer/ShapeRegistry";
@@ -148,34 +149,33 @@ export class PalettePanel {
     private readonly renderer: SvgSceneRenderer,
     private readonly shapeRegistry: ShapeRegistry,
     private readonly onToggleChange?: (isOpen: boolean) => void,
-    private readonly onDefineChip?: (existingChip?: ChipInterfaceDefinition) => void
+    private readonly onDefineChip?: (existingChip?: ChipInterfaceDefinition) => void,
+    private readonly app?: App
   ) {
-    // Load saved width from localStorage if present
+    // Load saved width if present
     this.currentWidth = this.loadSavedWidth();
 
     // 1. Right side drawer container
-    this.panelEl = document.createElement("div");
-    this.panelEl.className = "umlcanvas-palette-panel is-collapsed";
-    this.panelEl.style.width = `${this.currentWidth}px`;
+    this.panelEl = this.container.createDiv({ cls: "umlcanvas-palette-panel is-collapsed" });
+    this.panelEl.setCssStyles({ width: `${this.currentWidth}px` });
 
     // 1b. Left edge resize handle
-    this.resizeHandleEl = document.createElement("div");
-    this.resizeHandleEl.className = "umlcanvas-palette-resize-handle";
-    this.resizeHandleEl.title = "Drag to adjust panel width";
+    this.resizeHandleEl = this.panelEl.createDiv({
+      cls: "umlcanvas-palette-resize-handle",
+      title: "Drag to adjust panel width",
+    });
     this.initResizeHandle();
-    this.panelEl.appendChild(this.resizeHandleEl);
 
     // 2. Floating toggle tab on the right edge
-    this.toggleTabEl = document.createElement("div");
-    this.toggleTabEl.className = "umlcanvas-palette-toggle-tab";
-    this.toggleTabEl.title = "Open Shape Library";
-    this.toggleTabEl.innerHTML = `<span>‹</span><span class="umlcanvas-palette-tab-text">Shapes</span>`;
+    this.toggleTabEl = this.container.createDiv({
+      cls: "umlcanvas-palette-toggle-tab",
+      title: "Open Shape Library",
+    });
+    this.toggleTabEl.createSpan({ text: "‹" });
+    this.toggleTabEl.createSpan({ cls: "umlcanvas-palette-tab-text", text: "Shapes" });
     this.toggleTabEl.addEventListener("click", () => {
       this.toggle(true);
     });
-
-    this.container.appendChild(this.toggleTabEl);
-    this.container.appendChild(this.panelEl);
 
     // Default: expand category matching current diagram type, collapse others
     this.initDefaultExpandedState();
@@ -183,9 +183,7 @@ export class PalettePanel {
     this.createHeader();
     this.createSearch();
 
-    this.contentEl = document.createElement("div");
-    this.contentEl.className = "umlcanvas-palette-content";
-    this.panelEl.appendChild(this.contentEl);
+    this.contentEl = this.panelEl.createDiv({ cls: "umlcanvas-palette-content" });
 
     this.render();
 
@@ -227,45 +225,38 @@ export class PalettePanel {
   }
 
   private createHeader(): void {
-    const header = document.createElement("div");
-    header.className = "umlcanvas-palette-header-bar";
+    const header = this.panelEl.createDiv({ cls: "umlcanvas-palette-header-bar" });
 
-    const title = document.createElement("div");
-    title.className = "umlcanvas-palette-title";
-    title.innerHTML = `<span>Shape Library</span>`;
+    const title = header.createDiv({ cls: "umlcanvas-palette-title" });
+    title.createSpan({ text: "Shape Library" });
 
-    const closeBtn = document.createElement("button");
-    closeBtn.className = "umlcanvas-palette-close-btn";
-    closeBtn.title = "Close Shape Library";
-    closeBtn.textContent = "✕";
+    const closeBtn = header.createEl("button", {
+      cls: "umlcanvas-palette-close-btn",
+      title: "Close Shape Library",
+      text: "✕",
+    });
     closeBtn.addEventListener("click", () => {
       this.toggle(false);
     });
-
-    header.appendChild(title);
-    header.appendChild(closeBtn);
-    this.panelEl.appendChild(header);
   }
 
   private createSearch(): void {
-    const container = document.createElement("div");
-    container.className = "umlcanvas-palette-search-container";
+    const container = this.panelEl.createDiv({ cls: "umlcanvas-palette-search-container" });
 
-    const input = document.createElement("input");
-    input.type = "text";
-    input.placeholder = "Search shapes...";
-    input.className = "umlcanvas-palette-search-input";
+    const input = container.createEl("input", {
+      cls: "umlcanvas-palette-search-input",
+      type: "text",
+      placeholder: "Search shapes...",
+    });
     input.addEventListener("input", () => {
       this.filterShapes(input.value.trim().toLowerCase());
     });
 
     this.searchInput = input;
-    container.appendChild(input);
-    this.panelEl.appendChild(container);
   }
 
   render(): void {
-    this.contentEl.innerHTML = "";
+    this.contentEl.empty();
 
     // 1. Render each shape category
     for (const cat of SHAPE_CATEGORIES) {
@@ -311,37 +302,33 @@ export class PalettePanel {
     name: string,
     shapes: ShapeDefinition[]
   ): HTMLElement {
-    const catEl = document.createElement("div");
-    catEl.className = "umlcanvas-palette-category";
-    catEl.setAttribute("data-category-id", id);
+    const catEl = createDiv({
+      cls: "umlcanvas-palette-category",
+      attr: { "data-category-id": id },
+    });
     if (this.collapsedCategories.has(id)) {
       catEl.classList.add("is-collapsed");
     }
 
     // Category Header
-    const header = document.createElement("div");
-    header.className = "umlcanvas-palette-category-header";
-    header.title = `Click to toggle ${name}`;
+    const header = catEl.createDiv({
+      cls: "umlcanvas-palette-category-header",
+      title: `Click to toggle ${name}`,
+    });
 
-    const left = document.createElement("div");
-    left.className = "umlcanvas-palette-category-left";
+    const left = header.createDiv({ cls: "umlcanvas-palette-category-left" });
 
-    const chevron = document.createElement("span");
-    chevron.className = "umlcanvas-palette-category-chevron";
-    chevron.textContent = this.collapsedCategories.has(id) ? "▶" : "▼";
+    const chevron = left.createSpan({
+      cls: "umlcanvas-palette-category-chevron",
+      text: this.collapsedCategories.has(id) ? "▶" : "▼",
+    });
 
-    const titleSpan = document.createElement("span");
-    titleSpan.textContent = name;
+    left.createSpan({ text: name });
 
-    left.appendChild(chevron);
-    left.appendChild(titleSpan);
-
-    const countSpan = document.createElement("span");
-    countSpan.className = "umlcanvas-palette-category-count";
-    countSpan.textContent = String(shapes.length);
-
-    header.appendChild(left);
-    header.appendChild(countSpan);
+    header.createSpan({
+      cls: "umlcanvas-palette-category-count",
+      text: String(shapes.length),
+    });
 
     header.addEventListener("click", () => {
       const isCurrentlyCollapsed = this.collapsedCategories.has(id);
@@ -356,26 +343,25 @@ export class PalettePanel {
       }
     });
 
-    catEl.appendChild(header);
-
     // Body (Grid of Shape Tiles)
-    const body = document.createElement("div");
-    body.className = "umlcanvas-palette-category-body";
+    const body = catEl.createDiv({ cls: "umlcanvas-palette-category-body" });
 
     for (const shapeDef of shapes) {
       const tile = this.renderShapeTile(shapeDef);
       body.appendChild(tile);
     }
 
-    catEl.appendChild(body);
     return catEl;
   }
 
   private renderShapeTile(shapeDef: ShapeDefinition): HTMLElement {
-    const tile = document.createElement("div");
-    tile.className = "umlcanvas-shape-tile";
-    tile.setAttribute("data-shape-kind", shapeDef.kind);
-    tile.title = `${shapeDef.displayName} (${shapeDef.kind})\nClick to add, or drag onto canvas`;
+    const tile = createDiv({
+      cls: "umlcanvas-shape-tile",
+      attr: {
+        "data-shape-kind": shapeDef.kind,
+        title: `${shapeDef.displayName} (${shapeDef.kind})\nClick to add, or drag onto canvas`,
+      },
+    });
     tile.draggable = true;
 
     tile.addEventListener("dragstart", (e) => {
@@ -391,19 +377,20 @@ export class PalettePanel {
     });
 
     // SVG Preview
-    const previewContainer = document.createElement("div");
-    previewContainer.className = "umlcanvas-shape-tile-preview";
+    const previewContainer = tile.createDiv({ cls: "umlcanvas-shape-tile-preview" });
 
-    const svgNS = "http://www.w3.org/2000/svg";
-    const previewSvg = document.createElementNS(svgNS, "svg");
     const w = shapeDef.defaultSize.width || 100;
     const h = shapeDef.defaultSize.height || 60;
     const pad = 4;
-    previewSvg.setAttribute("viewBox", `${-pad} ${-pad} ${w + pad * 2} ${h + pad * 2}`);
-    previewSvg.setAttribute("width", "100%");
-    previewSvg.setAttribute("height", "100%");
-    previewSvg.setAttribute("preserveAspectRatio", "xMidYMid meet");
-    previewSvg.setAttribute("class", "umlcanvas-shape-preview-svg");
+    const previewSvg = previewContainer.createSvg("svg", {
+      cls: "umlcanvas-shape-preview-svg",
+      attr: {
+        viewBox: `${-pad} ${-pad} ${w + pad * 2} ${h + pad * 2}`,
+        width: "100%",
+        height: "100%",
+        preserveAspectRatio: "xMidYMid meet",
+      },
+    });
 
     try {
       const dummyNode = createDiagramNode({
@@ -415,24 +402,23 @@ export class PalettePanel {
       const rendered = shapeDef.renderSvg(dummyNode, { isSelected: false });
       previewSvg.appendChild(rendered);
     } catch {
-      const fallbackRect = document.createElementNS(svgNS, "rect");
-      fallbackRect.setAttribute("x", "0");
-      fallbackRect.setAttribute("y", "0");
-      fallbackRect.setAttribute("width", String(w));
-      fallbackRect.setAttribute("height", String(h));
-      fallbackRect.setAttribute("fill", "var(--background-primary)");
-      fallbackRect.setAttribute("stroke", "var(--text-muted)");
-      fallbackRect.setAttribute("stroke-width", "1.5");
-      previewSvg.appendChild(fallbackRect);
+      previewSvg.createSvg("rect", {
+        attr: {
+          x: "0",
+          y: "0",
+          width: String(w),
+          height: String(h),
+          fill: "var(--background-primary)",
+          stroke: "var(--text-muted)",
+          "stroke-width": "1.5",
+        },
+      });
     }
 
-    previewContainer.appendChild(previewSvg);
-    tile.appendChild(previewContainer);
-
-    const label = document.createElement("div");
-    label.className = "umlcanvas-shape-tile-label";
-    label.textContent = shapeDef.displayName;
-    tile.appendChild(label);
+    tile.createDiv({
+      cls: "umlcanvas-shape-tile-label",
+      text: shapeDef.displayName,
+    });
 
     return tile;
   }
@@ -442,36 +428,32 @@ export class PalettePanel {
     name: string,
     edgeStyles: EdgeStyleDefinition[]
   ): HTMLElement {
-    const catEl = document.createElement("div");
-    catEl.className = "umlcanvas-palette-category";
-    catEl.setAttribute("data-category-id", id);
+    const catEl = createDiv({
+      cls: "umlcanvas-palette-category",
+      attr: { "data-category-id": id },
+    });
     if (this.collapsedCategories.has(id)) {
       catEl.classList.add("is-collapsed");
     }
 
-    const header = document.createElement("div");
-    header.className = "umlcanvas-palette-category-header";
-    header.title = `Click to toggle ${name}`;
+    const header = catEl.createDiv({
+      cls: "umlcanvas-palette-category-header",
+      title: `Click to toggle ${name}`,
+    });
 
-    const left = document.createElement("div");
-    left.className = "umlcanvas-palette-category-left";
+    const left = header.createDiv({ cls: "umlcanvas-palette-category-left" });
 
-    const chevron = document.createElement("span");
-    chevron.className = "umlcanvas-palette-category-chevron";
-    chevron.textContent = this.collapsedCategories.has(id) ? "▶" : "▼";
+    const chevron = left.createSpan({
+      cls: "umlcanvas-palette-category-chevron",
+      text: this.collapsedCategories.has(id) ? "▶" : "▼",
+    });
 
-    const titleSpan = document.createElement("span");
-    titleSpan.textContent = name;
+    left.createSpan({ text: name });
 
-    left.appendChild(chevron);
-    left.appendChild(titleSpan);
-
-    const countSpan = document.createElement("span");
-    countSpan.className = "umlcanvas-palette-category-count";
-    countSpan.textContent = String(edgeStyles.length);
-
-    header.appendChild(left);
-    header.appendChild(countSpan);
+    header.createSpan({
+      cls: "umlcanvas-palette-category-count",
+      text: String(edgeStyles.length),
+    });
 
     header.addEventListener("click", () => {
       const isCurrentlyCollapsed = this.collapsedCategories.has(id);
@@ -486,16 +468,16 @@ export class PalettePanel {
       }
     });
 
-    catEl.appendChild(header);
-
-    const body = document.createElement("div");
-    body.className = "umlcanvas-palette-category-body";
+    const body = catEl.createDiv({ cls: "umlcanvas-palette-category-body" });
 
     for (const style of edgeStyles) {
-      const tile = document.createElement("div");
-      tile.className = "umlcanvas-edge-tile";
-      tile.setAttribute("data-edge-kind", style.kind);
-      tile.title = `Connector: ${style.displayName}\nClick to set active connector type`;
+      const tile = body.createDiv({
+        cls: "umlcanvas-edge-tile",
+        attr: {
+          "data-edge-kind": style.kind,
+          title: `Connector: ${style.displayName}\nClick to set active connector type`,
+        },
+      });
       if (this.editor.activeEdgeKind === style.kind) {
         tile.classList.add("is-active");
       }
@@ -511,89 +493,80 @@ export class PalettePanel {
         this.updateActiveSelection();
       });
 
-      const previewContainer = document.createElement("div");
-      previewContainer.className = "umlcanvas-edge-tile-preview";
+      const previewContainer = tile.createDiv({ cls: "umlcanvas-edge-tile-preview" });
 
-      const svgNS = "http://www.w3.org/2000/svg";
-      const previewSvg = document.createElementNS(svgNS, "svg");
-      previewSvg.setAttribute("viewBox", "0 0 50 20");
-      previewSvg.setAttribute("preserveAspectRatio", "xMidYMid meet");
-      previewSvg.setAttribute("class", "umlcanvas-edge-preview-svg");
+      const previewSvg = previewContainer.createSvg("svg", {
+        cls: "umlcanvas-edge-preview-svg",
+        attr: {
+          viewBox: "0 0 50 20",
+          preserveAspectRatio: "xMidYMid meet",
+        },
+      });
 
-      const line = document.createElementNS(svgNS, "line");
-      line.setAttribute("x1", "5");
-      line.setAttribute("y1", "10");
-      line.setAttribute("x2", "45");
-      line.setAttribute("y2", "10");
-      line.setAttribute("stroke", "var(--text-normal)");
-      line.setAttribute("stroke-width", "1.5");
+      const line = previewSvg.createSvg("line", {
+        attr: {
+          x1: "5",
+          y1: "10",
+          x2: "45",
+          y2: "10",
+          stroke: "var(--text-normal)",
+          "stroke-width": "1.5",
+        },
+      });
       if (style.strokeDasharray) {
         line.setAttribute("stroke-dasharray", style.strokeDasharray);
       }
-      previewSvg.appendChild(line);
 
-      previewContainer.appendChild(previewSvg);
-      tile.appendChild(previewContainer);
-
-      const label = document.createElement("div");
-      label.className = "umlcanvas-shape-tile-label";
-      label.textContent = style.displayName;
-      tile.appendChild(label);
-
-      body.appendChild(tile);
+      tile.createDiv({
+        cls: "umlcanvas-shape-tile-label",
+        text: style.displayName,
+      });
     }
 
-    catEl.appendChild(body);
     return catEl;
   }
 
   private renderCustomChipsCategory(chips: ChipInterfaceDefinition[]): HTMLElement {
-    const catEl = document.createElement("div");
-    catEl.className = "umlcanvas-palette-category";
-    catEl.setAttribute("data-category-id", "customChips");
+    const catEl = createDiv({
+      cls: "umlcanvas-palette-category",
+      attr: { "data-category-id": "customChips" },
+    });
     if (this.collapsedCategories.has("customChips")) {
       catEl.classList.add("is-collapsed");
     }
 
-    const header = document.createElement("div");
-    header.className = "umlcanvas-palette-category-header";
-    header.title = "Click to toggle Custom Chips";
+    const header = catEl.createDiv({
+      cls: "umlcanvas-palette-category-header",
+      title: "Click to toggle Custom Chips",
+    });
 
-    const left = document.createElement("div");
-    left.className = "umlcanvas-palette-category-left";
+    const left = header.createDiv({ cls: "umlcanvas-palette-category-left" });
 
-    const chevron = document.createElement("span");
-    chevron.className = "umlcanvas-palette-category-chevron";
-    chevron.textContent = this.collapsedCategories.has("customChips") ? "▶" : "▼";
+    const chevron = left.createSpan({
+      cls: "umlcanvas-palette-category-chevron",
+      text: this.collapsedCategories.has("customChips") ? "▶" : "▼",
+    });
 
-    const titleSpan = document.createElement("span");
-    titleSpan.textContent = "Custom Chips";
+    left.createSpan({ text: "Custom Chips" });
 
-    left.appendChild(chevron);
-    left.appendChild(titleSpan);
+    const rightWrapper = header.createDiv({ cls: "umlcanvas-palette-category-right" });
 
-    const rightWrapper = document.createElement("div");
-    rightWrapper.className = "umlcanvas-palette-category-right";
-
-    const countSpan = document.createElement("span");
-    countSpan.className = "umlcanvas-palette-category-count";
-    countSpan.textContent = String(chips.length);
-    rightWrapper.appendChild(countSpan);
+    rightWrapper.createSpan({
+      cls: "umlcanvas-palette-category-count",
+      text: String(chips.length),
+    });
 
     if (this.onDefineChip) {
-      const addBtn = document.createElement("button");
-      addBtn.className = "umlcanvas-palette-cat-add-btn";
-      addBtn.title = "Define New Custom Chip...";
-      addBtn.textContent = "+";
+      const addBtn = rightWrapper.createEl("button", {
+        cls: "umlcanvas-palette-cat-add-btn",
+        title: "Define New Custom Chip...",
+        text: "+",
+      });
       addBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         this.onDefineChip?.();
       });
-      rightWrapper.appendChild(addBtn);
     }
-
-    header.appendChild(left);
-    header.appendChild(rightWrapper);
 
     header.addEventListener("click", () => {
       const isCurrentlyCollapsed = this.collapsedCategories.has("customChips");
@@ -608,47 +581,47 @@ export class PalettePanel {
       }
     });
 
-    catEl.appendChild(header);
-
-    const body = document.createElement("div");
-    body.className = "umlcanvas-palette-category-body";
+    const body = catEl.createDiv({ cls: "umlcanvas-palette-category-body" });
 
     // "+ Define New Chip" tile
-    const newChipTile = document.createElement("div");
-    newChipTile.className = "umlcanvas-shape-tile umlcanvas-tile-add-chip";
-    newChipTile.title = "Click to define a custom IC chip interface with pins";
+    const newChipTile = body.createDiv({
+      cls: "umlcanvas-shape-tile umlcanvas-tile-add-chip",
+      title: "Click to define a custom IC chip interface with pins",
+    });
 
-    const addPreviewContainer = document.createElement("div");
-    addPreviewContainer.className = "umlcanvas-shape-tile-preview umlcanvas-add-chip-preview";
+    const addPreviewContainer = newChipTile.createDiv({
+      cls: "umlcanvas-shape-tile-preview umlcanvas-add-chip-preview",
+    });
 
-    const svgNS = "http://www.w3.org/2000/svg";
-    const addSvg = document.createElementNS(svgNS, "svg");
-    addSvg.setAttribute("viewBox", "0 0 40 40");
-    addSvg.setAttribute("width", "100%");
-    addSvg.setAttribute("height", "100%");
-    addSvg.setAttribute("preserveAspectRatio", "xMidYMid meet");
-    addSvg.setAttribute("class", "umlcanvas-shape-preview-svg");
-    const plusText = document.createElementNS(svgNS, "text");
-    plusText.setAttribute("x", "20");
-    plusText.setAttribute("y", "26");
-    plusText.setAttribute("text-anchor", "middle");
-    plusText.setAttribute("font-size", "24");
-    plusText.setAttribute("font-weight", "bold");
-    plusText.setAttribute("fill", "var(--text-accent)");
-    plusText.textContent = "+";
-    addSvg.appendChild(plusText);
-    addPreviewContainer.appendChild(addSvg);
-    newChipTile.appendChild(addPreviewContainer);
+    const addSvg = addPreviewContainer.createSvg("svg", {
+      cls: "umlcanvas-shape-preview-svg",
+      attr: {
+        viewBox: "0 0 40 40",
+        width: "100%",
+        height: "100%",
+        preserveAspectRatio: "xMidYMid meet",
+      },
+    });
+    const textEl = addSvg.createSvg("text", {
+      attr: {
+        x: "20",
+        y: "26",
+        "text-anchor": "middle",
+        "font-size": "24",
+        "font-weight": "bold",
+        fill: "var(--text-accent)",
+      },
+    });
+    textEl.textContent = "+";
 
-    const addLabel = document.createElement("div");
-    addLabel.className = "umlcanvas-shape-tile-label";
-    addLabel.textContent = "+ Define Chip";
-    newChipTile.appendChild(addLabel);
+    newChipTile.createDiv({
+      cls: "umlcanvas-shape-tile-label",
+      text: "+ Define Chip",
+    });
 
     newChipTile.addEventListener("click", () => {
       this.onDefineChip?.();
     });
-    body.appendChild(newChipTile);
 
     // Tiles for each custom chip
     for (const chip of chips) {
@@ -656,16 +629,18 @@ export class PalettePanel {
       body.appendChild(tile);
     }
 
-    catEl.appendChild(body);
     return catEl;
   }
 
   private renderCustomChipTile(chip: ChipInterfaceDefinition): HTMLElement {
-    const tile = document.createElement("div");
-    tile.className = "umlcanvas-shape-tile umlcanvas-chip-tile";
-    tile.setAttribute("data-chip-id", chip.id);
-    tile.setAttribute("data-shape-kind", "schematic.chip");
-    tile.title = `${chip.name} (${chip.ports.length} pins)\nClick to add, or drag onto canvas`;
+    const tile = createDiv({
+      cls: "umlcanvas-shape-tile umlcanvas-chip-tile",
+      attr: {
+        "data-chip-id": chip.id,
+        "data-shape-kind": "schematic.chip",
+        title: `${chip.name} (${chip.ports.length} pins)\nClick to add, or drag onto canvas`,
+      },
+    });
     tile.draggable = true;
 
     tile.addEventListener("dragstart", (e) => {
@@ -696,19 +671,20 @@ export class PalettePanel {
     });
 
     // Preview
-    const previewContainer = document.createElement("div");
-    previewContainer.className = "umlcanvas-shape-tile-preview";
+    const previewContainer = tile.createDiv({ cls: "umlcanvas-shape-tile-preview" });
 
-    const svgNS = "http://www.w3.org/2000/svg";
-    const previewSvg = document.createElementNS(svgNS, "svg");
     const w = 140;
     const h = Math.max(80, (chip.ports.length + 1) * 20);
     const pad = 8;
-    previewSvg.setAttribute("viewBox", `${-pad} ${-pad} ${w + pad * 2} ${h + pad * 2}`);
-    previewSvg.setAttribute("width", "100%");
-    previewSvg.setAttribute("height", "100%");
-    previewSvg.setAttribute("preserveAspectRatio", "xMidYMid meet");
-    previewSvg.setAttribute("class", "umlcanvas-shape-preview-svg");
+    const previewSvg = previewContainer.createSvg("svg", {
+      cls: "umlcanvas-shape-preview-svg",
+      attr: {
+        viewBox: `${-pad} ${-pad} ${w + pad * 2} ${h + pad * 2}`,
+        width: "100%",
+        height: "100%",
+        preserveAspectRatio: "xMidYMid meet",
+      },
+    });
 
     try {
       const dummyNode = createDiagramNode({
@@ -722,63 +698,56 @@ export class PalettePanel {
       const rendered = this.shapeRegistry.get("schematic.chip").renderSvg(dummyNode, { isSelected: false });
       previewSvg.appendChild(rendered);
     } catch {
-      const fallbackRect = document.createElementNS(svgNS, "rect");
-      fallbackRect.setAttribute("x", "0");
-      fallbackRect.setAttribute("y", "0");
-      fallbackRect.setAttribute("width", String(w));
-      fallbackRect.setAttribute("height", String(h));
-      fallbackRect.setAttribute("fill", "var(--background-primary)");
-      fallbackRect.setAttribute("stroke", "var(--text-muted)");
-      fallbackRect.setAttribute("stroke-width", "1.5");
-      previewSvg.appendChild(fallbackRect);
+      previewSvg.createSvg("rect", {
+        attr: {
+          x: "0",
+          y: "0",
+          width: String(w),
+          height: String(h),
+          fill: "var(--background-primary)",
+          stroke: "var(--text-muted)",
+          "stroke-width": "1.5",
+        },
+      });
     }
 
-    previewContainer.appendChild(previewSvg);
-    tile.appendChild(previewContainer);
-
     // Label & pin count
-    const labelContainer = document.createElement("div");
-    labelContainer.className = "umlcanvas-chip-tile-footer";
+    const labelContainer = tile.createDiv({ cls: "umlcanvas-chip-tile-footer" });
 
-    const label = document.createElement("div");
-    label.className = "umlcanvas-shape-tile-label";
-    label.textContent = chip.name;
-    labelContainer.appendChild(label);
+    labelContainer.createDiv({
+      cls: "umlcanvas-shape-tile-label",
+      text: chip.name,
+    });
 
-    const pinCount = document.createElement("span");
-    pinCount.className = "umlcanvas-chip-tile-pins";
-    pinCount.textContent = `${chip.ports.length} pins`;
-    labelContainer.appendChild(pinCount);
-
-    tile.appendChild(labelContainer);
+    labelContainer.createSpan({
+      cls: "umlcanvas-chip-tile-pins",
+      text: `${chip.ports.length} pins`,
+    });
 
     // Hover Action Buttons: Edit and Delete
-    const actionsBar = document.createElement("div");
-    actionsBar.className = "umlcanvas-chip-tile-actions";
+    const actionsBar = tile.createDiv({ cls: "umlcanvas-chip-tile-actions" });
 
     if (this.onDefineChip) {
-      const editBtn = document.createElement("button");
-      editBtn.className = "umlcanvas-tile-action-btn";
-      editBtn.title = `Edit interface for ${chip.name}`;
-      editBtn.textContent = "✎";
+      const editBtn = actionsBar.createEl("button", {
+        cls: "umlcanvas-tile-action-btn",
+        title: `Edit interface for ${chip.name}`,
+        text: "✎",
+      });
       editBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         this.onDefineChip?.(chip);
       });
-      actionsBar.appendChild(editBtn);
     }
 
-    const delBtn = document.createElement("button");
-    delBtn.className = "umlcanvas-tile-action-btn is-danger";
-    delBtn.title = `Delete ${chip.name} from library`;
-    delBtn.textContent = "✕";
+    const delBtn = actionsBar.createEl("button", {
+      cls: "umlcanvas-tile-action-btn is-danger",
+      title: `Delete ${chip.name} from library`,
+      text: "✕",
+    });
     delBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       defaultCustomChipRegistry.unregister(chip.id);
     });
-    actionsBar.appendChild(delBtn);
-
-    tile.appendChild(actionsBar);
 
     return tile;
   }
@@ -789,8 +758,8 @@ export class PalettePanel {
     categories.forEach((catEl) => {
       const tiles = catEl.querySelectorAll<HTMLElement>(".umlcanvas-shape-tile, .umlcanvas-edge-tile");
       if (!query) {
-        catEl.style.display = "";
-        tiles.forEach((t) => (t.style.display = ""));
+        catEl.classList.remove("is-hidden");
+        tiles.forEach((t) => t.classList.remove("is-hidden"));
         const catId = catEl.getAttribute("data-category-id");
         if (catId && this.collapsedCategories.has(catId)) {
           catEl.classList.add("is-collapsed");
@@ -809,20 +778,20 @@ export class PalettePanel {
         const text = (tile.textContent || "").toLowerCase();
         const kind = (tile.getAttribute("data-shape-kind") || tile.getAttribute("data-edge-kind") || "").toLowerCase();
         if (text.includes(query) || kind.includes(query)) {
-          tile.style.display = "";
+          tile.classList.remove("is-hidden");
           matchCount++;
         } else {
-          tile.style.display = "none";
+          tile.classList.add("is-hidden");
         }
       });
 
       if (matchCount > 0) {
-        catEl.style.display = "";
+        catEl.classList.remove("is-hidden");
         catEl.classList.remove("is-collapsed");
         const chevron = catEl.querySelector(".umlcanvas-palette-category-chevron");
         if (chevron) chevron.textContent = "▼";
       } else {
-        catEl.style.display = "none";
+        catEl.classList.add("is-hidden");
       }
     });
   }
@@ -870,13 +839,13 @@ export class PalettePanel {
 
     if (this.isOpenState) {
       this.panelEl.classList.remove("is-collapsed");
-      this.toggleTabEl.style.display = "none";
+      this.toggleTabEl.classList.add("is-hidden");
       if (this.searchInput) {
-        setTimeout(() => this.searchInput?.focus(), 100);
+        window.setTimeout(() => this.searchInput?.focus(), 100);
       }
     } else {
       this.panelEl.classList.add("is-collapsed");
-      this.toggleTabEl.style.display = "flex";
+      this.toggleTabEl.classList.remove("is-hidden");
     }
 
     this.onToggleChange?.(this.isOpenState);
@@ -906,9 +875,8 @@ export class PalettePanel {
 
     this.panelEl.classList.add("is-resizing");
     this.resizeHandleEl.classList.add("is-resizing");
-    if (typeof document !== "undefined" && document.body && document.body.style) {
-      document.body.style.cursor = "ew-resize";
-      document.body.style.userSelect = "none";
+    if (typeof document !== "undefined" && document.body) {
+      document.body.classList.add("umlcanvas-is-resizing-palette");
     }
 
     this.boundOnMouseMove = (e: MouseEvent) => {
@@ -934,9 +902,8 @@ export class PalettePanel {
 
     this.panelEl.classList.remove("is-resizing");
     this.resizeHandleEl.classList.remove("is-resizing");
-    if (typeof document !== "undefined" && document.body && document.body.style) {
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
+    if (typeof document !== "undefined" && document.body) {
+      document.body.classList.remove("umlcanvas-is-resizing-palette");
     }
 
     if (typeof window !== "undefined") {
@@ -966,7 +933,7 @@ export class PalettePanel {
     const maxWidth = this.getMaxWidth();
     const clamped = Math.max(MIN_PALETTE_WIDTH, Math.min(maxWidth, width));
     this.currentWidth = clamped;
-    this.panelEl.style.width = `${clamped}px`;
+    this.panelEl.setCssStyles({ width: `${clamped}px` });
   }
 
   private getMaxWidth(): number {
@@ -978,28 +945,28 @@ export class PalettePanel {
 
   private loadSavedWidth(): number {
     try {
-      if (typeof localStorage !== "undefined" && localStorage) {
-        const saved = localStorage.getItem(STORAGE_KEY_PALETTE_WIDTH);
-        if (saved) {
-          const parsed = parseInt(saved, 10);
+      if (this.app) {
+        const saved = this.app.loadLocalStorage(STORAGE_KEY_PALETTE_WIDTH);
+        if (typeof saved === "string" || typeof saved === "number") {
+          const parsed = typeof saved === "number" ? saved : parseInt(saved, 10);
           if (!isNaN(parsed) && parsed >= MIN_PALETTE_WIDTH && parsed <= MAX_PALETTE_WIDTH) {
             return parsed;
           }
         }
       }
     } catch {
-      // Ignore localStorage errors in sandbox
+      // Ignore storage errors in sandbox
     }
     return DEFAULT_PALETTE_WIDTH;
   }
 
   private saveWidth(width: number): void {
     try {
-      if (typeof localStorage !== "undefined" && localStorage) {
-        localStorage.setItem(STORAGE_KEY_PALETTE_WIDTH, String(Math.round(width)));
+      if (this.app) {
+        this.app.saveLocalStorage(STORAGE_KEY_PALETTE_WIDTH, String(Math.round(width)));
       }
     } catch {
-      // Ignore localStorage errors in sandbox
+      // Ignore storage errors in sandbox
     }
   }
 

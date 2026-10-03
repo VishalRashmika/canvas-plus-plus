@@ -15,28 +15,20 @@ export class MinimapView {
     private readonly renderer: SvgSceneRenderer,
     parentContainer: HTMLElement
   ) {
-    const svgNS = "http://www.w3.org/2000/svg";
+    this.containerEl = parentContainer.createDiv({ cls: "umlcanvas-minimap-container" });
 
-    this.containerEl = document.createElement("div");
-    this.containerEl.setAttribute("class", "umlcanvas-minimap-container");
+    this.svgEl = this.containerEl.createSvg("svg", {
+      cls: "umlcanvas-minimap-svg",
+      attr: { preserveAspectRatio: "xMidYMid meet" },
+    });
 
-    this.svgEl = document.createElementNS(svgNS, "svg");
-    this.svgEl.setAttribute("class", "umlcanvas-minimap-svg");
-    this.svgEl.setAttribute("preserveAspectRatio", "xMidYMid meet");
+    this.contentGroup = this.svgEl.createSvg("g", {
+      cls: "umlcanvas-minimap-content",
+    });
 
-    this.contentGroup = document.createElementNS(svgNS, "g");
-    this.contentGroup.setAttribute("class", "umlcanvas-minimap-content");
-    this.svgEl.appendChild(this.contentGroup);
-
-    this.viewportIndicator = document.createElementNS(svgNS, "rect");
-    this.viewportIndicator.setAttribute(
-      "class",
-      "umlcanvas-minimap-viewport-indicator"
-    );
-    this.svgEl.appendChild(this.viewportIndicator);
-
-    this.containerEl.appendChild(this.svgEl);
-    parentContainer.appendChild(this.containerEl);
+    this.viewportIndicator = this.svgEl.createSvg("rect", {
+      cls: "umlcanvas-minimap-viewport-indicator",
+    });
 
     this.setupEvents();
     this.unsubscribeEditor = this.editor.subscribe(() => this.update());
@@ -49,7 +41,7 @@ export class MinimapView {
 
   setVisible(visible: boolean): void {
     this.isVisible = visible;
-    this.containerEl.style.display = visible ? "block" : "none";
+    this.containerEl.toggleClass("is-hidden", !visible);
     if (visible) {
       this.update();
     }
@@ -62,7 +54,6 @@ export class MinimapView {
   update(): void {
     if (!this.isVisible) return;
 
-    const svgNS = "http://www.w3.org/2000/svg";
     const diagram = this.editor.diagram;
 
     // 1. Calculate diagram bounding box
@@ -111,26 +102,30 @@ export class MinimapView {
       const from = nodeMap.get(edge.fromNodeId);
       const to = nodeMap.get(edge.toNodeId);
       if (from && to) {
-        const line = document.createElementNS(svgNS, "line");
-        line.setAttribute("x1", String(from.position.x + from.size.width / 2));
-        line.setAttribute("y1", String(from.position.y + from.size.height / 2));
-        line.setAttribute("x2", String(to.position.x + to.size.width / 2));
-        line.setAttribute("y2", String(to.position.y + to.size.height / 2));
-        line.setAttribute("class", "umlcanvas-minimap-edge");
-        this.contentGroup.appendChild(line);
+        this.contentGroup.createSvg("line", {
+          cls: "umlcanvas-minimap-edge",
+          attr: {
+            x1: String(from.position.x + from.size.width / 2),
+            y1: String(from.position.y + from.size.height / 2),
+            x2: String(to.position.x + to.size.width / 2),
+            y2: String(to.position.y + to.size.height / 2),
+          },
+        });
       }
     }
 
     for (const node of diagram.nodes) {
-      const rect = document.createElementNS(svgNS, "rect");
-      rect.setAttribute("x", String(node.position.x));
-      rect.setAttribute("y", String(node.position.y));
-      rect.setAttribute("width", String(node.size.width));
-      rect.setAttribute("height", String(node.size.height));
-      rect.setAttribute("rx", "2");
-      rect.setAttribute("ry", "2");
-      rect.setAttribute("class", "umlcanvas-minimap-node");
-      this.contentGroup.appendChild(rect);
+      this.contentGroup.createSvg("rect", {
+        cls: "umlcanvas-minimap-node",
+        attr: {
+          x: String(node.position.x),
+          y: String(node.position.y),
+          width: String(node.size.width),
+          height: String(node.size.height),
+          rx: "2",
+          ry: "2",
+        },
+      });
     }
 
     // 3. Update Camera Indicator

@@ -174,8 +174,9 @@
   cursor: default;
 }
 
-.umlcanvas-svg-container.umlcanvas-panning {
-  cursor: grabbing !important;
+.umlcanvas-svg-container.umlcanvas-panning,
+.umlcanvas-svg-container.umlcanvas-panning * {
+  cursor: grabbing;
 }
 
 .umlcanvas-svg-container.umlcanvas-space-pressed {
@@ -184,13 +185,14 @@
 
 .umlcanvas-view-container.umlcanvas-freehand-mode,
 .umlcanvas-view-container.umlcanvas-freehand-mode .umlcanvas-svg-container,
-.umlcanvas-view-container.umlcanvas-freehand-mode .umlcanvas-svg {
-  cursor: crosshair !important;
+.umlcanvas-view-container.umlcanvas-freehand-mode .umlcanvas-svg,
+.umlcanvas-view-container.umlcanvas-freehand-mode * {
+  cursor: crosshair;
 }
 
-.umlcanvas-moving,
-.umlcanvas-moving * {
-  cursor: grabbing !important;
+body .umlcanvas-moving,
+body .umlcanvas-moving * {
+  cursor: grabbing;
 }
 
 .umlcanvas-svg {
@@ -320,8 +322,10 @@
   opacity: 0.75;
 }
 
+.umlcanvas-node .umlcanvas-port-handle:hover,
+.umlcanvas-node:hover .umlcanvas-port-handle:hover,
 .umlcanvas-port-handle:hover {
-  opacity: 1 !important;
+  opacity: 1;
   r: 7;
 }
 
@@ -510,9 +514,9 @@
 
 .umlcanvas-edge-line.umlcanvas-edge-selected,
 .umlcanvas-edge.umlcanvas-edge-selected .umlcanvas-edge-line {
-  stroke: var(--interactive-accent) !important;
-  stroke-width: 3px !important;
-  filter: drop-shadow(0 0 3px var(--interactive-accent)) !important;
+  stroke: var(--interactive-accent);
+  stroke-width: 3px;
+  filter: drop-shadow(0 0 3px var(--interactive-accent));
 }
 
 .umlcanvas-arrow-head {
@@ -526,7 +530,7 @@
 .umlcanvas-edge-line.umlcanvas-edge-selected + .umlcanvas-arrow-head,
 .umlcanvas-edge-selected ~ * .umlcanvas-arrow-head,
 .umlcanvas-edge.umlcanvas-edge-selected .umlcanvas-arrow-head {
-  fill: var(--interactive-accent) !important;
+  fill: var(--interactive-accent);
 }
 
 .umlcanvas-edge-label-group {
@@ -903,6 +907,8 @@
 }
 
 .umlcanvas-obsidian-note-body {
+  width: 100%;
+  height: 100%;
   color: var(--text-normal);
   font-family: var(--font-text, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
   font-size: var(--font-text-size, 13px);
@@ -1044,6 +1050,8 @@
 
 .umlcanvas-obsidian-note-svg-fallback {
   display: none;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .umlcanvas-obsidian-note-body-line {
@@ -1207,7 +1215,7 @@
 }
 
 .umlcanvas-palette-panel.is-resizing {
-  transition: none !important;
+  transition: none;
   user-select: none;
 }
 
@@ -1658,13 +1666,17 @@
 
 /* Breadcrumbs Bar (F-062) */
 .umlcanvas-breadcrumbs {
-  display: flex;
+  display: none;
   align-items: center;
   gap: 6px;
   padding: 4px 8px;
   background-color: var(--background-secondary);
   border-bottom: 1px solid var(--background-modifier-border);
   font-size: 12px;
+}
+
+.umlcanvas-breadcrumbs.is-visible {
+  display: flex;
 }
 
 .umlcanvas-breadcrumb-item {
@@ -1922,13 +1934,13 @@
 .umlcanvas-node[data-color] .umlcanvas-activity-action-body,
 .umlcanvas-node[data-color] .umlcanvas-state-body,
 .umlcanvas-node[data-color] .umlcanvas-state-composite-body {
-  stroke: var(--canvas-color) !important;
-  fill: color-mix(in srgb, var(--canvas-color) 10%, var(--background-primary)) !important;
+  stroke: var(--canvas-color);
+  fill: color-mix(in srgb, var(--canvas-color) 10%, var(--background-primary));
 }
 
 .umlcanvas-node[data-color] .umlcanvas-actor-glyph,
 .umlcanvas-node[data-color] .umlcanvas-freehand-path {
-  stroke: var(--canvas-color) !important;
+  stroke: var(--canvas-color);
 }
 
 /* Node Selection Override: Selection always takes precedence over color */
@@ -1936,14 +1948,14 @@
 .umlcanvas-node.umlcanvas-node-selected .umlcanvas-node-body,
 .umlcanvas-node[data-color] .umlcanvas-node-body.umlcanvas-node-selected,
 .umlcanvas-node[data-color] .umlcanvas-obsidian-note-card.umlcanvas-node-selected {
-  stroke: var(--interactive-accent) !important;
-  stroke-width: 2.5px !important;
-  filter: drop-shadow(0 0 4px rgba(var(--interactive-accent-rgb, 120, 100, 255), 0.5)) !important;
+  stroke: var(--interactive-accent);
+  stroke-width: 2.5px;
+  filter: drop-shadow(0 0 4px rgba(var(--interactive-accent-rgb, 120, 100, 255), 0.5));
 }
 
 /* Edge Color Application */
 .umlcanvas-edge[data-color] .umlcanvas-edge-line {
-  stroke: var(--canvas-color) !important;
+  stroke: var(--canvas-color);
   stroke-width: 2px;
   stroke-linecap: round;
   stroke-linejoin: round;
@@ -1957,63 +1969,63 @@
 .umlcanvas-edge[data-color] .umlcanvas-arrow-head,
 .umlcanvas-edge[data-color] .umlcanvas-marker-diamond-filled,
 .umlcanvas-edge[data-color] .umlcanvas-marker-triangle-filled {
-  fill: var(--canvas-color) !important;
+  fill: var(--canvas-color);
 }
 
 .umlcanvas-edge[data-color] .umlcanvas-marker-open-arrow,
 .umlcanvas-edge[data-color] .umlcanvas-marker-diamond-hollow,
 .umlcanvas-edge[data-color] .umlcanvas-marker-triangle-hollow,
 .umlcanvas-edge[data-color] .umlcanvas-marker-timing-stop {
-  stroke: var(--canvas-color) !important;
+  stroke: var(--canvas-color);
 }
 
 /* Edge Selection Override: Selection always takes precedence over custom line color */
 .umlcanvas-edge[data-color].umlcanvas-edge-selected .umlcanvas-edge-line,
 .umlcanvas-edge[data-color] .umlcanvas-edge-line.umlcanvas-edge-selected,
 .umlcanvas-edge.umlcanvas-edge-selected .umlcanvas-edge-line {
-  stroke: var(--interactive-accent) !important;
-  stroke-width: 3px !important;
-  filter: drop-shadow(0 0 3px var(--interactive-accent)) !important;
+  stroke: var(--interactive-accent);
+  stroke-width: 3px;
+  filter: drop-shadow(0 0 3px var(--interactive-accent));
 }
 
 .umlcanvas-edge[data-color].umlcanvas-edge-selected .umlcanvas-arrow-head,
 .umlcanvas-edge[data-color].umlcanvas-edge-selected .umlcanvas-marker-diamond-filled,
 .umlcanvas-edge[data-color].umlcanvas-edge-selected .umlcanvas-marker-triangle-filled {
-  fill: var(--interactive-accent) !important;
+  fill: var(--interactive-accent);
 }
 
 .umlcanvas-edge[data-color].umlcanvas-edge-selected .umlcanvas-marker-open-arrow,
 .umlcanvas-edge[data-color].umlcanvas-edge-selected .umlcanvas-marker-diamond-hollow,
 .umlcanvas-edge[data-color].umlcanvas-edge-selected .umlcanvas-marker-triangle-hollow,
 .umlcanvas-edge[data-color].umlcanvas-edge-selected .umlcanvas-marker-timing-stop {
-  stroke: var(--interactive-accent) !important;
+  stroke: var(--interactive-accent);
 }
 
 /* Group Color Application */
 .umlcanvas-group[data-color] .umlcanvas-group-box {
-  stroke: var(--canvas-color) !important;
-  fill: color-mix(in srgb, var(--canvas-color) 7%, transparent) !important;
+  stroke: var(--canvas-color);
+  fill: color-mix(in srgb, var(--canvas-color) 7%, transparent);
 }
 
 .umlcanvas-group[data-color] .umlcanvas-group-header-bg {
-  fill: color-mix(in srgb, var(--canvas-color) 16%, transparent) !important;
+  fill: color-mix(in srgb, var(--canvas-color) 16%, transparent);
 }
 
 .umlcanvas-group[data-color] .umlcanvas-group-title {
-  fill: var(--canvas-color) !important;
+  fill: var(--canvas-color);
 }
 
 .umlcanvas-group[data-color] .umlcanvas-group-collapsed-card {
-  stroke: var(--canvas-color) !important;
+  stroke: var(--canvas-color);
 }
 
 .umlcanvas-group[data-color] .umlcanvas-group-resize-handle {
-  stroke: var(--canvas-color) !important;
+  stroke: var(--canvas-color);
 }
 
 .umlcanvas-group[data-color].is-selected .umlcanvas-group-box {
-  stroke: var(--interactive-accent) !important;
-  stroke-width: 2.5px !important;
+  stroke: var(--interactive-accent);
+  stroke-width: 2.5px;
 }
 
 /* --- Color Palette Popover --- */
@@ -2098,6 +2110,10 @@
   box-shadow: 0 0 2px rgba(0, 0, 0, 0.3);
   flex-shrink: 0;
   vertical-align: middle;
+}
+
+.umlcanvas-color-indicator.is-visible {
+  display: inline-block;
 }
 
 .umlcanvas-color-swatch.is-custom {
@@ -2515,6 +2531,7 @@
 
 /* Error Notice */
 .umlcanvas-chip-error-msg {
+  display: none;
   padding: 6px 10px;
   margin-bottom: 12px;
   background-color: rgba(235, 87, 87, 0.12);
@@ -2522,6 +2539,10 @@
   border-radius: var(--radius-s, 4px);
   color: var(--text-error, #eb5757);
   font-size: 12px;
+}
+
+.umlcanvas-chip-error-msg.is-visible {
+  display: block;
 }
 
 /* Options Box */
@@ -2595,9 +2616,10 @@
 }
 
 /* Palette: "+ Define Chip" Tile */
+.umlcanvas-shape-tile.umlcanvas-tile-add-chip,
 .umlcanvas-tile-add-chip {
-  border: 1px dashed var(--interactive-accent) !important;
-  background-color: rgba(var(--interactive-accent-rgb, 120, 100, 240), 0.05) !important;
+  border: 1px dashed var(--interactive-accent);
+  background-color: rgba(var(--interactive-accent-rgb, 120, 100, 240), 0.05);
 }
 
 .umlcanvas-add-chip-preview {
@@ -2696,8 +2718,8 @@
 [data-path$=".canvuspp"] .nav-file-tag,
 [data-path$=".canvaspp"] .nav-file-tag,
 [data-path$=".umlcanvas"] .nav-file-tag {
-  font-size: 0 !important;
-  display: inline-flex !important;
+  font-size: 0;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
 }
@@ -2733,5 +2755,13 @@
   line-height: 1;
 }
 
+/* Utility & Resizing State Classes */
+.is-hidden {
+  display: none;
+}
 
-
+body.umlcanvas-is-resizing-palette,
+body.umlcanvas-is-resizing-palette * {
+  cursor: ew-resize;
+  user-select: none;
+}

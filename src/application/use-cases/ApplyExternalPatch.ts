@@ -33,7 +33,7 @@ export class ApplyExternalPatch {
     // 1. Resolve target diagram
     let diagram: Diagram;
     if (options?.currentDiagram) {
-      diagram = JSON.parse(JSON.stringify(options.currentDiagram));
+      diagram = JSON.parse(JSON.stringify(options.currentDiagram)) as Diagram;
     } else {
       try {
         diagram = await this.repository.load(patch.targetDiagramId);

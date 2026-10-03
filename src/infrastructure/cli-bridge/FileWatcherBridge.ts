@@ -131,7 +131,7 @@ export class FileWatcherBridge implements CliBridgePort {
       return;
     }
 
-    const patch = parsed as DiagramPatch;
+    const patch = parsed;
     this.pendingPatches.set(patch, filePath);
 
     if (this.patchHandler) {

@@ -133,7 +133,6 @@ export class ChipDefinitionModal extends Modal {
 
     // 6. Error Message Container
     this.errorMsgEl = contentEl.createDiv({ cls: "umlcanvas-chip-error-msg" });
-    this.errorMsgEl.style.display = "none";
 
     // 7. Checkboxes / Options
     const optionsEl = contentEl.createDiv({ cls: "umlcanvas-chip-options-box" });
@@ -176,7 +175,7 @@ export class ChipDefinitionModal extends Modal {
     });
 
     // Focus input
-    setTimeout(() => nameInput.focus(), 50);
+    window.setTimeout(() => nameInput.focus(), 50);
   }
 
   onClose(): void {
@@ -402,13 +401,13 @@ export class ChipDefinitionModal extends Modal {
   private showError(msg: string): void {
     if (this.errorMsgEl) {
       this.errorMsgEl.textContent = msg;
-      this.errorMsgEl.style.display = "block";
+      this.errorMsgEl.addClass("is-visible");
     }
   }
 
   private clearError(): void {
     if (this.errorMsgEl) {
-      this.errorMsgEl.style.display = "none";
+      this.errorMsgEl.removeClass("is-visible");
       this.errorMsgEl.textContent = "";
     }
   }

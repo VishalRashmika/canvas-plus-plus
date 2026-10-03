@@ -918,16 +918,9 @@ export class ShapeRegistry {
         foreign.setAttribute("width", String(w));
         foreign.setAttribute("height", String(Math.max(10, h - headerH)));
         foreign.setAttribute("class", "umlcanvas-obsidian-note-foreign");
-
-        const bodyDiv = document.createElement("div");
-        bodyDiv.setAttribute(
-          "class",
-          "umlcanvas-obsidian-note-body markdown-rendered markdown-preview-view umlcanvas-scrollable"
-        );
-        bodyDiv.setAttribute(
-          "style",
-          "width: 100%; height: 100%; box-sizing: border-box; overflow-y: auto; overflow-x: hidden; padding: 10px 14px;"
-        );
+        const bodyDiv = createDiv({
+          cls: "umlcanvas-obsidian-note-body markdown-rendered markdown-preview-view umlcanvas-scrollable",
+        });
 
         const fullMarkdown =
           (node.customData?.content as string) ||
@@ -936,10 +929,10 @@ export class ShapeRegistry {
         if (fullMarkdown) {
           renderMarkdownFallback(fullMarkdown, bodyDiv);
         } else {
-          const placeholder = document.createElement("div");
-          placeholder.setAttribute("class", "umlcanvas-obsidian-note-body-placeholder");
-          placeholder.textContent = "Vault Note (connect to diagram)";
-          bodyDiv.appendChild(placeholder);
+          bodyDiv.createDiv({
+            cls: "umlcanvas-obsidian-note-body-placeholder",
+            text: "Vault Note (connect to diagram)",
+          });
         }
         foreign.appendChild(bodyDiv);
         group.appendChild(foreign);
@@ -947,7 +940,6 @@ export class ShapeRegistry {
         // 8. SVG Fallback elements (for headless Jest tests and SVG-only exporters)
         const fallbackGroup = document.createElementNS(svgNS, "g");
         fallbackGroup.setAttribute("class", "umlcanvas-obsidian-note-svg-fallback");
-        fallbackGroup.setAttribute("style", "display: none; opacity: 0; pointer-events: none;");
 
         const snippet =
           (node.customData?.snippet as string) ||
@@ -1526,7 +1518,7 @@ export class ShapeRegistry {
         const headerH = node.size.height;
         const lifelineLength =
           typeof node.metadata?.lifelineLength === "number"
-            ? (node.metadata.lifelineLength as number)
+            ? node.metadata.lifelineLength
             : 450;
 
         // Vertical dashed lifeline stem
@@ -2972,9 +2964,7 @@ function appendInlineTokens(text: string, parent: HTMLElement): void {
   while ((match = pattern.exec(text)) !== null) {
     matchedAny = true;
     if (match.index > lastIndex) {
-      const span = document.createElement("span");
-      span.textContent = text.substring(lastIndex, match.index);
-      parent.appendChild(span);
+      parent.createSpan({ text: text.substring(lastIndex, match.index) });
     }
 
     if (match[1]) {
@@ -2982,31 +2972,25 @@ function appendInlineTokens(text: string, parent: HTMLElement): void {
       const parts = inner.split("|");
       const target = parts[0];
       const alias = parts[1] || target;
-      const a = document.createElement("a");
-      a.className = "internal-link";
-      a.setAttribute("data-href", target);
-      a.textContent = alias;
-      parent.appendChild(a);
+      parent.createEl("a", {
+        cls: "internal-link",
+        attr: { "data-href": target },
+        text: alias,
+      });
     } else if (match[3]) {
       const linkText = match[4];
       const url = match[5];
-      const a = document.createElement("a");
-      a.className = "external-link";
-      a.setAttribute("href", url);
-      a.textContent = linkText;
-      parent.appendChild(a);
+      parent.createEl("a", {
+        cls: "external-link",
+        attr: { href: url },
+        text: linkText,
+      });
     } else if (match[6]) {
-      const code = document.createElement("code");
-      code.textContent = match[7];
-      parent.appendChild(code);
+      parent.createEl("code", { text: match[7] });
     } else if (match[8]) {
-      const strong = document.createElement("strong");
-      strong.textContent = match[8];
-      parent.appendChild(strong);
+      parent.createEl("strong", { text: match[8] });
     } else if (match[9]) {
-      const em = document.createElement("em");
-      em.textContent = match[9];
-      parent.appendChild(em);
+      parent.createEl("em", { text: match[9] });
     }
 
     lastIndex = pattern.lastIndex;
@@ -3015,9 +2999,7 @@ function appendInlineTokens(text: string, parent: HTMLElement): void {
   if (!matchedAny) {
     parent.textContent = text;
   } else if (lastIndex < text.length) {
-    const span = document.createElement("span");
-    span.textContent = text.substring(lastIndex);
-    parent.appendChild(span);
+    parent.createSpan({ text: text.substring(lastIndex) });
   }
 }
 
@@ -3035,11 +3017,8 @@ function renderMarkdownFallback(markdown: string, container: HTMLElement): void 
 
     if (line.trim().startsWith("```")) {
       if (inCodeBlock) {
-        const pre = document.createElement("pre");
-        const code = document.createElement("code");
-        code.textContent = codeBuffer.join("\n");
-        pre.appendChild(code);
-        container.appendChild(pre);
+        const pre = container.createEl("pre");
+        pre.createEl("code", { text: codeBuffer.join("\n") });
         codeBuffer = [];
         inCodeBlock = false;
       } else {
@@ -3056,25 +3035,23 @@ function renderMarkdownFallback(markdown: string, container: HTMLElement): void 
     const listMatch = line.match(/^(\s*)[-*+]\s+(.*)$/);
     if (listMatch) {
       if (!currentList) {
-        currentList = document.createElement("ul");
-        container.appendChild(currentList);
+        currentList = container.createEl("ul");
       }
-      const li = document.createElement("li");
+      const li = currentList.createEl("li");
       const taskMatch = listMatch[2].match(/^\[([ xX])\]\s+(.*)$/);
       if (taskMatch) {
         li.className = "task-list-item" + (taskMatch[1].toLowerCase() === "x" ? " is-checked" : "");
-        const checkbox = document.createElement("input");
-        checkbox.setAttribute("type", "checkbox");
-        checkbox.setAttribute("disabled", "true");
+        const checkbox = li.createEl("input", {
+          type: "checkbox",
+          attr: { disabled: "true" },
+        });
         if (taskMatch[1].toLowerCase() === "x") {
-          checkbox.setAttribute("checked", "true");
+          checkbox.checked = true;
         }
-        li.appendChild(checkbox);
         appendInlineTokens(taskMatch[2], li);
       } else {
         appendInlineTokens(listMatch[2], li);
       }
-      currentList.appendChild(li);
       continue;
     } else {
       currentList = null;
@@ -3087,36 +3064,30 @@ function renderMarkdownFallback(markdown: string, container: HTMLElement): void 
     const headingMatch = line.match(/^(#{1,6})\s+(.*)$/);
     if (headingMatch) {
       const level = headingMatch[1].length;
-      const h = document.createElement(`h${level}`);
-      h.className = `umlcanvas-note-h${level}`;
+      const h = container.createEl(`h${level}` as keyof HTMLElementTagNameMap, {
+        cls: `umlcanvas-note-h${level}`,
+      });
       appendInlineTokens(headingMatch[2], h);
-      container.appendChild(h);
       continue;
     }
 
     if (line.startsWith(">")) {
-      const bq = document.createElement("blockquote");
+      const bq = container.createEl("blockquote");
       appendInlineTokens(line.replace(/^>\s*/, ""), bq);
-      container.appendChild(bq);
       continue;
     }
 
     if (/^(\*{3,}|-{3,}|_{3,})$/.test(line.trim())) {
-      const hr = document.createElement("hr");
-      container.appendChild(hr);
+      container.createEl("hr");
       continue;
     }
 
-    const p = document.createElement("p");
+    const p = container.createEl("p");
     appendInlineTokens(line, p);
-    container.appendChild(p);
   }
 
   if (inCodeBlock && codeBuffer.length > 0) {
-    const pre = document.createElement("pre");
-    const code = document.createElement("code");
-    code.textContent = codeBuffer.join("\n");
-    pre.appendChild(code);
-    container.appendChild(pre);
+    const pre = container.createEl("pre");
+    pre.createEl("code", { text: codeBuffer.join("\n") });
   }
 }

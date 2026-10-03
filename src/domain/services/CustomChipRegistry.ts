@@ -142,15 +142,34 @@ export class CustomChipRegistry {
 
   private tryLoadFromStorage(): void {
     try {
-      if (typeof window !== "undefined" && window.localStorage) {
-        const stored = window.localStorage.getItem(STORAGE_KEY);
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (Array.isArray(parsed)) {
-            for (const item of parsed) {
-              if (item && item.id && item.name && Array.isArray(item.ports)) {
-                this.chips.set(item.id, item);
-              }
+      const holder =
+        typeof window !== "undefined"
+          ? (window as unknown as {
+              app?: {
+                loadLocalStorage?(key: string): string | null;
+                saveLocalStorage?(key: string, value: string): void;
+              };
+            })
+          : undefined;
+      const stored = holder?.app?.loadLocalStorage
+        ? holder.app.loadLocalStorage(STORAGE_KEY)
+        : null;
+      if (stored) {
+        const parsed: unknown = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          for (const item of parsed) {
+            if (
+              item &&
+              typeof item === "object" &&
+              "id" in item &&
+              typeof (item as Record<string, unknown>).id === "string" &&
+              "name" in item &&
+              typeof (item as Record<string, unknown>).name === "string" &&
+              "ports" in item &&
+              Array.isArray((item as Record<string, unknown>).ports)
+            ) {
+              const chipDef = item as ChipInterfaceDefinition;
+              this.chips.set(chipDef.id, chipDef);
             }
           }
         }
@@ -162,9 +181,17 @@ export class CustomChipRegistry {
 
   private trySaveToStorage(): void {
     try {
-      if (typeof window !== "undefined" && window.localStorage) {
+      const holder =
+        typeof window !== "undefined"
+          ? (window as unknown as {
+              app?: {
+                saveLocalStorage?(key: string, value: string): void;
+              };
+            })
+          : undefined;
+      if (holder?.app?.saveLocalStorage) {
         const items = this.getAll();
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+        holder.app.saveLocalStorage(STORAGE_KEY, JSON.stringify(items));
       }
     } catch {
       // Storage unavailable or quota exceeded

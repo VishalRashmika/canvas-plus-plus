@@ -1267,8 +1267,8 @@ export class DiagramEditor {
       version: 1,
       format: "canvas-plus-plus",
       diagramType: this.diagram.diagramType,
-      nodes: JSON.parse(JSON.stringify(selectedNodes)),
-      edges: JSON.parse(JSON.stringify(selectedEdges)),
+      nodes: JSON.parse(JSON.stringify(selectedNodes)) as DiagramNode[],
+      edges: JSON.parse(JSON.stringify(selectedEdges)) as DiagramEdge[],
     };
 
     DiagramEditor.globalClipboard = payload;
@@ -1321,7 +1321,7 @@ export class DiagramEditor {
         stereotype: node.stereotype,
         taggedValues: node.taggedValues ? { ...node.taggedValues } : undefined,
         compartments: node.compartments
-          ? JSON.parse(JSON.stringify(node.compartments))
+          ? (JSON.parse(JSON.stringify(node.compartments)) as Compartment[])
           : [],
         ports: clonedPorts,
         labels: clonedLabels,

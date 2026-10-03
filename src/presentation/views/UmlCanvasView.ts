@@ -1,4 +1,4 @@
-import { TextFileView, WorkspaceLeaf, Menu, TFile, MarkdownRenderer } from "obsidian";
+import { TextFileView, WorkspaceLeaf, Menu, TFile, MarkdownRenderer, Platform, App } from "obsidian";
 import type CanvasPlusPlusPlugin from "../../main";
 import { VIEW_TYPE_UML_CANVAS } from "../../main";
 import { Diagram, createDiagram } from "../../domain/entities/Diagram";
@@ -21,6 +21,13 @@ import { Stroke } from "../../domain/services/ShapeRecognizer";
 import { UmlCanvasSettings } from "../../infrastructure/obsidian/PluginSettings";
 import { CANVAS_COLOR_PRESETS } from "../../domain/value-objects/CanvasColor";
 
+interface AppWithDragManager extends App {
+  dragManager?: {
+    draggable?: { file?: unknown };
+    dragData?: { file?: unknown };
+  };
+}
+
 export class UmlCanvasView extends TextFileView {
   private editor: DiagramEditor | null = null;
   private renderer: SvgSceneRenderer | null = null;
@@ -31,13 +38,13 @@ export class UmlCanvasView extends TextFileView {
   private serializer: JsonCanvasSerializer = new JsonCanvasSerializer();
   private rootEl: HTMLElement | null = null;
   private escapeHatchEl: HTMLElement | null = null;
-  private escapeHatchTimer: ReturnType<typeof setTimeout> | null = null;
+  private escapeHatchTimer: number | null = null;
 
   constructor(leaf: WorkspaceLeaf, private readonly plugin: CanvasPlusPlusPlugin) {
     super(leaf);
   }
 
-  async onload(): Promise<void> {
+  onload(): void {
     super.onload();
     this.registerEvent(
       this.app.vault.on("modify", (file) => {
@@ -130,8 +137,8 @@ export class UmlCanvasView extends TextFileView {
       this.escapeHatchEl.remove();
       this.escapeHatchEl = null;
     }
-    if (this.escapeHatchTimer) {
-      clearTimeout(this.escapeHatchTimer);
+    if (this.escapeHatchTimer !== null) {
+      window.clearTimeout(this.escapeHatchTimer);
       this.escapeHatchTimer = null;
     }
     if (this.rootEl) {
@@ -145,13 +152,8 @@ export class UmlCanvasView extends TextFileView {
   private initializeView(diagram: Diagram): void {
     this.contentEl.empty();
 
-    this.rootEl = document.createElement("div");
-    this.rootEl.className = "umlcanvas-view-container";
-    this.contentEl.appendChild(this.rootEl);
-
-    const svgContainer = document.createElement("div");
-    svgContainer.className = "umlcanvas-svg-container";
-    this.rootEl.appendChild(svgContainer);
+    this.rootEl = this.contentEl.createDiv({ cls: "umlcanvas-view-container" });
+    const svgContainer = this.rootEl.createDiv({ cls: "umlcanvas-svg-container" });
 
     this.editor = new DiagramEditor(diagram);
 
@@ -198,13 +200,7 @@ export class UmlCanvasView extends TextFileView {
       },
       onRenderMarkdown: async (markdown: string, el: HTMLElement, sourcePath: string) => {
         try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          if (typeof (el as any).empty === "function") {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            (el as any).empty();
-          } else {
-            el.innerHTML = "";
-          }
+          el.textContent = "";
           await MarkdownRenderer.render(this.app, markdown, el, sourcePath, this);
         } catch (e) {
           console.error("Failed to render note markdown:", e);
@@ -215,8 +211,8 @@ export class UmlCanvasView extends TextFileView {
       },
       onExternalDrop: async (e: DragEvent, canvasPoint: Point) => {
         // 1. Check Obsidian dragManager
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const dragManager = (this.app as any).dragManager;
+        const appWithDrag = this.app as unknown as AppWithDragManager;
+        const dragManager = appWithDrag.dragManager;
         let file: TFile | null = null;
         if (dragManager?.draggable?.file instanceof TFile) {
           file = dragManager.draggable.file;
@@ -234,8 +230,15 @@ export class UmlCanvasView extends TextFileView {
             if (dest instanceof TFile) {
               file = dest;
             } else {
-              const all = this.app.vault.getMarkdownFiles();
-              file = all.find((f) => f.path === linkPath || f.basename === linkPath || f.name === linkPath) ?? null;
+              const byPath = this.app.vault.getAbstractFileByPath(linkPath);
+              if (byPath instanceof TFile) {
+                file = byPath;
+              } else {
+                const byPathMd = this.app.vault.getAbstractFileByPath(linkPath + ".md");
+                if (byPathMd instanceof TFile) {
+                  file = byPathMd;
+                }
+              }
             }
           }
         }
@@ -262,7 +265,8 @@ export class UmlCanvasView extends TextFileView {
       },
       (existingChip) => {
         this.openChipDefinitionModal({ initialDefinition: existingChip });
-      }
+      },
+      this.app
     );
 
     // Setup Toolbar
@@ -289,7 +293,7 @@ export class UmlCanvasView extends TextFileView {
 
     // Setup Copy / Paste (F-012) and Minimap (F-011) shortcuts
     this.rootEl.addEventListener("keydown", (e: KeyboardEvent) => {
-      const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
+      const isMac = Platform.isMacOS;
       const mod = isMac ? e.metaKey : e.ctrlKey;
 
       if (mod && e.key.toLowerCase() === "c") {
@@ -316,34 +320,33 @@ export class UmlCanvasView extends TextFileView {
       this.escapeHatchEl.remove();
       this.escapeHatchEl = null;
     }
-    if (this.escapeHatchTimer) {
-      clearTimeout(this.escapeHatchTimer);
+    if (this.escapeHatchTimer !== null) {
+      window.clearTimeout(this.escapeHatchTimer);
       this.escapeHatchTimer = null;
     }
 
     if (!this.rootEl) return;
 
-    const toast = document.createElement("div");
-    toast.className = "umlcanvas-escape-hatch-toast";
-    toast.innerHTML = `<span>Shape recognized</span><button class="umlcanvas-escape-hatch-btn">Keep as freehand</button>`;
+    const toast = this.rootEl.createDiv({ cls: "umlcanvas-escape-hatch-toast" });
+    toast.createSpan({ text: "Shape recognized" });
+    const btn = toast.createEl("button", {
+      cls: "umlcanvas-escape-hatch-btn",
+      text: "Keep as freehand",
+    });
 
-    const btn = toast.querySelector("button");
-    if (btn) {
-      btn.onclick = (e) => {
-        e.stopPropagation();
-        if (this.editor) {
-          this.editor.undo();
-          this.editor.keepAsFreehand(stroke);
-        }
-        toast.remove();
-        this.escapeHatchEl = null;
-      };
-    }
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      if (this.editor) {
+        this.editor.undo();
+        this.editor.keepAsFreehand(stroke);
+      }
+      toast.remove();
+      this.escapeHatchEl = null;
+    };
 
-    this.rootEl.appendChild(toast);
     this.escapeHatchEl = toast;
 
-    this.escapeHatchTimer = setTimeout(() => {
+    this.escapeHatchTimer = window.setTimeout(() => {
       if (this.escapeHatchEl === toast) {
         toast.remove();
         this.escapeHatchEl = null;

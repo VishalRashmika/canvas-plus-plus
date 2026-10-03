@@ -232,7 +232,7 @@ export class SvgSceneRenderer {
     this.gridRectEl.setAttribute("height", "100%");
     this.gridRectEl.setAttribute("fill", "url(#umlcanvas-grid-pattern)");
     if (!this.showGrid) {
-      this.gridRectEl.style.display = "none";
+      this.gridRectEl.classList.add("is-hidden");
     }
     this.svgEl.appendChild(this.gridRectEl);
 
@@ -411,7 +411,7 @@ export class SvgSceneRenderer {
 
   setGridVisible(visible: boolean): void {
     this.showGrid = visible;
-    this.gridRectEl.style.display = visible ? "block" : "none";
+    this.gridRectEl.classList.toggle("is-hidden", !visible);
   }
 
   get isGridVisible(): boolean {
@@ -480,7 +480,7 @@ export class SvgSceneRenderer {
 
   private createDefs(): void {
     const svgNS = "http://www.w3.org/2000/svg";
-    this.defsEl = document.createElementNS(svgNS, "defs") as SVGDefsElement;
+    this.defsEl = document.createElementNS(svgNS, "defs");
     this.markerTemplates.clear();
     this.createdMarkerIds.clear();
 
@@ -763,7 +763,7 @@ export class SvgSceneRenderer {
 
   private renderGroups(): void {
     const svgNS = "http://www.w3.org/2000/svg";
-    this.groupsLayerEl.innerHTML = "";
+    this.groupsLayerEl.textContent = "";
 
     const visibleRect = this.isVirtualizationActive()
       ? this.getVisibleCanvasRect()
@@ -805,7 +805,7 @@ export class SvgSceneRenderer {
         groupEl.setAttribute("data-color", group.color);
         const resolvedColor = resolveCanvasColor(group.color);
         if (resolvedColor) {
-          groupEl.style.setProperty("--canvas-color", resolvedColor);
+          groupEl.setCssProps({ "--canvas-color": resolvedColor });
         }
         if (isCanvasColorPreset(group.color)) {
           groupEl.classList.add(`is-color-${group.color}`);
@@ -921,7 +921,7 @@ export class SvgSceneRenderer {
 
   private renderEdges(): void {
     const svgNS = "http://www.w3.org/2000/svg";
-    this.edgesLayerEl.innerHTML = "";
+    this.edgesLayerEl.textContent = "";
 
     const visibleNodes = this.editor.diagram.nodes.filter((n) =>
       this.editor.isNodeVisible(n.id)
@@ -1039,10 +1039,8 @@ export class SvgSceneRenderer {
         edgeGroup.setAttribute("data-color", edge.style.color);
         const resolvedColor = resolveCanvasColor(edge.style.color);
         if (resolvedColor) {
-          edgeGroup.style.setProperty("--canvas-color", resolvedColor);
+          edgeGroup.setCssProps({ "--canvas-color": resolvedColor, color: resolvedColor });
           path.setAttribute("stroke", resolvedColor);
-          path.style.stroke = resolvedColor;
-          edgeGroup.style.setProperty("color", resolvedColor);
         }
         if (isCanvasColorPreset(edge.style.color)) {
           edgeGroup.classList.add(`is-color-${edge.style.color}`);
@@ -1051,10 +1049,6 @@ export class SvgSceneRenderer {
         }
       } else if (edge.style?.strokeColor) {
         path.setAttribute("stroke", edge.style.strokeColor);
-        path.style.stroke = edge.style.strokeColor;
-      }
-      if (isSelected) {
-        path.style.stroke = "var(--interactive-accent)";
       }
       if (edge.style?.strokeWidth || styleDef.strokeWidth) {
         path.setAttribute(
@@ -1152,7 +1146,7 @@ export class SvgSceneRenderer {
 
   private renderNodes(): void {
     const svgNS = "http://www.w3.org/2000/svg";
-    this.nodesLayerEl.innerHTML = "";
+    this.nodesLayerEl.textContent = "";
 
     const visibleRect = this.isVirtualizationActive()
       ? this.getVisibleCanvasRect()
@@ -1185,7 +1179,7 @@ export class SvgSceneRenderer {
         nodeGroup.setAttribute("data-color", node.style.color);
         const resolvedColor = resolveCanvasColor(node.style.color);
         if (resolvedColor) {
-          nodeGroup.style.setProperty("--canvas-color", resolvedColor);
+          nodeGroup.setCssProps({ "--canvas-color": resolvedColor });
         }
         if (isCanvasColorPreset(node.style.color)) {
           nodeGroup.classList.add(`is-color-${node.style.color}`);
@@ -1194,7 +1188,7 @@ export class SvgSceneRenderer {
         }
       } else if (node.style?.strokeColor) {
         nodeGroup.setAttribute("data-color", node.style.strokeColor);
-        nodeGroup.style.setProperty("--canvas-color", node.style.strokeColor);
+        nodeGroup.setCssProps({ "--canvas-color": node.style.strokeColor });
         nodeGroup.classList.add("has-custom-color");
       }
 
@@ -1214,9 +1208,9 @@ export class SvgSceneRenderer {
 
       // Render markdown for obsidian note embeds
       if (node.kind === "obsidian.note" || node.metadata?.filePath) {
-        const bodyEl = renderedShape.querySelector(
+        const bodyEl = renderedShape.querySelector<HTMLElement>(
           ".umlcanvas-obsidian-note-body"
-        ) as HTMLElement | null;
+        );
         if (bodyEl && this.onRenderMarkdown) {
           const filePath =
             (node.metadata?.filePath as string) ||
@@ -1279,7 +1273,7 @@ export class SvgSceneRenderer {
 
   private renderInteractions(): void {
     const svgNS = "http://www.w3.org/2000/svg";
-    this.interactionLayerEl.innerHTML = "";
+    this.interactionLayerEl.textContent = "";
 
     // Active Alignment Guides (F-009)
     if (this.dragMode.type === "move" && this.dragMode.activeGuides) {
@@ -1826,11 +1820,11 @@ export class SvgSceneRenderer {
         points: [initialPoint],
       };
 
-      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-      path.setAttribute("d", `M ${canvasPoint.x},${canvasPoint.y}`);
-      path.setAttribute("class", "umlcanvas-freehand-stroke");
+      const path = this.viewportEl.createSvg("path", {
+        cls: "umlcanvas-freehand-stroke",
+        attr: { d: `M ${canvasPoint.x},${canvasPoint.y}` },
+      });
       this.freehandPathEl = path;
-      this.viewportEl.appendChild(path);
 
       this.dragMode = { type: "freehand" };
       return;
@@ -2463,14 +2457,17 @@ export class SvgSceneRenderer {
     const screenPos = canvasToScreen(node.position, this.transform);
     const screenWidth = node.size.width * this.transform.zoom;
 
-    const input = document.createElement("input");
-    input.type = "text";
-    input.value = node.labels[0]?.text ?? "";
-    input.className = "umlcanvas-inline-editor";
-    input.style.left = `${screenPos.x}px`;
-    input.style.top = `${screenPos.y + 6 * this.transform.zoom}px`;
-    input.style.width = `${screenWidth}px`;
-    input.setAttribute("data-node-id", node.id);
+    const input = this.container.createEl("input", {
+      type: "text",
+      value: node.labels[0]?.text ?? "",
+      cls: "umlcanvas-inline-editor",
+      attr: { "data-node-id": node.id },
+    });
+    input.setCssStyles({
+      left: `${screenPos.x}px`,
+      top: `${screenPos.y + 6 * this.transform.zoom}px`,
+      width: `${screenWidth}px`,
+    });
 
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
@@ -2486,7 +2483,6 @@ export class SvgSceneRenderer {
       this.commitInlineEditor();
     });
 
-    this.container.appendChild(input);
     input.focus();
     if (typeof input.select === "function") {
       input.select();
@@ -2557,17 +2553,19 @@ export class SvgSceneRenderer {
     const centerCanvas = atPoint ?? this.getEdgeCenter(edge);
     const screenPos = canvasToScreen(centerCanvas, this.transform);
 
-    const input = document.createElement("input");
-    input.type = "text";
-    input.value = edge.labels && edge.labels.length > 0 ? edge.labels[0].text : "";
-    input.placeholder = "Line label...";
-    input.className = "umlcanvas-inline-editor umlcanvas-edge-inline-editor";
-
     const width = Math.max(120, 140 * this.transform.zoom);
-    input.style.left = `${screenPos.x - width / 2}px`;
-    input.style.top = `${screenPos.y - 14 * this.transform.zoom}px`;
-    input.style.width = `${width}px`;
-    input.setAttribute("data-edge-id", edge.id);
+    const input = this.container.createEl("input", {
+      type: "text",
+      value: edge.labels && edge.labels.length > 0 ? edge.labels[0].text : "",
+      placeholder: "Line label...",
+      cls: "umlcanvas-inline-editor umlcanvas-edge-inline-editor",
+      attr: { "data-edge-id": edge.id },
+    });
+    input.setCssStyles({
+      left: `${screenPos.x - width / 2}px`,
+      top: `${screenPos.y - 14 * this.transform.zoom}px`,
+      width: `${width}px`,
+    });
 
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
@@ -2583,7 +2581,6 @@ export class SvgSceneRenderer {
       this.commitInlineEditor();
     });
 
-    this.container.appendChild(input);
     input.focus();
     if (typeof input.select === "function") {
       input.select();
@@ -2600,17 +2597,19 @@ export class SvgSceneRenderer {
     const canvasPos = atPoint ?? { x: bounds.position.x + 24, y: bounds.position.y + 4 };
     const screenPos = canvasToScreen(canvasPos, this.transform);
 
-    const input = document.createElement("input");
-    input.type = "text";
-    input.value = group.name;
-    input.placeholder = "Group title...";
-    input.className = "umlcanvas-inline-editor umlcanvas-group-inline-editor";
-
     const width = Math.max(120, Math.min(240, (bounds.size.width - 40) * this.transform.zoom));
-    input.style.left = `${screenPos.x}px`;
-    input.style.top = `${screenPos.y}px`;
-    input.style.width = `${width}px`;
-    input.setAttribute("data-group-id", group.id);
+    const input = this.container.createEl("input", {
+      type: "text",
+      value: group.name,
+      placeholder: "Group title...",
+      cls: "umlcanvas-inline-editor umlcanvas-group-inline-editor",
+      attr: { "data-group-id": group.id },
+    });
+    input.setCssStyles({
+      left: `${screenPos.x}px`,
+      top: `${screenPos.y}px`,
+      width: `${width}px`,
+    });
 
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
@@ -2626,7 +2625,6 @@ export class SvgSceneRenderer {
       this.commitInlineEditor();
     });
 
-    this.container.appendChild(input);
     input.focus();
     if (typeof input.select === "function") {
       input.select();

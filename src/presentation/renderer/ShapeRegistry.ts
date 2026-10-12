@@ -8,7 +8,9 @@ import {
   getEllipsePerimeterIntersection,
   getDiamondPerimeterIntersection,
   getCirclePerimeterIntersection,
+  getTrianglePerimeterIntersection,
 } from "./ConnectorGeometry";
+import { estimateMarkdownContentHeight } from "../../domain/services/TextMeasurement";
 
 export interface RenderContext {
   isSelected: boolean;
@@ -58,6 +60,8 @@ export class ShapeRegistry {
     this.register(this.createUmlUseCaseShape());
     this.register(this.createUmlSystemBoundaryShape());
     this.register(this.createGenericNoteShape());
+    this.register(this.createGenericStickyNoteShape());
+    this.register(this.createGenericImageShape());
     this.register(this.createObsidianNoteShape());
 
     // --- Phase 3 Behavioral Shapes ---
@@ -137,6 +141,12 @@ export class ShapeRegistry {
 
     // Freehand Stroke (F-073)
     this.register(this.createGenericFreehandShape());
+
+    // Common Shapes (General-purpose)
+    this.register(this.createGenericCircleShape());
+    this.register(this.createGenericEllipseShape());
+    this.register(this.createGenericTriangleShape());
+    this.register(this.createDiamondShape("generic.diamond", "Diamond"));
   }
 
   register(shape: ShapeDefinition): void {
@@ -776,6 +786,250 @@ export class ShapeRegistry {
     };
   }
 
+  private createGenericStickyNoteShape(): ShapeDefinition {
+    return {
+      kind: "generic.stickyNote",
+      displayName: "Sticky Note",
+      defaultSize: { width: 180, height: 140 },
+      getPorts(node: DiagramNode): Port[] {
+        if (node.ports && node.ports.length > 0) return node.ports;
+        const sides: Side[] = ["top", "right", "bottom", "left"];
+        return sides.map((side) => ({
+          id: `${node.id}-port-${side}`,
+          ownerNodeId: node.id,
+          name: side,
+          side,
+          offset: 0.5,
+          direction: "inout",
+        }));
+      },
+      getBoundaryPoint(node: DiagramNode, targetPoint: Point): Point {
+        return getRectPerimeterIntersection(
+          { position: node.position, size: node.size },
+          targetPoint
+        );
+      },
+      renderSvg(node: DiagramNode, context: RenderContext): SVGElement {
+        const svgNS = "http://www.w3.org/2000/svg";
+        const group = document.createElementNS(svgNS, "g");
+        group.setAttribute("class", "umlcanvas-shape-sticky");
+
+        const w = node.size.width;
+        const h = node.size.height;
+        const stripH = 22;
+
+        // 1. Sticky note paper body rect
+        const rect = document.createElementNS(svgNS, "rect");
+        rect.setAttribute("x", "0");
+        rect.setAttribute("y", "0");
+        rect.setAttribute("width", String(w));
+        rect.setAttribute("height", String(h));
+        rect.setAttribute("rx", "4");
+        rect.setAttribute("ry", "4");
+        rect.setAttribute(
+          "class",
+          context.isSelected
+            ? "umlcanvas-sticky-body umlcanvas-node-selected"
+            : "umlcanvas-sticky-body"
+        );
+        if (node.style?.fillColor) {
+          rect.setAttribute("fill", node.style.fillColor);
+        }
+        if (node.style?.strokeColor) {
+          rect.setAttribute("stroke", node.style.strokeColor);
+        }
+        group.appendChild(rect);
+
+        // 2. Adhesive strip along top edge
+        const strip = document.createElementNS(svgNS, "path");
+        strip.setAttribute(
+          "d",
+          `M 0 4 A 4 4 0 0 1 4 0 L ${w - 4} 0 A 4 4 0 0 1 ${w} 4 L ${w} ${stripH} L 0 ${stripH} Z`
+        );
+        strip.setAttribute("class", "umlcanvas-sticky-strip");
+        group.appendChild(strip);
+
+        // 3. Multiline text pad lines
+        const textContent = node.labels[0]?.text ?? "";
+        if (!textContent) {
+          const placeholder = document.createElementNS(svgNS, "text");
+          placeholder.setAttribute("x", "12");
+          placeholder.setAttribute("y", "42");
+          placeholder.setAttribute("class", "umlcanvas-sticky-placeholder");
+          placeholder.textContent = "Type a note...";
+          group.appendChild(placeholder);
+        } else {
+          const lines = textContent.split("\n");
+          let lineY = 40;
+          const maxLineY = h - 8;
+          for (let i = 0; i < lines.length; i++) {
+            if (lineY > maxLineY) break;
+            const textEl = document.createElementNS(svgNS, "text");
+            textEl.setAttribute("x", "12");
+            textEl.setAttribute("y", String(lineY));
+            textEl.setAttribute("class", "umlcanvas-sticky-text");
+            textEl.textContent = lines[i] || " ";
+            group.appendChild(textEl);
+            lineY += 18;
+          }
+        }
+
+        return group;
+      },
+    };
+  }
+
+  private createGenericImageShape(): ShapeDefinition {
+    return {
+      kind: "generic.image",
+      displayName: "Photo Frame Image",
+      defaultSize: { width: 220, height: 260 },
+      getPorts(node: DiagramNode): Port[] {
+        if (node.ports && node.ports.length > 0) return node.ports;
+        const sides: Side[] = ["top", "right", "bottom", "left"];
+        return sides.map((side) => ({
+          id: `${node.id}-port-${side}`,
+          ownerNodeId: node.id,
+          name: side,
+          side,
+          offset: 0.5,
+          direction: "inout",
+        }));
+      },
+      getBoundaryPoint(node: DiagramNode, targetPoint: Point): Point {
+        return getRectPerimeterIntersection(
+          { position: node.position, size: node.size },
+          targetPoint
+        );
+      },
+      renderSvg(node: DiagramNode, context: RenderContext): SVGElement {
+        const svgNS = "http://www.w3.org/2000/svg";
+        const group = document.createElementNS(svgNS, "g");
+        group.setAttribute("class", "umlcanvas-shape-image");
+
+        const w = node.size.width;
+        const h = node.size.height;
+        const pad = 10;
+        const titleAreaH = 38;
+        const imgW = Math.max(20, w - pad * 2);
+        const imgH = Math.max(20, h - pad * 2 - titleAreaH);
+
+        // 1. Photo frame outer card / box (Polaroid / photo-frame style)
+        const frameRect = document.createElementNS(svgNS, "rect");
+        frameRect.setAttribute("x", "0");
+        frameRect.setAttribute("y", "0");
+        frameRect.setAttribute("width", String(w));
+        frameRect.setAttribute("height", String(h));
+        frameRect.setAttribute("rx", "6");
+        frameRect.setAttribute("ry", "6");
+        frameRect.setAttribute(
+          "class",
+          context.isSelected
+            ? "umlcanvas-photo-frame-body umlcanvas-node-selected"
+            : "umlcanvas-photo-frame-body"
+        );
+        if (node.style?.fillColor) {
+          frameRect.setAttribute("fill", node.style.fillColor);
+        }
+        if (node.style?.strokeColor) {
+          frameRect.setAttribute("stroke", node.style.strokeColor);
+        }
+        group.appendChild(frameRect);
+
+        // 2. Photo viewport / mat / inner border
+        const photoMat = document.createElementNS(svgNS, "rect");
+        photoMat.setAttribute("x", String(pad));
+        photoMat.setAttribute("y", String(pad));
+        photoMat.setAttribute("width", String(imgW));
+        photoMat.setAttribute("height", String(imgH));
+        photoMat.setAttribute("rx", "3");
+        photoMat.setAttribute("ry", "3");
+        photoMat.setAttribute("class", "umlcanvas-photo-mat");
+        group.appendChild(photoMat);
+
+        // 3. Image element (if src or filePath is available)
+        const src =
+          (node.customData?.src as string) ||
+          (node.metadata?.src as string) ||
+          (node.customData?.filePath as string) ||
+          (node.metadata?.filePath as string) ||
+          "";
+
+        if (src) {
+          const img = document.createElementNS(svgNS, "image");
+          img.setAttribute("x", String(pad));
+          img.setAttribute("y", String(pad));
+          img.setAttribute("width", String(imgW));
+          img.setAttribute("height", String(imgH));
+          img.setAttribute("preserveAspectRatio", "xMidYMid slice");
+          img.setAttributeNS("http://www.w3.org/1999/xlink", "href", src);
+          img.setAttribute("href", src);
+          img.setAttribute("class", "umlcanvas-photo-img");
+          group.appendChild(img);
+        } else {
+          // Placeholder icon when no image src is present yet
+          const placeholderGroup = document.createElementNS(svgNS, "g");
+          placeholderGroup.setAttribute("class", "umlcanvas-photo-placeholder");
+
+          const cx = pad + imgW / 2;
+          const cy = pad + imgH / 2;
+          const iconPath = document.createElementNS(svgNS, "path");
+          iconPath.setAttribute(
+            "d",
+            `M ${cx - 16} ${cy - 12} h 32 a 3 3 0 0 1 3 3 v 24 a 3 3 0 0 1 -3 3 h -32 a 3 3 0 0 1 -3 -3 v -24 a 3 3 0 0 1 3 -3 z`
+          );
+          iconPath.setAttribute("fill", "none");
+          iconPath.setAttribute("stroke", "currentColor");
+          iconPath.setAttribute("stroke-width", "1.5");
+          placeholderGroup.appendChild(iconPath);
+
+          const circle = document.createElementNS(svgNS, "circle");
+          circle.setAttribute("cx", String(cx - 6));
+          circle.setAttribute("cy", String(cy - 2));
+          circle.setAttribute("r", "2.5");
+          circle.setAttribute("fill", "currentColor");
+          placeholderGroup.appendChild(circle);
+
+          const hill = document.createElementNS(svgNS, "path");
+          hill.setAttribute(
+            "d",
+            `M ${cx - 13} ${cy + 15} l 8 -8 l 6 6 l 7 -7 l 11 9`
+          );
+          hill.setAttribute("fill", "none");
+          hill.setAttribute("stroke", "currentColor");
+          hill.setAttribute("stroke-width", "1.5");
+          placeholderGroup.appendChild(hill);
+
+          const hint = document.createElementNS(svgNS, "text");
+          hint.setAttribute("x", String(cx));
+          hint.setAttribute("y", String(cy + 24));
+          hint.setAttribute("text-anchor", "middle");
+          hint.setAttribute("class", "umlcanvas-photo-placeholder-text");
+          hint.textContent = "Drop or click image";
+          placeholderGroup.appendChild(hint);
+
+          group.appendChild(placeholderGroup);
+        }
+
+        // 4. Title inside the frame (Polaroid / photo-frame caption style)
+        const title = node.labels[0]?.text ?? "";
+        const titleY = h - titleAreaH / 2 + 5;
+        const titleText = document.createElementNS(svgNS, "text");
+        titleText.setAttribute("x", String(w / 2));
+        titleText.setAttribute("y", String(titleY));
+        titleText.setAttribute("text-anchor", "middle");
+        titleText.setAttribute("class", "umlcanvas-node-title umlcanvas-photo-frame-title");
+        titleText.textContent = title || "Add title...";
+        if (!title) {
+          titleText.classList.add("umlcanvas-placeholder-text");
+        }
+        group.appendChild(titleText);
+
+        return group;
+      },
+    };
+  }
+
   private createObsidianNoteShape(): ShapeDefinition {
     return {
       kind: "obsidian.note",
@@ -808,6 +1062,13 @@ export class ShapeRegistry {
         const h = node.size.height;
         const r = 8;
         const headerH = 32;
+        const bodyH = Math.max(10, h - headerH);
+
+        const scaleInfo = calculateNoteContentScale(node, w, h);
+        const scale = scaleInfo.effectiveScale;
+
+        group.setAttribute("data-scale", String(scale));
+        group.setAttribute("data-scale-mode", scaleInfo.scaleMode);
 
         // 1. Card container / background rect
         const bgRect = document.createElementNS(svgNS, "rect");
@@ -894,14 +1155,15 @@ export class ShapeRegistry {
         titleText.setAttribute("class", "umlcanvas-obsidian-note-title");
         const rawTitle = node.labels[0]?.text || (node.metadata?.filePath as string) || "Vault Note";
         const title = rawTitle.replace(/\.md$/, "");
-        const maxChars = Math.max(12, Math.floor((w - 65) / 8));
+        const rightMargin = w >= 260 ? 135 : (w >= 180 ? 95 : 30);
+        const maxChars = Math.max(8, Math.floor((w - rightMargin) / 7.5));
         titleText.textContent = title.length > maxChars ? `${title.slice(0, maxChars - 2)}…` : title;
         titleText.setAttribute("title", rawTitle);
         group.appendChild(titleText);
 
-        // 6. Clickable Open Icon in Header (↗)
+        // 6a. Clickable Open Icon in Header (↗)
         const openIcon = document.createElementNS(svgNS, "text");
-        openIcon.setAttribute("x", String(w - 22));
+        openIcon.setAttribute("x", String(w - 20));
         openIcon.setAttribute("y", "21");
         openIcon.setAttribute("class", "umlcanvas-obsidian-note-open-btn");
         const noteFilePath =
@@ -911,16 +1173,89 @@ export class ShapeRegistry {
         openIcon.setAttribute("title", "Open note in Obsidian");
         group.appendChild(openIcon);
 
+        // 6b-6e. Scalability controls in Header (for quick scale / fit manipulation)
+        if (w >= 180) {
+          // Fit Toggle Button
+          const fitBtn = document.createElementNS(svgNS, "text");
+          fitBtn.setAttribute("x", String(w - 46));
+          fitBtn.setAttribute("y", "21");
+          fitBtn.setAttribute(
+            "class",
+            scaleInfo.scaleMode === "fit"
+              ? "umlcanvas-obsidian-note-scale-btn is-active"
+              : "umlcanvas-obsidian-note-scale-btn"
+          );
+          fitBtn.setAttribute("data-action", "toggle-fit");
+          fitBtn.setAttribute(
+            "title",
+            scaleInfo.scaleMode === "fit" ? "Fit mode active (click for 100%)" : "Scale to fit card"
+          );
+          fitBtn.textContent = "Fit";
+          group.appendChild(fitBtn);
+
+          // Zoom In (+)
+          const zoomInBtn = document.createElementNS(svgNS, "text");
+          zoomInBtn.setAttribute("x", String(w - 68));
+          zoomInBtn.setAttribute("y", "21");
+          zoomInBtn.setAttribute("class", "umlcanvas-obsidian-note-zoom-in-btn");
+          zoomInBtn.setAttribute("title", "Zoom in note content");
+          zoomInBtn.textContent = "+";
+          group.appendChild(zoomInBtn);
+
+          // Zoom Out (−)
+          const zoomOutBtn = document.createElementNS(svgNS, "text");
+          zoomOutBtn.setAttribute("x", String(w - 86));
+          zoomOutBtn.setAttribute("y", "21");
+          zoomOutBtn.setAttribute("class", "umlcanvas-obsidian-note-zoom-out-btn");
+          zoomOutBtn.setAttribute("title", "Zoom out note content");
+          zoomOutBtn.textContent = "−";
+          group.appendChild(zoomOutBtn);
+
+          if (w >= 260) {
+            // Scale Badge / Indicator
+            const scaleBadge = document.createElementNS(svgNS, "text");
+            scaleBadge.setAttribute("x", String(w - 126));
+            scaleBadge.setAttribute("y", "21");
+            scaleBadge.setAttribute("class", "umlcanvas-obsidian-note-scale-badge");
+            scaleBadge.setAttribute("title", "Current scale (click to toggle Fit / 100%)");
+            scaleBadge.textContent = `${Math.round(scale * 100)}%`;
+            group.appendChild(scaleBadge);
+          }
+        }
+
         // 7. Rich HTML Markdown Body via foreignObject (for browser / Obsidian interactive view)
         const foreign = document.createElementNS(svgNS, "foreignObject");
         foreign.setAttribute("x", "0");
         foreign.setAttribute("y", String(headerH));
         foreign.setAttribute("width", String(w));
-        foreign.setAttribute("height", String(Math.max(10, h - headerH)));
+        foreign.setAttribute("height", String(bodyH));
         foreign.setAttribute("class", "umlcanvas-obsidian-note-foreign");
-        const bodyDiv = createDiv({
+
+        const containerDiv = safeCreateDiv({
+          cls: "umlcanvas-obsidian-note-container",
+        });
+        containerDiv.style.width = "100%";
+        containerDiv.style.height = "100%";
+        containerDiv.style.overflow = "auto";
+        containerDiv.style.boxSizing = "border-box";
+        containerDiv.style.position = "relative";
+
+        const scalerDiv = safeCreateDiv({
+          cls: "umlcanvas-obsidian-note-scale-wrapper",
+        });
+        const scalerWidthPct = Math.round((100 / scale) * 100) / 100;
+        const scalerMinHeightPx = Math.round((bodyH / scale) * 100) / 100;
+        scalerDiv.style.transform = `scale(${scale})`;
+        scalerDiv.style.transformOrigin = "top left";
+        scalerDiv.style.width = `${scalerWidthPct}%`;
+        scalerDiv.style.minHeight = `${scalerMinHeightPx}px`;
+        scalerDiv.style.boxSizing = "border-box";
+
+        const bodyDiv = safeCreateDiv({
           cls: "umlcanvas-obsidian-note-body markdown-rendered markdown-preview-view umlcanvas-scrollable",
         });
+        bodyDiv.style.width = "100%";
+        bodyDiv.style.boxSizing = "border-box";
 
         const fullMarkdown =
           (node.customData?.content as string) ||
@@ -929,28 +1264,41 @@ export class ShapeRegistry {
         if (fullMarkdown) {
           renderMarkdownFallback(fullMarkdown, bodyDiv);
         } else {
-          bodyDiv.createDiv({
+          const placeholder = safeCreateDiv({
             cls: "umlcanvas-obsidian-note-body-placeholder",
             text: "Vault Note (connect to diagram)",
           });
+          bodyDiv.appendChild(placeholder);
         }
-        foreign.appendChild(bodyDiv);
+
+        scalerDiv.appendChild(bodyDiv);
+        containerDiv.appendChild(scalerDiv);
+        foreign.appendChild(containerDiv);
         group.appendChild(foreign);
 
         // 8. SVG Fallback elements (for headless Jest tests and SVG-only exporters)
         const fallbackGroup = document.createElementNS(svgNS, "g");
         fallbackGroup.setAttribute("class", "umlcanvas-obsidian-note-svg-fallback");
+        fallbackGroup.setAttribute("data-scale", String(scale));
+        fallbackGroup.setAttribute("data-scale-mode", scaleInfo.scaleMode);
 
-        const snippet =
-          (node.customData?.snippet as string) ||
+        const fullText =
           (node.customData?.content as string) ||
+          (node.customData?.snippet as string) ||
           "";
-        if (snippet) {
-          const lines = snippet.split("\n").slice(0, 5);
+        if (fullText) {
+          const clean = fullText.replace(/^---[\s\S]*?---\r?\n?/, "").trim();
+          const lines = clean.split(/\r?\n/).filter((l) => l.trim().length > 0);
+          const scaledLineSpacing = Math.max(10, Math.round(18 * scale));
+          const scaledFontSize = Math.max(8, Math.round(12 * scale));
+
           for (let i = 0; i < lines.length; i++) {
+            const lineY = headerH + 16 + i * scaledLineSpacing;
+            if (lineY > h - 8 && scaleInfo.scaleMode !== "fit") break;
             const lineText = document.createElementNS(svgNS, "text");
             lineText.setAttribute("x", "12");
-            lineText.setAttribute("y", String(headerH + 20 + i * 18));
+            lineText.setAttribute("y", String(lineY));
+            lineText.setAttribute("font-size", String(scaledFontSize));
             lineText.setAttribute("class", "umlcanvas-obsidian-note-body-line");
             lineText.textContent = lines[i];
             fallbackGroup.appendChild(lineText);
@@ -2951,6 +3299,196 @@ export class ShapeRegistry {
       },
     };
   }
+
+  private createGenericCircleShape(): ShapeDefinition {
+    return {
+      kind: "generic.circle",
+      displayName: "Circle",
+      defaultSize: { width: 80, height: 80 },
+      getPorts(node: DiagramNode): Port[] {
+        if (node.ports && node.ports.length > 0) return node.ports;
+        const sides: Side[] = ["top", "right", "bottom", "left"];
+        return sides.map((side) => ({
+          id: `${node.id}-port-${side}`,
+          ownerNodeId: node.id,
+          name: side,
+          side,
+          offset: 0.5,
+          direction: "inout",
+        }));
+      },
+      getBoundaryPoint(node: DiagramNode, targetPoint: Point): Point {
+        return getCirclePerimeterIntersection(
+          { position: node.position, size: node.size },
+          targetPoint
+        );
+      },
+      renderSvg(node: DiagramNode, context: RenderContext): SVGElement {
+        const svgNS = "http://www.w3.org/2000/svg";
+        const group = document.createElementNS(svgNS, "g");
+        group.setAttribute("class", "umlcanvas-shape-circle");
+
+        const cx = node.size.width / 2;
+        const cy = node.size.height / 2;
+        const r = Math.min(node.size.width, node.size.height) / 2;
+
+        const circle = document.createElementNS(svgNS, "circle");
+        circle.setAttribute("cx", String(cx));
+        circle.setAttribute("cy", String(cy));
+        circle.setAttribute("r", String(r));
+        circle.setAttribute(
+          "class",
+          context.isSelected
+            ? "umlcanvas-node-body umlcanvas-circle-body umlcanvas-node-selected"
+            : "umlcanvas-node-body umlcanvas-circle-body"
+        );
+        if (node.style?.fillColor) circle.setAttribute("fill", node.style.fillColor);
+        if (node.style?.strokeColor) circle.setAttribute("stroke", node.style.strokeColor);
+        if (node.style?.strokeWidth) circle.setAttribute("stroke-width", String(node.style.strokeWidth));
+        group.appendChild(circle);
+
+        const title = node.labels[0]?.text ?? "";
+        if (title) {
+          const text = document.createElementNS(svgNS, "text");
+          text.setAttribute("x", String(cx));
+          text.setAttribute("y", String(cy + 4));
+          text.setAttribute("dominant-baseline", "central");
+          text.setAttribute("text-anchor", "middle");
+          text.setAttribute("class", "umlcanvas-node-title");
+          text.textContent = title;
+          group.appendChild(text);
+        }
+
+        return group;
+      },
+    };
+  }
+
+  private createGenericEllipseShape(): ShapeDefinition {
+    return {
+      kind: "generic.ellipse",
+      displayName: "Ellipse",
+      defaultSize: { width: 120, height: 70 },
+      getPorts(node: DiagramNode): Port[] {
+        if (node.ports && node.ports.length > 0) return node.ports;
+        const sides: Side[] = ["top", "right", "bottom", "left"];
+        return sides.map((side) => ({
+          id: `${node.id}-port-${side}`,
+          ownerNodeId: node.id,
+          name: side,
+          side,
+          offset: 0.5,
+          direction: "inout",
+        }));
+      },
+      getBoundaryPoint(node: DiagramNode, targetPoint: Point): Point {
+        return getEllipsePerimeterIntersection(
+          { position: node.position, size: node.size },
+          targetPoint
+        );
+      },
+      renderSvg(node: DiagramNode, context: RenderContext): SVGElement {
+        const svgNS = "http://www.w3.org/2000/svg";
+        const group = document.createElementNS(svgNS, "g");
+        group.setAttribute("class", "umlcanvas-shape-ellipse");
+
+        const rx = node.size.width / 2;
+        const ry = node.size.height / 2;
+
+        const ellipse = document.createElementNS(svgNS, "ellipse");
+        ellipse.setAttribute("cx", String(rx));
+        ellipse.setAttribute("cy", String(ry));
+        ellipse.setAttribute("rx", String(rx));
+        ellipse.setAttribute("ry", String(ry));
+        ellipse.setAttribute(
+          "class",
+          context.isSelected
+            ? "umlcanvas-node-body umlcanvas-ellipse-body umlcanvas-node-selected"
+            : "umlcanvas-node-body umlcanvas-ellipse-body"
+        );
+        if (node.style?.fillColor) ellipse.setAttribute("fill", node.style.fillColor);
+        if (node.style?.strokeColor) ellipse.setAttribute("stroke", node.style.strokeColor);
+        if (node.style?.strokeWidth) ellipse.setAttribute("stroke-width", String(node.style.strokeWidth));
+        group.appendChild(ellipse);
+
+        const title = node.labels[0]?.text ?? "";
+        if (title) {
+          const text = document.createElementNS(svgNS, "text");
+          text.setAttribute("x", String(rx));
+          text.setAttribute("y", String(ry + 4));
+          text.setAttribute("dominant-baseline", "central");
+          text.setAttribute("text-anchor", "middle");
+          text.setAttribute("class", "umlcanvas-node-title");
+          text.textContent = title;
+          group.appendChild(text);
+        }
+
+        return group;
+      },
+    };
+  }
+
+  private createGenericTriangleShape(): ShapeDefinition {
+    return {
+      kind: "generic.triangle",
+      displayName: "Triangle",
+      defaultSize: { width: 90, height: 80 },
+      getPorts(node: DiagramNode): Port[] {
+        if (node.ports && node.ports.length > 0) return node.ports;
+        const sides: Side[] = ["top", "right", "bottom", "left"];
+        return sides.map((side) => ({
+          id: `${node.id}-port-${side}`,
+          ownerNodeId: node.id,
+          name: side,
+          side,
+          offset: 0.5,
+          direction: "inout",
+        }));
+      },
+      getBoundaryPoint(node: DiagramNode, targetPoint: Point): Point {
+        return getTrianglePerimeterIntersection(
+          { position: node.position, size: node.size },
+          targetPoint
+        );
+      },
+      renderSvg(node: DiagramNode, context: RenderContext): SVGElement {
+        const svgNS = "http://www.w3.org/2000/svg";
+        const group = document.createElementNS(svgNS, "g");
+        group.setAttribute("class", "umlcanvas-shape-triangle");
+
+        const w = node.size.width;
+        const h = node.size.height;
+        const points = `${w / 2},0 ${w},${h} 0,${h}`;
+
+        const poly = document.createElementNS(svgNS, "polygon");
+        poly.setAttribute("points", points);
+        poly.setAttribute(
+          "class",
+          context.isSelected
+            ? "umlcanvas-node-body umlcanvas-triangle-body umlcanvas-node-selected"
+            : "umlcanvas-node-body umlcanvas-triangle-body"
+        );
+        if (node.style?.fillColor) poly.setAttribute("fill", node.style.fillColor);
+        if (node.style?.strokeColor) poly.setAttribute("stroke", node.style.strokeColor);
+        if (node.style?.strokeWidth) poly.setAttribute("stroke-width", String(node.style.strokeWidth));
+        group.appendChild(poly);
+
+        const title = node.labels[0]?.text ?? "";
+        if (title) {
+          const text = document.createElementNS(svgNS, "text");
+          text.setAttribute("x", String(w / 2));
+          text.setAttribute("y", String((h * 2) / 3 + 4));
+          text.setAttribute("dominant-baseline", "central");
+          text.setAttribute("text-anchor", "middle");
+          text.setAttribute("class", "umlcanvas-node-title");
+          text.textContent = title;
+          group.appendChild(text);
+        }
+
+        return group;
+      },
+    };
+  }
 }
 
 export const defaultShapeRegistry = new ShapeRegistry();
@@ -3090,4 +3628,87 @@ function renderMarkdownFallback(markdown: string, container: HTMLElement): void 
     const pre = container.createEl("pre");
     pre.createEl("code", { text: codeBuffer.join("\n") });
   }
+}
+
+export interface NoteScaleInfo {
+  scale: number;
+  scaleMode: "fit" | "custom" | "none";
+  effectiveScale: number;
+  isScaled: boolean;
+  contentHeight: number;
+}
+
+export function calculateNoteContentScale(
+  node: DiagramNode,
+  width: number,
+  height: number
+): NoteScaleInfo {
+  const headerH = 32;
+  const availableBodyH = Math.max(10, height - headerH);
+  const customMode = (node.customData?.scaleMode as "fit" | "custom" | "none") ?? "fit";
+  const explicitScale =
+    typeof node.customData?.scale === "number" ? node.customData.scale : undefined;
+
+  const content =
+    (node.customData?.content as string) ||
+    (node.customData?.snippet as string) ||
+    "";
+  const contentHeight =
+    typeof node.customData?.contentHeight === "number" && node.customData.contentHeight > 0
+      ? node.customData.contentHeight
+      : estimateMarkdownContentHeight(content, width);
+
+  let effectiveScale = 1.0;
+  if (customMode === "custom" && explicitScale !== undefined) {
+    effectiveScale = Math.max(0.15, Math.min(3.0, explicitScale));
+  } else if (customMode === "fit") {
+    if (contentHeight > availableBodyH) {
+      effectiveScale = Math.max(0.15, Math.min(1.0, availableBodyH / contentHeight));
+    } else {
+      effectiveScale = 1.0;
+    }
+  } else {
+    effectiveScale = 1.0;
+  }
+
+  effectiveScale = Math.round(effectiveScale * 100) / 100;
+  const isScaled = Math.abs(effectiveScale - 1.0) > 0.02;
+
+  return {
+    scale: effectiveScale,
+    scaleMode: customMode,
+    effectiveScale,
+    isScaled,
+    contentHeight,
+  };
+}
+
+function safeCreateDiv(options?: { cls?: string; text?: string; attr?: any }): HTMLDivElement {
+  if (typeof createDiv === "function") {
+    return createDiv(options);
+  }
+  if (typeof document !== "undefined") {
+    const div = document.createElement("div");
+    if (options?.cls) {
+      div.className = options.cls;
+      if (div.classList && typeof div.classList.add === "function") {
+        div.classList.add(...options.cls.split(" ").filter(Boolean));
+      }
+    }
+    if (options?.text) div.textContent = options.text;
+    if (options?.attr) {
+      for (const [k, v] of Object.entries(options.attr)) {
+        div.setAttribute(k, String(v));
+      }
+    }
+    return div;
+  }
+  return {
+    className: options?.cls || "",
+    textContent: options?.text || "",
+    style: {},
+    appendChild: (child: any) => child,
+    createDiv: (childOpts: any) => safeCreateDiv(childOpts),
+    createEl: () => ({}),
+  } as unknown as HTMLDivElement;
 }

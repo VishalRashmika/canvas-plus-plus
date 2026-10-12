@@ -972,10 +972,115 @@ export const profileDiagramDefinition: DiagramTypeDefinition = {
   },
 };
 
+export const generalDiagramDefinition: DiagramTypeDefinition = {
+  id: "general",
+  displayName: "General Diagram",
+  allowedNodeKinds: [
+    "generic.rectangle",
+    "generic.circle",
+    "generic.ellipse",
+    "generic.triangle",
+    "generic.diamond",
+    "generic.note",
+    "generic.stickyNote",
+    "generic.image",
+    "obsidian.note",
+    "uml.class",
+    "uml.interface",
+    "uml.abstractClass",
+    "uml.enumeration",
+    "uml.object",
+    "uml.package",
+    "uml.actor",
+    "uml.usecase",
+    "uml.systemBoundary",
+    "activity.action",
+    "activity.initial",
+    "activity.final",
+    "activity.decision",
+    "activity.forkJoin",
+    "activity.swimlane",
+    "state.simple",
+    "state.initial",
+    "state.final",
+    "state.composite",
+    "state.choice",
+    "state.forkJoin",
+    "sequence.lifeline",
+    "sequence.activation",
+    "interaction.frame",
+    "interaction.occurrence",
+    "uml.component",
+    "uml.lollipop",
+    "uml.socket",
+    "uml.port",
+    "uml.componentPort",
+    "uml.compositeClassifier",
+    "uml.part",
+    "uml.node3d",
+    "uml.device",
+    "uml.executionEnvironment",
+    "uml.artifact",
+    "timing.lane",
+    "timing.stateSegment",
+    "uml.stereotype",
+    "uml.metaclass",
+    "schematic.chip",
+    "schematic.junction",
+    "schematic.ground",
+    "schematic.powerRail",
+    "schematic.busTap",
+    "generic.freehand",
+  ],
+  allowedEdgeKinds: [
+    "uml.association",
+    "uml.aggregation",
+    "uml.composition",
+    "uml.generalization",
+    "uml.realization",
+    "uml.dependency",
+    "uml.link",
+    "uml.include",
+    "uml.extend",
+    "activity.controlFlow",
+    "state.transition",
+    "sequence.syncMessage",
+    "sequence.asyncMessage",
+    "sequence.replyMessage",
+    "sequence.createMessage",
+    "communication.message",
+    "timing.constraint",
+    "uml.assembly",
+    "uml.delegation",
+    "deployment.communicationPath",
+    "uml.manifest",
+    "composite.connector",
+    "package.dependency",
+    "package.import",
+    "package.merge",
+    "package.access",
+    "profile.extension",
+    "schematic.wire",
+    "schematic.bus",
+    "generic.edge",
+  ],
+  defaultRouting: "orthogonal",
+  axisConstraint: "none",
+  validate(_diagram: Diagram): ValidationIssue[] {
+    return [];
+  },
+};
+
 export class DiagramTypeRegistry {
   private definitions = new Map<DiagramTypeId, DiagramTypeDefinition>();
 
   constructor() {
+    this.register(generalDiagramDefinition);
+    this.register({
+      ...generalDiagramDefinition,
+      id: "generic",
+      displayName: "Generic Diagram",
+    });
     this.register(classDiagramDefinition);
     this.register(objectDiagramDefinition);
     this.register(useCaseDiagramDefinition);
@@ -998,7 +1103,7 @@ export class DiagramTypeRegistry {
   }
 
   get(id: DiagramTypeId): DiagramTypeDefinition | undefined {
-    return this.definitions.get(id);
+    return this.definitions.get(id) ?? this.definitions.get("general");
   }
 
   getAll(): DiagramTypeDefinition[] {

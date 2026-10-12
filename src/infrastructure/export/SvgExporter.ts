@@ -46,11 +46,11 @@ export class SvgExporter {
     const isDark = theme === "dark";
     const bg =
       options?.backgroundColor ??
-      (isDark ? "#1e1e1e" : "#ffffff");
-    const textColor = isDark ? "#dcddde" : "#2e3338";
-    const strokeColor = isDark ? "#5c6370" : "#8a919e";
-    const nodeBg = isDark ? "#282c34" : "#f8f9fa";
-    const accentColor = isDark ? "#7b68ee" : "#5c4cdb";
+      (isDark ? "#1e1e1e" : "#f7f5f0");
+    const textColor = isDark ? "#dcddde" : "#1a1d24";
+    const strokeColor = isDark ? "#5c6370" : "#404654";
+    const nodeBg = isDark ? "#282c34" : "#ffffff";
+    const accentColor = isDark ? "#7b68ee" : "#5b4fe8";
 
     const diagramTitle = options?.title ?? diagram.title;
     let svg = `<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n`;
@@ -393,6 +393,45 @@ export class SvgExporter {
     let out = `  <g class="umlcanvas-node"${node.style?.color ? ` data-color="${node.style.color}"` : ""} transform="translate(${x}, ${y})">\n`;
 
     switch (node.kind) {
+      case "generic.circle": {
+        const cx = w / 2;
+        const cy = h / 2;
+        const r = Math.min(w, h) / 2;
+        out += `    <circle cx="${cx}" cy="${cy}" r="${r}" class="node-body"${bodyAttrs} />\n`;
+        if (title) {
+          out += `    <text x="${cx}" y="${cy + 4}" text-anchor="middle" class="node-title">${escapeXml(title)}</text>\n`;
+        }
+        break;
+      }
+
+      case "generic.ellipse": {
+        const rx = w / 2;
+        const ry = h / 2;
+        out += `    <ellipse cx="${rx}" cy="${ry}" rx="${rx}" ry="${ry}" class="node-body"${bodyAttrs} />\n`;
+        if (title) {
+          out += `    <text x="${rx}" y="${ry + 4}" text-anchor="middle" class="node-title">${escapeXml(title)}</text>\n`;
+        }
+        break;
+      }
+
+      case "generic.triangle": {
+        out += `    <polygon points="${w / 2},0 ${w},${h} 0,${h}" class="node-body"${bodyAttrs} />\n`;
+        if (title) {
+          out += `    <text x="${w / 2}" y="${(h * 2) / 3 + 4}" text-anchor="middle" class="node-title">${escapeXml(title)}</text>\n`;
+        }
+        break;
+      }
+
+      case "generic.diamond":
+      case "activity.decision":
+      case "state.choice": {
+        out += `    <polygon points="${w / 2},0 ${w},${h / 2} ${w / 2},${h} 0,${h / 2}" class="node-body"${bodyAttrs} />\n`;
+        if (title) {
+          out += `    <text x="${w / 2}" y="${h / 2 + 4}" text-anchor="middle" class="node-title">${escapeXml(title)}</text>\n`;
+        }
+        break;
+      }
+
       case "uml.usecase": {
         const rx = w / 2;
         const ry = h / 2;
@@ -583,6 +622,92 @@ export class SvgExporter {
       case "generic.freehand": {
         const pathData = (node.customData?.pathData as string) || "";
         out += `    <path class="umlcanvas-freehand-path" d="${escapeXml(pathData)}" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />\n`;
+        break;
+      }
+
+      case "generic.stickyNote": {
+        const stripH = 22;
+        const stickyBg = nodeBg;
+        out += `    <rect x="0" y="0" width="${w}" height="${h}" rx="4" class="umlcanvas-sticky-body" fill="${stickyBg}" stroke="${strokeColor}" stroke-width="1.5" />\n`;
+        out += `    <path d="M 0 4 A 4 4 0 0 1 4 0 L ${w - 4} 0 A 4 4 0 0 1 ${w} 4 L ${w} ${stripH} L 0 ${stripH} Z" class="umlcanvas-sticky-strip" fill="rgba(0,0,0,0.06)" />\n`;
+        const lines = (title || "").split("\n");
+        let textY = stripH + 18;
+        for (const line of lines) {
+          if (textY > h - 8) break;
+          out += `    <text x="12" y="${textY}" class="umlcanvas-sticky-text" font-size="13" fill="${strokeColor}">${escapeXml(line)}</text>\n`;
+          textY += 18;
+        }
+        break;
+      }
+
+      case "generic.image": {
+        const pad = 10;
+        const titleAreaH = 38;
+        const imgW = Math.max(20, w - pad * 2);
+        const imgH = Math.max(20, h - pad * 2 - titleAreaH);
+        const src =
+          (node.customData?.src as string) ||
+          (node.metadata?.src as string) ||
+          (node.customData?.filePath as string) ||
+          (node.metadata?.filePath as string) ||
+          "";
+        out += `    <rect x="0" y="0" width="${w}" height="${h}" rx="6" class="umlcanvas-photo-frame-body" fill="${nodeBg}" stroke="${strokeColor}" stroke-width="1.5" />\n`;
+        out += `    <rect x="${pad}" y="${pad}" width="${imgW}" height="${imgH}" rx="3" class="umlcanvas-photo-mat" fill="rgba(0,0,0,0.05)" stroke="${strokeColor}" stroke-width="1" />\n`;
+        if (src) {
+          out += `    <image x="${pad}" y="${pad}" width="${imgW}" height="${imgH}" preserveAspectRatio="xMidYMid slice" href="${escapeXml(src)}" />\n`;
+        }
+        if (title) {
+          out += `    <text x="${w / 2}" y="${h - 14}" text-anchor="middle" class="umlcanvas-photo-frame-title" font-size="13" fill="${strokeColor}">${escapeXml(title)}</text>\n`;
+        }
+        break;
+      }
+
+      case "obsidian.note": {
+        const headerH = 32;
+        const r = 8;
+        const rawTitle = node.labels[0]?.text || (node.metadata?.filePath as string) || "Vault Note";
+        const noteTitle = rawTitle.replace(/\.md$/, "");
+        const content =
+          (node.customData?.content as string) ||
+          (node.customData?.snippet as string) ||
+          "";
+
+        out += `    <rect x="0" y="0" width="${w}" height="${h}" rx="${r}" ry="${r}" class="node-body"${bodyAttrs} />\n`;
+        out += `    <path d="M 0 ${r} A ${r} ${r} 0 0 1 ${r} 0 L ${w - r} 0 A ${r} ${r} 0 0 1 ${w} ${r} L ${w} ${headerH} L 0 ${headerH} Z" fill="rgba(128,128,128,0.06)" />\n`;
+        out += `    <line x1="0" y1="${headerH}" x2="${w}" y2="${headerH}" stroke="${strokeColor}" stroke-width="1" />\n`;
+        // Icon
+        out += `    <g transform="translate(10, 8)">\n`;
+        out += `      <path d="M9 2H3.5A1.5 1.5 0 0 0 2 3.5v11A1.5 1.5 0 0 0 3.5 16h7a1.5 1.5 0 0 0 1.5-1.5V5L9 2z" fill="none" stroke="${strokeColor}" stroke-width="1.2" stroke-linejoin="round" />\n`;
+        out += `      <polyline points="8.5 2 8.5 5.5 12 5.5" fill="none" stroke="${strokeColor}" stroke-width="1.2" stroke-linejoin="round" />\n`;
+        out += `    </g>\n`;
+        // Title
+        out += `    <text x="30" y="21" class="node-title">${escapeXml(noteTitle)}</text>\n`;
+        // Open icon
+        out += `    <text x="${w - 20}" y="21" font-size="14" fill="${strokeColor}">↗</text>\n`;
+
+        if (content) {
+          const clean = content.replace(/^---[\s\S]*?---\r?\n?/, "").trim();
+          const lines = clean.split(/\r?\n/).filter((l) => l.trim().length > 0);
+          const bodyH = Math.max(10, h - headerH - 16);
+          const estH = Math.max(lines.length * 18, 40);
+          const customScale = typeof node.customData?.scale === "number" ? node.customData.scale : undefined;
+          const scaleMode = node.customData?.scaleMode ?? "fit";
+          const scale = customScale !== undefined && scaleMode === "custom"
+            ? customScale
+            : Math.min(1.0, Math.max(0.15, bodyH / estH));
+          const fontSize = Math.max(8, Math.round(12 * scale));
+          const lineSpacing = Math.max(10, Math.round(18 * scale));
+
+          out += `    <g transform="translate(12, ${headerH + 16})">\n`;
+          let curY = 0;
+          for (let i = 0; i < lines.length; i++) {
+            if (curY > bodyH && scaleMode !== "fit") break;
+            const line = lines[i].replace(/^#{1,6}\s+/, "").replace(/^[-*+]\s+/, "• ");
+            out += `      <text x="0" y="${curY}" font-size="${fontSize}" fill="${strokeColor}">${escapeXml(line)}</text>\n`;
+            curY += lineSpacing;
+          }
+          out += `    </g>\n`;
+        }
         break;
       }
 

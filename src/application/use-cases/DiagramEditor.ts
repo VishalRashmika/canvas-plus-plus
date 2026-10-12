@@ -19,6 +19,7 @@ import {
   GroupSelectionCommand,
   UngroupSelectionCommand,
   RenameGroupCommand,
+  computeGroupBounds,
   MoveGroupCommand,
   ResizeGroupCommand,
   ToggleGroupCollapseCommand,
@@ -38,6 +39,9 @@ import {
   UpdateEdgeRoutingCommand,
   ReconnectEdgeCommand,
   UpdateEdgeWaypointsCommand,
+  MoveEdgesCommand,
+  ReverseEdgeCommand,
+  EdgeMove,
   SwitchDiagramTypeCommand,
   AutoResizeNodeCommand,
   LayoutSequenceDiagramCommand,
@@ -58,6 +62,7 @@ import {
 } from "../../domain/services/CustomChipRegistry";
 import { EdgeRouting, DiagramTypeId, Side } from "../../domain/types";
 import { defaultDiagramTypeRegistry } from "../../domain/services/DiagramTypeRegistry";
+import { lineSegmentIntersectsRect, getRectCenter } from "../../domain/services/Geometry";
 import { ValidationIssue } from "../../domain/entities/DiagramTypeDefinition";
 import { calculateNodeFitSize } from "../../domain/services/TextMeasurement";
 import { defaultJsonCanvasImporter } from "../../infrastructure/persistence/JsonCanvasImporter";
@@ -182,6 +187,14 @@ export class DiagramEditor {
     return Array.from(this.selectedGroupIdSet);
   }
 
+  get hasSelection(): boolean {
+    return (
+      this.selectedNodeIdSet.size > 0 ||
+      this.selectedEdgeIdSet.size > 0 ||
+      this.selectedGroupIdSet.size > 0
+    );
+  }
+
   isNodeSelected(id: string): boolean {
     return this.selectedNodeIdSet.has(id);
   }
@@ -221,6 +234,21 @@ export class DiagramEditor {
     }
     this.selectedEdgeIdSet.add(id);
     this.notify();
+  }
+
+  toggleEdgeSelection(id: string): void {
+    if (this.selectedEdgeIdSet.has(id)) {
+      this.selectedEdgeIdSet.delete(id);
+    } else {
+      this.selectedEdgeIdSet.add(id);
+    }
+    this.notify();
+  }
+
+  deselectEdge(id: string): void {
+    if (this.selectedEdgeIdSet.delete(id)) {
+      this.notify();
+    }
   }
 
   selectGroup(id: string, additive = false): void {
@@ -270,6 +298,22 @@ export class DiagramEditor {
       const nodeRect = rect(node.position, node.size);
       if (intersects(area, nodeRect)) {
         this.selectedNodeIdSet.add(node.id);
+      }
+    }
+
+    for (const edge of this.diagram.edges) {
+      const fromNode = this.diagram.nodes.find((n) => n.id === edge.fromNodeId);
+      const toNode = this.diagram.nodes.find((n) => n.id === edge.toNodeId);
+      if (fromNode && toNode) {
+        const fromCenter = getRectCenter(fromNode.position, fromNode.size);
+        const toCenter = getRectCenter(toNode.position, toNode.size);
+        const edgePts = [fromCenter, ...(edge.waypoints ?? []), toCenter];
+        for (let i = 0; i < edgePts.length - 1; i++) {
+          if (lineSegmentIntersectsRect(edgePts[i], edgePts[i + 1], area)) {
+            this.selectedEdgeIdSet.add(edge.id);
+            break;
+          }
+        }
       }
     }
     this.notify();
@@ -578,9 +622,13 @@ export class DiagramEditor {
     }
   }
 
+  getGroupBounds(group: Group): Rect {
+    return computeGroupBounds(this.diagram, group);
+  }
+
   renameGroup(groupId: string, newName: string): void {
     const group = this.diagram.groups.find((g) => g.id === groupId);
-    if (!group || group.name === newName) return;
+    if (!group || group.locked || group.name === newName) return;
     const cmd = new RenameGroupCommand(group, newName);
     this.commandStack.execute(cmd);
   }
@@ -800,12 +848,51 @@ export class DiagramEditor {
     this.commandStack.execute(cmd);
   }
 
-  addEdgeWaypoint(edgeId: string, point: Point): void {
+  addEdgeWaypoint(edgeId: string, point: Point, index?: number): void {
     const edge = this.diagram.edges.find((e) => e.id === edgeId);
     if (!edge) return;
     const current = edge.waypoints ? [...edge.waypoints] : [];
-    current.push({ ...point });
+    if (index !== undefined && index >= 0 && index <= current.length) {
+      current.splice(index, 0, { ...point });
+    } else {
+      current.push({ ...point });
+    }
     this.updateEdgeWaypoints(edgeId, current);
+  }
+
+  removeEdgeWaypoint(edgeId: string, index: number): void {
+    const edge = this.diagram.edges.find((e) => e.id === edgeId);
+    if (!edge || !edge.waypoints || index < 0 || index >= edge.waypoints.length) return;
+    const current = [...edge.waypoints];
+    current.splice(index, 1);
+    this.updateEdgeWaypoints(edgeId, current.length > 0 ? current : undefined);
+  }
+
+  moveEdgeWaypoints(edgeId: string, dx: number, dy: number): void {
+    const edge = this.diagram.edges.find((e) => e.id === edgeId);
+    if (!edge || !edge.waypoints || edge.waypoints.length === 0) return;
+    const moved = edge.waypoints.map((p) => ({
+      x: Math.round(p.x + dx),
+      y: Math.round(p.y + dy),
+    }));
+    this.updateEdgeWaypoints(edgeId, moved);
+  }
+
+  moveEdges(moves: EdgeMove[]): void {
+    if (moves.length === 0) return;
+    const cmd = new MoveEdgesCommand(this.diagram, moves);
+    this.commandStack.execute(cmd);
+  }
+
+  rerouteEdge(edgeId: string): void {
+    this.clearEdgeWaypoints(edgeId);
+  }
+
+  reverseEdge(edgeId: string): void {
+    const edge = this.diagram.edges.find((e) => e.id === edgeId);
+    if (!edge) return;
+    const cmd = new ReverseEdgeCommand(this.diagram, edgeId);
+    this.commandStack.execute(cmd);
   }
 
   clearEdgeWaypoints(edgeId: string): void {
@@ -1065,16 +1152,32 @@ export class DiagramEditor {
 
     const dt = this.diagram.diagramType;
 
-    // Closed nodes: Rectangle, Diamond, Ellipse
+    // Closed nodes: Rectangle, Diamond, Ellipse, Circle, Triangle
     if (
       result.shape === "rectangle" ||
       result.shape === "diamond" ||
-      result.shape === "ellipse"
+      result.shape === "ellipse" ||
+      result.shape === "circle" ||
+      result.shape === "triangle"
     ) {
       let nodeKind = "generic.rectangle";
-      let title = "New Node";
+      let title = "";
 
-      if (result.shape === "rectangle") {
+      if (result.shape === "circle") {
+        if (dt === "uml.activity") {
+          nodeKind = "activity.initial";
+          title = "";
+        } else if (dt === "uml.stateMachine" || dt === "uml.state") {
+          nodeKind = "state.initial";
+          title = "";
+        } else {
+          nodeKind = "generic.circle";
+          title = "";
+        }
+      } else if (result.shape === "triangle") {
+        nodeKind = "generic.triangle";
+        title = "";
+      } else if (result.shape === "rectangle") {
         switch (dt) {
           case "uml.class":
             nodeKind = "uml.class";
@@ -1115,7 +1218,7 @@ export class DiagramEditor {
             break;
           default:
             nodeKind = "generic.rectangle";
-            title = "Node";
+            title = "";
         }
       } else if (result.shape === "diamond") {
         switch (dt) {
@@ -1125,9 +1228,12 @@ export class DiagramEditor {
             title = "";
             break;
           case "uml.activity":
-          default:
             nodeKind = "activity.decision";
             title = "Decision";
+            break;
+          default:
+            nodeKind = "generic.diamond";
+            title = "";
         }
       } else if (result.shape === "ellipse") {
         switch (dt) {
@@ -1142,10 +1248,21 @@ export class DiagramEditor {
             break;
           case "uml.useCase":
           case "uml.usecase":
-          default:
             nodeKind = "uml.usecase";
             title = "Use Case";
+            break;
+          default:
+            nodeKind = "generic.ellipse";
+            title = "";
         }
+      }
+
+      let width = Math.max(30, Math.round(result.bounds.size.width));
+      let height = Math.max(30, Math.round(result.bounds.size.height));
+      if (nodeKind === "generic.circle") {
+        const side = Math.round((width + height) / 2);
+        width = Math.max(30, side);
+        height = Math.max(30, side);
       }
 
       return this.addNode({
@@ -1155,8 +1272,8 @@ export class DiagramEditor {
           y: Math.round(result.bounds.position.y),
         },
         size: {
-          width: Math.max(40, Math.round(result.bounds.size.width)),
-          height: Math.max(30, Math.round(result.bounds.size.height)),
+          width,
+          height,
         },
         title,
       });
@@ -1280,7 +1397,11 @@ export class DiagramEditor {
     sourceData?: CanvasClipboardData
   ): { nodes: DiagramNode[]; edges: DiagramEdge[] } {
     const data = sourceData ?? DiagramEditor.globalClipboard;
-    if (!data || !data.nodes || data.nodes.length === 0) {
+    if (
+      !data ||
+      ((!data.nodes || data.nodes.length === 0) &&
+        (!data.edges || data.edges.length === 0))
+    ) {
       return { nodes: [], edges: [] };
     }
 
@@ -1291,7 +1412,7 @@ export class DiagramEditor {
     const commands: (AddNodeCommand | AddEdgeCommand)[] = [];
 
     // Remap nodes
-    for (const node of data.nodes) {
+    for (const node of data.nodes || []) {
       const newNodeId = `node-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
       nodeIdMap.set(node.id, newNodeId);
 
@@ -1333,18 +1454,26 @@ export class DiagramEditor {
       commands.push(new AddNodeCommand(this.diagram, clonedNode));
     }
 
-    // Remap edges connecting copied nodes
-    for (const edge of data.edges) {
-      const newFromNodeId = nodeIdMap.get(edge.fromNodeId);
-      const newToNodeId = nodeIdMap.get(edge.toNodeId);
+    // Remap edges connecting copied nodes, or duplicate selected edges connecting existing nodes
+    for (const edge of data.edges || []) {
+      const newFromNodeId =
+        nodeIdMap.get(edge.fromNodeId) ??
+        (this.diagram.nodes.some((n) => n.id === edge.fromNodeId)
+          ? edge.fromNodeId
+          : undefined);
+      const newToNodeId =
+        nodeIdMap.get(edge.toNodeId) ??
+        (this.diagram.nodes.some((n) => n.id === edge.toNodeId)
+          ? edge.toNodeId
+          : undefined);
 
       if (newFromNodeId && newToNodeId) {
         const newEdgeId = `edge-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
         const newFromPortId = edge.fromPortId
-          ? portIdMap.get(edge.fromPortId)
+          ? (portIdMap.get(edge.fromPortId) ?? edge.fromPortId)
           : undefined;
         const newToPortId = edge.toPortId
-          ? portIdMap.get(edge.toPortId)
+          ? (portIdMap.get(edge.toPortId) ?? edge.toPortId)
           : undefined;
 
         const clonedWaypoints = edge.waypoints
@@ -1366,6 +1495,8 @@ export class DiagramEditor {
           toNodeId: newToNodeId,
           fromPortId: newFromPortId,
           toPortId: newToPortId,
+          fromSide: edge.fromSide,
+          toSide: edge.toSide,
           routing: edge.routing,
           waypoints: clonedWaypoints,
           labels: clonedLabels,
@@ -1397,7 +1528,10 @@ export class DiagramEditor {
     offset: Point = { x: 30, y: 30 }
   ): { nodes: DiagramNode[]; edges: DiagramEdge[] } {
     const clipboardData = this.copySelection();
-    if (!clipboardData || clipboardData.nodes.length === 0) {
+    if (
+      !clipboardData ||
+      (clipboardData.nodes.length === 0 && clipboardData.edges.length === 0)
+    ) {
       return { nodes: [], edges: [] };
     }
     return this.paste(offset, clipboardData);

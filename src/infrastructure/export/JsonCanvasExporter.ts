@@ -9,6 +9,10 @@ export interface JsonCanvasExportOptions {
 }
 
 export class JsonCanvasExporter {
+  exportToJsonCanvas(diagram: Diagram, options?: JsonCanvasExportOptions): string {
+    return this.exportCanvas(diagram, options);
+  }
+
   /**
    * Exports a UML Diagram aggregate into native Obsidian .canvas (JSON Canvas) format (F-025).
    */
@@ -71,7 +75,7 @@ export class JsonCanvasExporter {
         (node.metadata?.filePath as string) ||
         (node.customData?.filePath as string);
 
-      if (node.kind === "obsidian.note" && filePath) {
+      if ((node.kind === "obsidian.note" || node.kind === "generic.image") && filePath) {
         plainNodes.push({
           id: node.id,
           type: "file",
@@ -154,6 +158,10 @@ export class JsonCanvasExporter {
   }
 
   private formatNodeMarkdown(node: DiagramNode, options?: JsonCanvasExportOptions): string {
+    if (node.kind === "generic.stickyNote" || node.kind === "generic.note") {
+      return node.labels[0]?.text ?? "";
+    }
+
     const lines: string[] = [];
     const includeStereotypes = options?.includeStereotypes ?? true;
     const includeCompartments = options?.includeCompartments ?? true;

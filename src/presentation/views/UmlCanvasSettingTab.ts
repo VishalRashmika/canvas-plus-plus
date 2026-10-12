@@ -15,11 +15,7 @@ export class UmlCanvasSettingTab extends PluginSettingTab {
           type: "dropdown",
           key: "defaultDiagramType",
           options: {
-            "uml.class": "UML Class Diagram",
-            "uml.usecase": "UML Use Case Diagram",
-            "uml.sequence": "UML Sequence Diagram",
-            "schematic": "Schematic / Chip Diagram",
-            "generic": "Generic Diagram",
+            "general": "General Diagram",
           },
         },
       },
@@ -87,6 +83,19 @@ export class UmlCanvasSettingTab extends PluginSettingTab {
           key: "enableFreehand",
         },
       },
+      {
+        name: "Canvas theme",
+        desc: "Choose between pastel light theme (off-white), dark theme, or follow Obsidian's system theme.",
+        control: {
+          type: "dropdown",
+          key: "theme",
+          options: {
+            system: "System (Follow Obsidian)",
+            light: "Pastel Light",
+            dark: "Dark",
+          },
+        },
+      },
     ];
   }
 
@@ -108,12 +117,8 @@ export class UmlCanvasSettingTab extends PluginSettingTab {
       .setDesc("The initial diagram type when creating a new canvas.")
       .addDropdown((dropdown) => {
         dropdown
-          .addOption("uml.class", "UML Class Diagram")
-          .addOption("uml.usecase", "UML Use Case Diagram")
-          .addOption("uml.sequence", "UML Sequence Diagram")
-          .addOption("schematic", "Schematic / Chip Diagram")
-          .addOption("generic", "Generic Diagram")
-          .setValue(this.plugin.settings.defaultDiagramType)
+          .addOption("general", "General Diagram")
+          .setValue(this.plugin.settings.defaultDiagramType || "general")
           .onChange(async (value) => {
             this.plugin.settings.defaultDiagramType = value;
             await this.plugin.saveSettings();
@@ -218,6 +223,37 @@ export class UmlCanvasSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.enableFreehand)
           .onChange(async (value) => {
             this.plugin.settings.enableFreehand = value;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Auto shape detection when drawing")
+      .setDesc(
+        "Automatically recognize common shapes (circles, rectangles, triangles, lines) when drawing. When disabled, drawn strokes are kept as raw freehand drawings."
+      )
+      .addToggle((toggle) => {
+        toggle
+          .setValue(this.plugin.settings.autoShapeDetection ?? true)
+          .onChange(async (value) => {
+            this.plugin.settings.autoShapeDetection = value;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Canvas theme")
+      .setDesc(
+        "Choose between pastel light theme (off-white), dark theme, or follow Obsidian's system theme."
+      )
+      .addDropdown((dropdown) => {
+        dropdown
+          .addOption("system", "System (Follow Obsidian)")
+          .addOption("light", "Pastel Light")
+          .addOption("dark", "Dark")
+          .setValue(this.plugin.settings.theme || "system")
+          .onChange(async (value) => {
+            this.plugin.settings.theme = value as "system" | "light" | "dark";
             await this.plugin.saveSettings();
           });
       });

@@ -29,6 +29,8 @@ export default class CanvasPlusPlusPlugin extends Plugin {
   private fileWatcherBridge: FileWatcherBridge | null = null;
   private fs: ObsidianFileSystem | null = null;
 
+  ribbonIconEl: HTMLElement | null = null;
+
   async onload(): Promise<void> {
     await this.loadSettings();
 
@@ -45,22 +47,50 @@ export default class CanvasPlusPlusPlugin extends Plugin {
     // F-090: Register settings tab
     this.addSettingTab(new UmlCanvasSettingTab(this.app, this));
 
-    // F-091: Register ribbon icon
-    this.addRibbonIcon("git-fork", "Create UML diagram", async () => {
-      await this.createNewDiagramFile(
-        this.settings.defaultDiagramType || "uml.class",
-        "Untitled UML Diagram"
-      );
-    });
+    // Register ribbon icon for Canvas++ in Obsidian's left sidebar
+    this.ribbonIconEl = this.addRibbonIcon(
+      "layout-dashboard",
+      "Create new Canvas++",
+      async () => {
+        const selectedDir = this.getSelectedDirectory();
+        await this.createNewDiagramFile(
+          this.settings.defaultDiagramType || "general",
+          "Untitled Diagram",
+          selectedDir ?? undefined
+        );
+      }
+    );
 
     // F-091: Register command palette entries
+    this.addCommand({
+      id: "create-canvas-plus-plus",
+      name: "Create Canvas++",
+      callback: async () => {
+        await this.createNewDiagramFile(
+          this.settings.defaultDiagramType || "general",
+          "Untitled Diagram"
+        );
+      },
+    });
+
+    this.addCommand({
+      id: "create-diagram",
+      name: "Create diagram",
+      callback: async () => {
+        await this.createNewDiagramFile(
+          this.settings.defaultDiagramType || "general",
+          "Untitled Diagram"
+        );
+      },
+    });
+
     this.addCommand({
       id: "create-uml-diagram",
       name: "Create UML diagram",
       callback: async () => {
         await this.createNewDiagramFile(
-          this.settings.defaultDiagramType || "uml.class",
-          "Untitled UML Diagram"
+          this.settings.defaultDiagramType || "general",
+          "Untitled Diagram"
         );
       },
     });
@@ -104,6 +134,18 @@ export default class CanvasPlusPlusPlugin extends Plugin {
       },
     });
 
+    // Register command palette entry to toggle canvas theme (Light / Dark)
+    this.addCommand({
+      id: "toggle-canvas-theme",
+      name: "Toggle canvas theme (Light / Dark)",
+      callback: async () => {
+        const nextTheme = this.settings.theme === "light" ? "dark" : "light";
+        this.settings.theme = nextTheme;
+        await this.saveSettings();
+        new Notice(`Canvas++ theme set to ${nextTheme === "light" ? "Pastel Light" : "Dark"}`);
+      },
+    });
+
     // Right-click context menu in File Explorer (on folder or file)
     this.registerEvent(
       this.app.workspace.on("file-menu", (menu, file) => {
@@ -116,25 +158,12 @@ export default class CanvasPlusPlusPlugin extends Plugin {
 
         menu.addItem((item) => {
           item
-            .setTitle("New UML canvas")
-            .setIcon("git-fork")
+            .setTitle("New Canvas++")
+            .setIcon("layout-dashboard")
             .onClick(async () => {
               await this.createNewDiagramFile(
-                this.settings.defaultDiagramType || "uml.class",
-                "Untitled UML Diagram",
-                targetFolder
-              );
-            });
-        });
-
-        menu.addItem((item) => {
-          item
-            .setTitle("New schematic canvas")
-            .setIcon("cpu")
-            .onClick(async () => {
-              await this.createNewDiagramFile(
-                "schematic",
-                "Untitled Schematic",
+                this.settings.defaultDiagramType || "general",
+                "Untitled Diagram",
                 targetFolder
               );
             });
@@ -155,12 +184,12 @@ export default class CanvasPlusPlusPlugin extends Plugin {
 
         menu.addItem((item) => {
           item
-            .setTitle("New UML canvas")
-            .setIcon("git-fork")
+            .setTitle("New Canvas++")
+            .setIcon("layout-dashboard")
             .onClick(async () => {
               await this.createNewDiagramFile(
-                this.settings.defaultDiagramType || "uml.class",
-                "Untitled UML Diagram",
+                this.settings.defaultDiagramType || "general",
+                "Untitled Diagram",
                 targetFolder
               );
             });
@@ -231,26 +260,174 @@ export default class CanvasPlusPlusPlugin extends Plugin {
     }
   }
 
+  getSelectedDirectory(): TFolder | null {
+    const isFolder = (obj: any): obj is TFolder => {
+      if (!obj) return false;
+      if (obj instanceof TFolder) return true;
+      if (obj instanceof TFile) return false;
+      if (typeof obj.extension === "string" && obj.extension.length > 0) return false;
+      if (
+        obj.children !== undefined ||
+        obj.constructor?.name === "TFolder" ||
+        typeof obj.isRoot === "function"
+      ) {
+        return true;
+      }
+      return false;
+    };
+
+    const resolveFolderFromPath = (path: string): TFolder | null => {
+      if (typeof path !== "string") return null;
+      const cleanPath = path === "/" ? "" : path.replace(/\/+$/, "");
+      const abstractFile = this.app.vault.getAbstractFileByPath(cleanPath || "/");
+      if (isFolder(abstractFile)) return abstractFile;
+      const fileWithoutSlash = this.app.vault.getAbstractFileByPath(cleanPath);
+      if (isFolder(fileWithoutSlash)) return fileWithoutSlash;
+      const folder = new TFolder();
+      folder.path = cleanPath;
+      folder.name = cleanPath.split("/").pop() || "";
+      return folder;
+    };
+
+    // 1. Check workspace leaves for 'file-explorer'
+    const leaves = this.app.workspace.getLeavesOfType("file-explorer");
+    for (const leaf of leaves) {
+      const view = leaf.view as any;
+      if (!view) continue;
+
+      // 1a. Explicit selectedDirectory or selectedFolder property on view
+      if (isFolder(view.selectedDirectory)) return view.selectedDirectory;
+      if (isFolder(view.selectedFolder)) return view.selectedFolder;
+      if (typeof view.selectedDirectory === "string") {
+        const folder = resolveFolderFromPath(view.selectedDirectory);
+        if (folder) return folder;
+      }
+      if (typeof view.selectedFolder === "string") {
+        const folder = resolveFolderFromPath(view.selectedFolder);
+        if (folder) return folder;
+      }
+
+      // 1b. view.selectedFile (if it is a folder)
+      if (isFolder(view.selectedFile)) {
+        return view.selectedFile;
+      }
+
+      // 1c. view.selectedFiles or view.tree?.selectedFiles
+      const selectedFiles = view.selectedFiles || (view.tree && view.tree.selectedFiles);
+      if (Array.isArray(selectedFiles) && selectedFiles.length > 0) {
+        for (const item of selectedFiles) {
+          const file = isFolder(item) ? item : item?.file;
+          if (isFolder(file)) return file;
+        }
+      }
+
+      // 1d. view.selectedItems (Set or Array)
+      if (view.selectedItems) {
+        const items =
+          view.selectedItems instanceof Set
+            ? Array.from(view.selectedItems)
+            : Array.isArray(view.selectedItems)
+            ? view.selectedItems
+            : [];
+        for (const item of items) {
+          const file = isFolder(item) ? item : (item as any)?.file;
+          if (isFolder(file)) return file;
+        }
+      }
+
+      // 1e. view.tree (focusedItem / selectedItem / activeItem)
+      if (view.tree) {
+        const treeItem =
+          view.tree.focusedItem || view.tree.selectedItem || view.tree.activeItem;
+        if (treeItem) {
+          const file = isFolder(treeItem) ? treeItem : treeItem?.file;
+          if (isFolder(file)) return file;
+        }
+      }
+
+      // 1f. view.activeItem (if folder or has .file as folder)
+      if (isFolder(view.activeItem)) {
+        return view.activeItem;
+      }
+      if (isFolder(view.activeItem?.file)) {
+        return view.activeItem.file;
+      }
+
+      // 1g. view.fileItems (Map or Record)
+      if (view.fileItems) {
+        const items =
+          view.fileItems instanceof Map
+            ? Array.from(view.fileItems.values())
+            : typeof view.fileItems === "object"
+            ? Object.values(view.fileItems)
+            : [];
+        for (const item of items as any[]) {
+          if (item?.isFocused || item?.isSelected || item?.selected || item?.active) {
+            const file = isFolder(item) ? item : item?.file;
+            if (isFolder(file)) return file;
+          }
+        }
+      }
+
+      // 1h. DOM container inspection
+      if (view.containerEl && typeof view.containerEl.querySelectorAll === "function") {
+        const activeEls = view.containerEl.querySelectorAll(
+          ".nav-folder.is-active, .nav-folder.is-selected, .nav-folder-title.is-active, .nav-folder-title.is-selected, .tree-item.is-selected, .tree-item-self.is-selected, .tree-item-self.is-active"
+        );
+        for (const el of Array.from(activeEls) as HTMLElement[]) {
+          let dataPath = el.getAttribute("data-path");
+          if (!dataPath) {
+            const titleEl = el.querySelector(".nav-folder-title, .tree-item-self, [data-path]");
+            if (titleEl) {
+              dataPath = titleEl.getAttribute("data-path");
+            }
+          }
+          if (dataPath) {
+            const file = this.app.vault.getAbstractFileByPath(dataPath);
+            if (isFolder(file)) {
+              return file;
+            }
+          }
+        }
+      }
+    }
+
+    // 2. Fallback: app.workspace properties (e.g. if set by mocks or plugins)
+    const ws = this.app.workspace as any;
+    if (isFolder(ws.selectedDirectory)) return ws.selectedDirectory;
+    if (isFolder(ws.selectedFolder)) return ws.selectedFolder;
+
+    return null;
+  }
+
   async createNewDiagramFile(
-    diagramType: string,
+    diagramType = "general",
     defaultNamePrefix = "Untitled Diagram",
-    targetFolder?: TFolder | string
+    targetFolder?: TFolder | string | null
   ): Promise<void> {
-    // Determine target folder (explicit target, active folder, or root)
+    // Determine target folder (explicit target, selected directory, or root)
     let folderPath = "";
     if (targetFolder instanceof TFolder) {
       folderPath = targetFolder.path === "/" ? "" : targetFolder.path;
-    } else if (typeof targetFolder === "string") {
-      folderPath = targetFolder === "/" ? "" : targetFolder;
+    } else if (typeof targetFolder === "string" && targetFolder !== "/") {
+      folderPath = targetFolder;
+    } else if (targetFolder === "/") {
+      folderPath = "";
+    } else if (targetFolder === null) {
+      folderPath = "";
     } else {
-      const activeFile = this.app.workspace.getActiveFile();
-      if (activeFile && activeFile.parent) {
-        folderPath = activeFile.parent.path === "/" ? "" : activeFile.parent.path;
+      const selectedDir = this.getSelectedDirectory();
+      if (selectedDir) {
+        folderPath = selectedDir.path === "/" ? "" : selectedDir.path;
       } else {
-        const rootFolder = this.app.fileManager.getNewFileParent("");
-        if (rootFolder instanceof TFolder && rootFolder.path !== "/") {
-          folderPath = rootFolder.path;
-        }
+        folderPath = "";
+      }
+    }
+
+    if (folderPath) {
+      folderPath = folderPath.replace(/\/+$/, "");
+      if (folderPath === "/") {
+        folderPath = "";
       }
     }
 
@@ -279,7 +456,9 @@ export default class CanvasPlusPlusPlugin extends Plugin {
 
     // Open file in active or new leaf
     const leaf = this.app.workspace.getLeaf(false);
-    await leaf.openFile(createdFile);
+    if (leaf && typeof leaf.openFile === "function") {
+      await leaf.openFile(createdFile);
+    }
   }
 
   async exportActiveDiagramForRAG(view: UmlCanvasView): Promise<void> {

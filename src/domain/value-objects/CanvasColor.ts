@@ -8,12 +8,12 @@ export interface CanvasColorPreset {
 }
 
 export const CANVAS_LIGHT_COLOR_PRESETS: Record<CanvasColorPresetId, string> = {
-  "1": "#e93147", // Red
-  "2": "#ec7500", // Orange
-  "3": "#d49b00", // Amber-Gold Yellow (crisp & high-contrast on white/light backgrounds)
-  "4": "#08b94e", // Green
-  "5": "#00bfbc", // Deep Teal-Cyan (high-contrast on white/light backgrounds)
-  "6": "#7852ee", // Purple
+  "1": "#c92a3e", // Pastel Rose (crisp & high-contrast on off-white)
+  "2": "#c45e00", // Pastel Amber
+  "3": "#a17000", // Pastel Gold (crisp amber-gold on off-white)
+  "4": "#12883f", // Pastel Sage
+  "5": "#0a8288", // Pastel Ocean Teal
+  "6": "#6340c7", // Pastel Lavender Violet
 };
 
 export const CANVAS_DARK_COLOR_PRESETS: Record<CanvasColorPresetId, string> = {

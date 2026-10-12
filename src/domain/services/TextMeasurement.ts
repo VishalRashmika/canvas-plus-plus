@@ -42,6 +42,51 @@ export function calculateNodeFitSize(node: DiagramNode): Size {
     };
   }
 
+  if (kind === "generic.stickyNote") {
+    const titleText = node.labels[0]?.text ?? "";
+    const lines = titleText.split("\n");
+    const maxChars = lines.reduce((m, l) => Math.max(m, l.length), 0);
+    const contentW = Math.max(140, maxChars * 8.5 + 32);
+    const contentH = Math.max(100, 32 + lines.length * 20 + 16);
+    return {
+      width: Math.max(node.size.width, contentW),
+      height: Math.max(node.size.height, contentH),
+    };
+  }
+
+  if (kind === "generic.image") {
+    const titleText = node.labels[0]?.text ?? "";
+    const minW = Math.max(160, titleText.length * 8.5 + 32);
+    return {
+      width: Math.max(node.size.width, minW),
+      height: node.size.height,
+    };
+  }
+
+  if (kind === "obsidian.note") {
+    const content =
+      (node.customData?.content as string) ||
+      (node.customData?.snippet as string) ||
+      "";
+    const headerH = 32;
+    const padding = 28;
+    if (!content) {
+      return {
+        width: Math.max(node.size.width, 340),
+        height: Math.max(node.size.height, 240),
+      };
+    }
+    const clean = content.replace(/^---[\s\S]*?---\r?\n?/, "").trim();
+    const lines = clean.split(/\r?\n/);
+    const maxChars = lines.reduce((m, l) => Math.max(m, l.trim().length), 0);
+    const contentW = Math.max(340, Math.min(650, maxChars * 8 + 48));
+    const contentH = Math.max(160, Math.min(950, headerH + padding + estimateMarkdownContentHeight(clean, contentW)));
+    return {
+      width: contentW,
+      height: contentH,
+    };
+  }
+
   // Box shapes: uml.class, uml.object, generic.rectangle, generic.note
   const titleText = node.labels[0]?.text ?? "";
   const titleLines = titleText.split("\n");
@@ -93,4 +138,45 @@ export function calculateNodeFitSize(node: DiagramNode): Size {
     width: Math.max(minWidth, Math.ceil(maxContentWidth + 32)),
     height: Math.max(minHeight, Math.ceil(totalHeight)),
   };
+}
+
+/**
+ * Estimates rendered height of markdown text content for scalable note embedding.
+ */
+export function estimateMarkdownContentHeight(markdown: string, cardWidth = 340): number {
+  const clean = markdown.replace(/^---[\s\S]*?---\r?\n?/, "").trim();
+  if (!clean) return 40;
+  const lines = clean.split(/\r?\n/);
+  let totalH = 20; // padding
+  const effectiveWidth = Math.max(100, cardWidth - 28);
+  const charsPerLine = Math.max(15, Math.floor(effectiveWidth / 7.5));
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      totalH += 8;
+      continue;
+    }
+    if (trimmed.startsWith("#")) {
+      const headingText = trimmed.replace(/^#+\s*/, "");
+      const wraps = Math.max(1, Math.ceil((headingText.length * 1.3) / charsPerLine));
+      totalH += wraps * 26 + 8;
+    } else if (trimmed.startsWith("```")) {
+      totalH += 22;
+    } else if (trimmed.startsWith("-") || trimmed.startsWith("*") || trimmed.startsWith("+")) {
+      const itemText = trimmed.replace(/^[-*+]\s*/, "");
+      const wraps = Math.max(1, Math.ceil(itemText.length / charsPerLine));
+      totalH += wraps * 20 + 4;
+    } else if (trimmed.startsWith(">")) {
+      const quoteText = trimmed.replace(/^>\s*/, "");
+      const wraps = Math.max(1, Math.ceil(quoteText.length / charsPerLine));
+      totalH += wraps * 20 + 6;
+    } else if (/^(\*{3,}|-{3,}|_{3,})$/.test(trimmed)) {
+      totalH += 16;
+    } else {
+      const wraps = Math.max(1, Math.ceil(trimmed.length / charsPerLine));
+      totalH += wraps * 20 + 4;
+    }
+  }
+  return Math.max(40, totalH);
 }

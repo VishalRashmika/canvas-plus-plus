@@ -61,7 +61,7 @@ export class JsonCanvasImporter {
     const diagramId =
       options?.diagramId ?? `imported-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
     const title = options?.title ?? "Imported Canvas";
-    const diagramType = options?.targetType ?? "uml.class";
+    const diagramType = options?.targetType ?? "general";
 
     const diagram = createDiagram({
       id: diagramId,
@@ -100,7 +100,12 @@ export class JsonCanvasImporter {
         stereotype: parsed.stereotype,
         style: rawNode.color ? { color: rawNode.color } : undefined,
         metadata: parsed.filePath ? { filePath: parsed.filePath } : undefined,
-        customData: parsed.filePath ? { filePath: parsed.filePath } : undefined,
+        customData: parsed.filePath
+          ? {
+              filePath: parsed.filePath,
+              ...(parsed.kind === "obsidian.note" ? { scaleMode: "fit", scale: 1.0 } : {}),
+            }
+          : undefined,
       });
 
       diagram.nodes.push(node);
@@ -174,7 +179,15 @@ export class JsonCanvasImporter {
     filePath?: string;
   } {
     if (raw.type === "file") {
-      const fileName = raw.file ? raw.file.replace(/\.[^/.]+$/, "").split("/").pop() ?? "Note" : "Note";
+      const fileName = raw.file ? raw.file.replace(/\.[^/.]+$/, "").split("/").pop() ?? "File" : "File";
+      const isImg = raw.file && /\.(png|jpe?g|gif|svg|webp|bmp|avif)$/i.test(raw.file);
+      if (isImg) {
+        return {
+          title: fileName,
+          kind: "generic.image",
+          filePath: raw.file,
+        };
+      }
       return {
         title: fileName,
         kind: "obsidian.note",

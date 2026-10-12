@@ -6,6 +6,7 @@ import { Point, point } from "../../domain/value-objects/Point";
 import { Rect, Size, size, rect, rectFromBounds, intersects } from "../../domain/value-objects/Rect";
 import { Side } from "../../domain/types";
 import { ShapeRegistry, defaultShapeRegistry } from "./ShapeRegistry";
+import { estimateMarkdownContentHeight } from "../../domain/services/TextMeasurement";
 import {
   ViewportTransform,
   screenToCanvas,
@@ -26,10 +27,11 @@ export interface SvgSceneRendererOptions {
   showGrid?: boolean;
   initialTransform?: ViewportTransform;
   onTransformChange?: (transform: ViewportTransform) => void;
-  onStrokeComplete?: (stroke: Stroke) => void;
+  onStrokeComplete?: (stroke: Stroke, options?: { autoDetect?: boolean }) => void;
   enableVirtualization?: boolean;
   virtualizationThreshold?: number;
   enableFreehand?: boolean;
+  autoShapeDetection?: boolean;
   onModeChange?: (mode: "select" | "draw") => void;
   onContextMenu?: (
     e: MouseEvent,
@@ -58,6 +60,8 @@ type DragMode =
       initialPositions: Map<string, Point>;
       moved: boolean;
       activeGuides?: AlignmentGuides;
+      wasAlreadySingleSelected?: boolean;
+      clickedNodeId?: string;
     }
   | {
       type: "group-move";
@@ -66,6 +70,8 @@ type DragMode =
       initialGroupPos?: Point;
       initialMemberPositions: Map<string, Point>;
       moved: boolean;
+      wasAlreadySingleSelected?: boolean;
+      isTitleClick?: boolean;
     }
   | {
       type: "resize";
@@ -107,6 +113,15 @@ type DragMode =
       edgeId: string;
       waypointIndex: number;
       initialWaypoints: Point[];
+      originalWaypointsBeforeInsert?: Point[];
+    }
+  | {
+      type: "edge-move";
+      edgeId: string;
+      startClient: Point;
+      startCanvas: Point;
+      initialWaypointsMap: Map<string, Point[] | undefined>;
+      moved: boolean;
     }
   | {
       type: "marquee";
@@ -120,12 +135,15 @@ export class SvgSceneRenderer {
   private container: HTMLElement;
   private svgEl: SVGSVGElement;
   private viewportEl: SVGGElement;
+  private bgRectEl!: SVGRectElement;
   private gridRectEl: SVGRectElement;
   private groupsLayerEl: SVGGElement;
   private edgesLayerEl: SVGGElement;
   private nodesLayerEl: SVGGElement;
   private interactionLayerEl: SVGGElement;
-  private inlineEditorEl: HTMLInputElement | null = null;
+  private inlineEditorEl: HTMLInputElement | HTMLTextAreaElement | null = null;
+  private editingNodeId: string | null = null;
+  private editingGroupId: string | null = null;
   private defsEl!: SVGDefsElement;
   private markerTemplates = new Map<
     string,
@@ -149,9 +167,10 @@ export class SvgSceneRenderer {
   private showGrid: boolean;
   private transform: ViewportTransform = { panX: 0, panY: 0, zoom: 1.0 };
   private onTransformChange?: (transform: ViewportTransform) => void;
-  private onStrokeComplete?: (stroke: Stroke) => void;
+  private onStrokeComplete?: (stroke: Stroke, options?: { autoDetect?: boolean }) => void;
 
   private isFreehandMode = false;
+  private autoShapeDetection = true;
   private activeStroke: Stroke | null = null;
   private freehandPathEl: SVGPathElement | null = null;
   private enableVirtualization: boolean;
@@ -200,6 +219,7 @@ export class SvgSceneRenderer {
     this.showGrid = options?.showGrid ?? true;
     this.onTransformChange = options?.onTransformChange;
     this.onStrokeComplete = options?.onStrokeComplete;
+    this.autoShapeDetection = options?.autoShapeDetection ?? true;
     this.enableVirtualization = options?.enableVirtualization ?? false;
     this.virtualizationThreshold = options?.virtualizationThreshold ?? 200;
     this.enableFreehand = options?.enableFreehand ?? true;
@@ -226,11 +246,20 @@ export class SvgSceneRenderer {
 
     this.createDefs();
 
+    this.bgRectEl = document.createElementNS(svgNS, "rect");
+    this.bgRectEl.setAttribute("class", "umlcanvas-bg");
+    this.bgRectEl.setAttribute("width", "100%");
+    this.bgRectEl.setAttribute("height", "100%");
+    this.bgRectEl.setAttribute("fill", "transparent");
+    this.bgRectEl.setAttribute("pointer-events", "all");
+    this.svgEl.appendChild(this.bgRectEl);
+
     this.gridRectEl = document.createElementNS(svgNS, "rect");
     this.gridRectEl.setAttribute("class", "umlcanvas-grid-bg");
     this.gridRectEl.setAttribute("width", "100%");
     this.gridRectEl.setAttribute("height", "100%");
     this.gridRectEl.setAttribute("fill", "url(#umlcanvas-grid-pattern)");
+    this.gridRectEl.setAttribute("pointer-events", "none");
     if (!this.showGrid) {
       this.gridRectEl.classList.add("is-hidden");
     }
@@ -331,6 +360,7 @@ export class SvgSceneRenderer {
 
     this.svgEl.addEventListener("wheel", this.onWheelBound, { passive: false });
     this.svgEl.addEventListener("mousedown", this.onMouseDownBound);
+    this.container.addEventListener("mousedown", this.onMouseDownBound);
     window.addEventListener("mousemove", this.onMouseMoveBound);
     window.addEventListener("mouseup", this.onMouseUpBound);
     window.addEventListener("keydown", this.onKeyDownBound);
@@ -452,6 +482,15 @@ export class SvgSceneRenderer {
 
   get freehandMode(): boolean {
     return this.isFreehandMode;
+  }
+
+  setAutoShapeDetection(active: boolean): void {
+    this.autoShapeDetection = active;
+    this.onModeChange?.(this.isFreehandMode ? "draw" : "select");
+  }
+
+  get isAutoShapeDetection(): boolean {
+    return this.autoShapeDetection;
   }
 
   zoomIn(): void {
@@ -676,6 +715,9 @@ export class SvgSceneRenderer {
       "transform",
       `translate(${this.transform.panX}, ${this.transform.panY}) scale(${this.transform.zoom})`
     );
+    if (this.inlineEditorEl) {
+      this.updateInlineEditorPosition();
+    }
     if (this.onTransformChange) {
       this.onTransformChange(this.transform);
     }
@@ -691,41 +733,7 @@ export class SvgSceneRenderer {
   }
 
   public getGroupBounds(group: Group): Rect {
-    if (group.position && group.size) {
-      return rect(group.position, group.size);
-    }
-
-    const nodeMap = new Map<string, DiagramNode>(
-      this.editor.diagram.nodes.map((n) => [n.id, n])
-    );
-    const memberNodes = group.nodeIds
-      .map((id) => nodeMap.get(id))
-      .filter((n): n is DiagramNode => n !== undefined && this.editor.isNodeVisible(n.id));
-
-    if (memberNodes.length === 0) {
-      return rect(group.position ?? point(100, 100), group.size ?? size(240, 140));
-    }
-
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-
-    for (const n of memberNodes) {
-      minX = Math.min(minX, n.position.x);
-      minY = Math.min(minY, n.position.y);
-      maxX = Math.max(maxX, n.position.x + n.size.width);
-      maxY = Math.max(maxY, n.position.y + n.size.height);
-    }
-
-    const padding = 16;
-    const headerHeight = 28;
-    const gx = minX - padding;
-    const gy = minY - padding - headerHeight;
-    const gw = maxX - minX + padding * 2;
-    const gh = maxY - minY + padding * 2 + headerHeight;
-
-    return rect(point(Math.round(gx), Math.round(gy)), size(Math.round(gw), Math.round(gh)));
+    return this.editor.getGroupBounds(group);
   }
 
   private renderGroupResizeHandles(groupEl: SVGGElement, group: Group, bounds: Rect): void {
@@ -800,6 +808,9 @@ export class SvgSceneRenderer {
       if (isLocked) {
         groupEl.classList.add("is-locked");
       }
+      if (this.editingGroupId === group.id) {
+        groupEl.classList.add("umlcanvas-group-editing");
+      }
 
       if (group.color) {
         groupEl.setAttribute("data-color", group.color);
@@ -861,6 +872,7 @@ export class SvgSceneRenderer {
         rectEl.setAttribute("rx", "6");
         rectEl.setAttribute("ry", "6");
         rectEl.setAttribute("class", "umlcanvas-group-box");
+        rectEl.setAttribute("pointer-events", "stroke");
         rectEl.setAttribute("data-group-id", group.id);
         groupEl.appendChild(rectEl);
 
@@ -1174,6 +1186,9 @@ export class SvgSceneRenderer {
       if (isLocked) {
         nodeGroup.classList.add("umlcanvas-node-locked");
       }
+      if (this.editingNodeId === node.id) {
+        nodeGroup.classList.add("umlcanvas-node-editing");
+      }
 
       if (node.style?.color) {
         nodeGroup.setAttribute("data-color", node.style.color);
@@ -1221,7 +1236,32 @@ export class SvgSceneRenderer {
             (node.customData?.snippet as string) ||
             "";
           if (markdown) {
-            void this.onRenderMarkdown(markdown, bodyEl, filePath);
+            const renderPromise = this.onRenderMarkdown(markdown, bodyEl, filePath);
+            const onComplete = () => {
+              if (node.customData?.scaleMode === "fit" && bodyEl.scrollHeight > 0) {
+                const actualH = bodyEl.scrollHeight;
+                const prevH = typeof node.customData.contentHeight === "number" ? node.customData.contentHeight : 0;
+                if (!prevH || Math.abs(prevH - actualH) > 30) {
+                  node.customData.contentHeight = actualH;
+                  const scaler = renderedShape.querySelector<HTMLElement>(".umlcanvas-obsidian-note-scale-wrapper");
+                  if (scaler) {
+                    const bodyH = Math.max(10, node.size.height - 32);
+                    const newScale = Math.round(Math.max(0.15, Math.min(1.0, bodyH / actualH)) * 100) / 100;
+                    scaler.style.transform = `scale(${newScale})`;
+                    scaler.style.width = `${Math.round((100 / newScale) * 100) / 100}%`;
+                    scaler.style.minHeight = `${Math.round((bodyH / newScale) * 100) / 100}px`;
+                    renderedShape.setAttribute("data-scale", String(newScale));
+                    const badge = renderedShape.querySelector<SVGTextElement>(".umlcanvas-obsidian-note-scale-badge");
+                    if (badge) badge.textContent = `${Math.round(newScale * 100)}%`;
+                  }
+                }
+              }
+            };
+            if (renderPromise && typeof (renderPromise as any).then === "function") {
+              void (renderPromise as Promise<void>).then(onComplete);
+            } else {
+              onComplete();
+            }
           }
         }
       }
@@ -1400,16 +1440,40 @@ export class SvgSceneRenderer {
             const wpHandle = document.createElementNS(svgNS, "circle");
             wpHandle.setAttribute("cx", String(wp.x));
             wpHandle.setAttribute("cy", String(wp.y));
-            wpHandle.setAttribute("r", "5");
+            wpHandle.setAttribute("r", "5.5");
             wpHandle.setAttribute(
               "class",
               "umlcanvas-edge-handle umlcanvas-edge-waypoint-handle"
             );
             wpHandle.setAttribute("data-edge-id", edge.id);
             wpHandle.setAttribute("data-waypoint-index", String(idx));
-            wpHandle.setAttribute("title", "Drag to adjust bend point");
+            wpHandle.setAttribute("title", "Drag to adjust bend point (Double-click or Alt+click to remove)");
             this.interactionLayerEl.appendChild(wpHandle);
           });
+        }
+
+        // Virtual midpoint handles on segments to allow inserting waypoints
+        for (let i = 0; i < routingResult.points.length - 1; i++) {
+          const pA = routingResult.points[i];
+          const pB = routingResult.points[i + 1];
+          const segDist = Math.hypot(pB.x - pA.x, pB.y - pA.y);
+          if (segDist >= 20) {
+            const midX = Math.round((pA.x + pB.x) / 2);
+            const midY = Math.round((pA.y + pB.y) / 2);
+            const midHandle = document.createElementNS(svgNS, "circle");
+            midHandle.setAttribute("cx", String(midX));
+            midHandle.setAttribute("cy", String(midY));
+            midHandle.setAttribute("r", "4.5");
+            midHandle.setAttribute(
+              "class",
+              "umlcanvas-edge-handle umlcanvas-edge-midpoint-handle"
+            );
+            midHandle.setAttribute("data-edge-id", edge.id);
+            midHandle.setAttribute("data-midpoint-x", String(midX));
+            midHandle.setAttribute("data-midpoint-y", String(midY));
+            midHandle.setAttribute("title", "Drag to add a bend point");
+            this.interactionLayerEl.appendChild(midHandle);
+          }
         }
       }
     }
@@ -1508,7 +1572,10 @@ export class SvgSceneRenderer {
   // --- Event Handling ---
 
   private getClientCoords(e: MouseEvent): Point {
-    const rect = this.container.getBoundingClientRect();
+    const rect =
+      typeof this.container.getBoundingClientRect === "function"
+        ? this.container.getBoundingClientRect()
+        : { left: 0, top: 0, width: this.container.clientWidth || 800, height: this.container.clientHeight || 600 };
     return {
       x: e.clientX - rect.left,
       y: e.clientY - rect.top,
@@ -1518,10 +1585,23 @@ export class SvgSceneRenderer {
   private handleWheel(e: WheelEvent): void {
     const target = e.target as HTMLElement | null;
     const scrollable = target?.closest?.(
-      ".umlcanvas-obsidian-note-body, .umlcanvas-scrollable"
+      ".umlcanvas-obsidian-note-body, .umlcanvas-scrollable, .umlcanvas-obsidian-note-container"
     ) as HTMLElement | null;
-    if (scrollable && !e.ctrlKey && !e.metaKey) {
-      return;
+    if (scrollable) {
+      if (e.altKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        const nodeEl = target?.closest?.(".umlcanvas-node");
+        const nodeId = nodeEl?.getAttribute("data-node-id");
+        if (nodeId) {
+          const delta = e.deltaY < 0 ? 0.1 : -0.1;
+          this.adjustNoteScale(nodeId, delta);
+          return;
+        }
+      }
+      if (!e.ctrlKey && !e.metaKey) {
+        return;
+      }
     }
 
     e.preventDefault();
@@ -1531,6 +1611,9 @@ export class SvgSceneRenderer {
   }
 
   private handleMouseDown(e: MouseEvent): void {
+    if ((e as any)._umlHandled) return;
+    (e as any)._umlHandled = true;
+
     if (this.inlineEditorEl) {
       this.commitInlineEditor();
     }
@@ -1579,12 +1662,44 @@ export class SvgSceneRenderer {
       }
     }
 
-    // Edge waypoint handle click -> start moving waypoint
+    // Edge midpoint handle click -> insert waypoint and start moving it
+    if (target.classList.contains("umlcanvas-edge-midpoint-handle")) {
+      const edgeId = target.getAttribute("data-edge-id")!;
+      const mx = parseFloat(target.getAttribute("data-midpoint-x")!);
+      const my = parseFloat(target.getAttribute("data-midpoint-y")!);
+      const edge = this.editor.diagram.edges.find((ed) => ed.id === edgeId);
+      if (edge) {
+        const originalWaypointsBeforeInsert = edge.waypoints
+          ? edge.waypoints.map((p) => ({ ...p }))
+          : undefined;
+        const newPt = { x: mx, y: my };
+        const currentWaypoints = edge.waypoints ? [...edge.waypoints] : [];
+        const insertIndex = this.findWaypointInsertIndex(edge, newPt);
+        currentWaypoints.splice(insertIndex, 0, newPt);
+        edge.waypoints = currentWaypoints;
+
+        this.dragMode = {
+          type: "edge-waypoint",
+          edgeId,
+          waypointIndex: insertIndex,
+          initialWaypoints: currentWaypoints.map((p) => ({ ...p })),
+          originalWaypointsBeforeInsert,
+        };
+        this.render();
+        return;
+      }
+    }
+
+    // Edge waypoint handle click -> start moving waypoint (or Alt+click to remove)
     if (target.classList.contains("umlcanvas-edge-waypoint-handle")) {
       const edgeId = target.getAttribute("data-edge-id")!;
       const waypointIndex = parseInt(target.getAttribute("data-waypoint-index")!, 10);
       const edge = this.editor.diagram.edges.find((ed) => ed.id === edgeId);
       if (edge && edge.waypoints && edge.waypoints[waypointIndex]) {
+        if (e.altKey) {
+          this.editor.removeEdgeWaypoint(edgeId, waypointIndex);
+          return;
+        }
         this.dragMode = {
           type: "edge-waypoint",
           edgeId,
@@ -1673,12 +1788,39 @@ export class SvgSceneRenderer {
       }
     }
 
-    // Edge click
+    // Edge click -> Select and prepare to move/reroute the line
     const edgeEl = target.closest(".umlcanvas-edge");
     if (edgeEl) {
       const edgeId = edgeEl.getAttribute("data-edge-id");
       if (edgeId) {
-        this.editor.selectEdge(edgeId, e.shiftKey || e.metaKey || e.ctrlKey);
+        const isMulti = e.shiftKey || e.metaKey || e.ctrlKey;
+        if (isMulti) {
+          this.editor.toggleEdgeSelection(edgeId);
+        } else if (!this.editor.isEdgeSelected(edgeId)) {
+          this.editor.selectEdge(edgeId, false);
+        }
+
+        if (this.editor.isEdgeSelected(edgeId)) {
+          const initialWaypointsMap = new Map<string, Point[] | undefined>();
+          for (const id of this.editor.selectedEdgeIds) {
+            const ed = this.editor.diagram.edges.find((e) => e.id === id);
+            if (ed) {
+              initialWaypointsMap.set(
+                id,
+                ed.waypoints ? ed.waypoints.map((p) => ({ ...p })) : undefined
+              );
+            }
+          }
+
+          this.dragMode = {
+            type: "edge-move",
+            edgeId,
+            startClient: clientPoint,
+            startCanvas: canvasPoint,
+            initialWaypointsMap,
+            moved: false,
+          };
+        }
         return;
       }
     }
@@ -1690,6 +1832,51 @@ export class SvgSceneRenderer {
       const filePath = openBtn.getAttribute("data-file-path");
       if (filePath && this.onNoteOpen) {
         this.onNoteOpen(filePath);
+        return;
+      }
+    }
+
+    // Click on note scale controls (F-Obsidian-Notes-Scalability)
+    const scaleBtn = target.closest(".umlcanvas-obsidian-note-scale-btn");
+    if (scaleBtn) {
+      e.stopPropagation();
+      const nodeEl = target.closest(".umlcanvas-node");
+      const nodeId = nodeEl?.getAttribute("data-node-id");
+      if (nodeId) {
+        this.toggleNoteScaleMode(nodeId);
+        return;
+      }
+    }
+
+    const zoomInBtn = target.closest(".umlcanvas-obsidian-note-zoom-in-btn");
+    if (zoomInBtn) {
+      e.stopPropagation();
+      const nodeEl = target.closest(".umlcanvas-node");
+      const nodeId = nodeEl?.getAttribute("data-node-id");
+      if (nodeId) {
+        this.adjustNoteScale(nodeId, 0.15);
+        return;
+      }
+    }
+
+    const zoomOutBtn = target.closest(".umlcanvas-obsidian-note-zoom-out-btn");
+    if (zoomOutBtn) {
+      e.stopPropagation();
+      const nodeEl = target.closest(".umlcanvas-node");
+      const nodeId = nodeEl?.getAttribute("data-node-id");
+      if (nodeId) {
+        this.adjustNoteScale(nodeId, -0.15);
+        return;
+      }
+    }
+
+    const scaleBadge = target.closest(".umlcanvas-obsidian-note-scale-badge");
+    if (scaleBadge) {
+      e.stopPropagation();
+      const nodeEl = target.closest(".umlcanvas-node");
+      const nodeId = nodeEl?.getAttribute("data-node-id");
+      if (nodeId) {
+        this.toggleNoteScaleMode(nodeId);
         return;
       }
     }
@@ -1718,6 +1905,11 @@ export class SvgSceneRenderer {
         }
 
         const isMulti = e.shiftKey || e.metaKey || e.ctrlKey;
+        const wasAlreadySingleSelected =
+          !isMulti &&
+          this.editor.selectedNodeIds.length === 1 &&
+          this.editor.selectedNodeIds[0] === nodeId;
+
         if (isMulti) {
           this.editor.toggleNodeSelection(nodeId);
         } else if (!this.editor.isNodeSelected(nodeId)) {
@@ -1760,6 +1952,8 @@ export class SvgSceneRenderer {
           startClient: clientPoint,
           initialPositions,
           moved: false,
+          wasAlreadySingleSelected,
+          clickedNodeId: nodeId,
         };
         this.container.classList.add("umlcanvas-moving");
         return;
@@ -1768,7 +1962,7 @@ export class SvgSceneRenderer {
 
     // Group click -> Select & start move
     const groupTarget = target.closest(
-      ".umlcanvas-group-header-bg, .umlcanvas-group-title, .umlcanvas-group-badge, .umlcanvas-group-collapsed-card, .umlcanvas-group-box"
+      ".umlcanvas-group-header-bg, .umlcanvas-group-title, .umlcanvas-group-badge, .umlcanvas-group-collapsed-card, .umlcanvas-group-box, .umlcanvas-group"
     );
     if (groupTarget) {
       const groupId = groupTarget.getAttribute("data-group-id");
@@ -1776,6 +1970,12 @@ export class SvgSceneRenderer {
         const group = this.editor.diagram.groups.find((g) => g.id === groupId);
         if (group) {
           const isMulti = e.shiftKey || e.metaKey || e.ctrlKey;
+          const wasAlreadySingleSelected =
+            !isMulti &&
+            this.editor.selectedGroupIds.length === 1 &&
+            this.editor.selectedGroupIds[0] === groupId;
+          const isTitleClick = !!target.closest(".umlcanvas-group-title");
+
           if (isMulti) {
             this.editor.toggleGroupSelection(groupId);
           } else if (!this.editor.isGroupSelected(groupId)) {
@@ -1797,6 +1997,8 @@ export class SvgSceneRenderer {
               initialGroupPos: group.position ? { ...group.position } : undefined,
               initialMemberPositions,
               moved: false,
+              wasAlreadySingleSelected,
+              isTitleClick,
             };
             this.container.classList.add("umlcanvas-moving");
           }
@@ -2106,6 +2308,42 @@ export class SvgSceneRenderer {
       return;
     }
 
+    if (this.dragMode.type === "edge-move") {
+      const moveState = this.dragMode;
+      const dx = canvasPoint.x - moveState.startCanvas.x;
+      const dy = canvasPoint.y - moveState.startCanvas.y;
+
+      if (!moveState.moved && Math.hypot(dx, dy) > 2) {
+        moveState.moved = true;
+        this.container.classList.add("umlcanvas-moving");
+      }
+
+      if (moveState.moved) {
+        for (const [edgeId, initWps] of moveState.initialWaypointsMap.entries()) {
+          const edge = this.editor.diagram.edges.find((e) => e.id === edgeId);
+          if (!edge) continue;
+
+          if (initWps && initWps.length > 0) {
+            edge.waypoints = initWps.map((p) => ({
+              x: Math.round(p.x + dx),
+              y: Math.round(p.y + dy),
+            }));
+          } else {
+            const center = this.getEdgeCenter(edge);
+            edge.waypoints = [
+              {
+                x: Math.round(center.x + dx),
+                y: Math.round(center.y + dy),
+              },
+            ];
+          }
+        }
+        this.renderEdges();
+        this.renderInteractions();
+      }
+      return;
+    }
+
     if (this.dragMode.type === "marquee") {
       this.dragMode.currentCanvas = canvasPoint;
       this.renderInteractions();
@@ -2141,7 +2379,9 @@ export class SvgSceneRenderer {
         const isMicroStroke = stroke.points.length < 4 || (width < 15 && height < 15);
 
         if (!isMicroStroke && this.onStrokeComplete) {
-          this.onStrokeComplete(stroke);
+          const shiftKeyHeld = Boolean(e.shiftKey);
+          const effectiveAutoDetect = shiftKeyHeld ? !this.autoShapeDetection : this.autoShapeDetection;
+          this.onStrokeComplete(stroke, { autoDetect: effectiveAutoDetect });
         }
       }
       this.dragMode = { type: "none" };
@@ -2155,10 +2395,11 @@ export class SvgSceneRenderer {
     }
 
     if (this.dragMode.type === "move") {
+      const moveState = this.dragMode;
       this.container.classList.remove("umlcanvas-moving");
-      if (this.dragMode.moved) {
+      if (moveState.moved) {
         const moves: Array<{ nodeId: string; oldPos: Point; newPos: Point }> = [];
-        for (const [id, initialPos] of this.dragMode.initialPositions.entries()) {
+        for (const [id, initialPos] of moveState.initialPositions.entries()) {
           const node = this.editor.diagram.nodes.find((n) => n.id === id);
           if (node) {
             moves.push({
@@ -2169,6 +2410,24 @@ export class SvgSceneRenderer {
           }
         }
         this.editor.moveNodes(moves);
+      } else if (
+        moveState.wasAlreadySingleSelected &&
+        moveState.clickedNodeId
+      ) {
+        const node = this.editor.diagram.nodes.find(
+          (n) => n.id === moveState.clickedNodeId
+        );
+        if (
+          node &&
+          !this.editor.isNodeLocked(node.id) &&
+          node.kind !== "obsidian.note" &&
+          node.kind !== "schematic.chip"
+        ) {
+          this.dragMode = { type: "none" };
+          this.renderInteractions();
+          this.startInlineEditor(node);
+          return;
+        }
       }
       this.dragMode = { type: "none" };
       this.renderInteractions();
@@ -2199,9 +2458,25 @@ export class SvgSceneRenderer {
           x: Math.round(dx),
           y: Math.round(dy),
         });
+        this.dragMode = { type: "none" };
+        this.render();
+        return;
+      } else if (
+        (moveState.wasAlreadySingleSelected || moveState.isTitleClick) &&
+        moveState.groupId
+      ) {
+        const group = this.editor.diagram.groups.find(
+          (g) => g.id === moveState.groupId
+        );
+        if (group && !group.locked) {
+          this.dragMode = { type: "none" };
+          this.renderInteractions();
+          this.startGroupInlineEditor(group);
+          return;
+        }
       }
       this.dragMode = { type: "none" };
-      this.render();
+      this.renderInteractions();
       return;
     }
 
@@ -2294,8 +2569,41 @@ export class SvgSceneRenderer {
       const edge = this.editor.diagram.edges.find((ed) => ed.id === waypointState.edgeId);
       if (edge && edge.waypoints) {
         const finalWaypoints = edge.waypoints.map((p) => ({ ...p }));
-        edge.waypoints = waypointState.initialWaypoints.map((p) => ({ ...p }));
+        if ("originalWaypointsBeforeInsert" in waypointState) {
+          edge.waypoints = waypointState.originalWaypointsBeforeInsert
+            ? waypointState.originalWaypointsBeforeInsert.map((p) => ({ ...p }))
+            : undefined;
+        } else {
+          edge.waypoints = waypointState.initialWaypoints.map((p) => ({ ...p }));
+        }
         this.editor.updateEdgeWaypoints(edge.id, finalWaypoints);
+      }
+      this.render();
+      return;
+    }
+
+    if (this.dragMode.type === "edge-move") {
+      const moveState = this.dragMode;
+      this.container.classList.remove("umlcanvas-moving");
+      this.dragMode = { type: "none" };
+
+      if (moveState.moved) {
+        const moves: Array<{ edgeId: string; oldWaypoints?: Point[]; newWaypoints?: Point[] }> = [];
+        for (const [edgeId, initWps] of moveState.initialWaypointsMap.entries()) {
+          const edge = this.editor.diagram.edges.find((e) => e.id === edgeId);
+          if (edge) {
+            const finalWps = edge.waypoints ? edge.waypoints.map((p) => ({ ...p })) : undefined;
+            edge.waypoints = initWps ? initWps.map((p) => ({ ...p })) : undefined;
+            moves.push({
+              edgeId,
+              oldWaypoints: initWps,
+              newWaypoints: finalWps,
+            });
+          }
+        }
+        if (moves.length > 0) {
+          this.editor.moveEdges(moves);
+        }
       }
       this.render();
       return;
@@ -2320,9 +2628,27 @@ export class SvgSceneRenderer {
   private handleDblClick(e: MouseEvent): void {
     const target = e.target as Element;
 
-    // Double-click on group header or title -> rename group
+    // Double-click on waypoint handle -> remove waypoint
+    if (target.classList.contains("umlcanvas-edge-waypoint-handle")) {
+      const edgeId = target.getAttribute("data-edge-id")!;
+      const waypointIndex = parseInt(target.getAttribute("data-waypoint-index")!, 10);
+      this.editor.removeEdgeWaypoint(edgeId, waypointIndex);
+      return;
+    }
+
+    // Double-click on resize handle -> auto-resize node (F-Obsidian-Notes-Scalability)
+    const resizeHandle = target.closest(".umlcanvas-resize-handle");
+    if (resizeHandle) {
+      const nodeId = resizeHandle.getAttribute("data-node-id");
+      if (nodeId) {
+        this.editor.autoResizeNode(nodeId);
+        return;
+      }
+    }
+
+    // Double-click on group header, title, card, or box -> rename group
     const groupHeader = target.closest(
-      ".umlcanvas-group-header-bg, .umlcanvas-group-title, .umlcanvas-group-collapsed-card"
+      ".umlcanvas-group-header-bg, .umlcanvas-group-title, .umlcanvas-group-collapsed-card, .umlcanvas-group-box, .umlcanvas-group"
     );
     if (groupHeader) {
       const groupId = groupHeader.getAttribute("data-group-id");
@@ -2342,7 +2668,10 @@ export class SvgSceneRenderer {
       if (nodeId) {
         const node = this.editor.diagram.nodes.find((n) => n.id === nodeId);
         if (node && !this.editor.isNodeLocked(node.id)) {
-          if (node.kind === "obsidian.note" || node.metadata?.filePath) {
+          if (
+            (node.kind === "obsidian.note" ||
+              (node.metadata?.filePath && node.kind !== "generic.image"))
+          ) {
             const filePath =
               (node.metadata?.filePath as string) ||
               (node.customData?.filePath as string);
@@ -2449,45 +2778,255 @@ export class SvgSceneRenderer {
     }
   }
 
+  public getNodeInPlaceEditorBounds(node: DiagramNode): {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    textAlign: "center" | "left" | "right";
+  } {
+    let inPlaceX = node.position.x;
+    let inPlaceY = node.position.y;
+    let inPlaceW = node.size.width;
+    let inPlaceH = node.size.height;
+    let textAlign: "center" | "left" | "right" = "center";
+
+    const lines = (node.labels[0]?.text ?? "").split("\n");
+    const lineCount = Math.max(1, lines.length);
+    const contentH = Math.max(24, lineCount * 20);
+
+    if (
+      node.kind.startsWith("uml.class") ||
+      node.kind === "uml.interface" ||
+      node.kind === "uml.abstractClass" ||
+      node.kind === "uml.enumeration" ||
+      node.kind === "uml.object"
+    ) {
+      const stereoH = node.stereotype ? 14 : 0;
+      const taggedH =
+        node.taggedValues && Object.keys(node.taggedValues).length > 0 ? 12 : 0;
+      inPlaceX = node.position.x + 8;
+      inPlaceY = node.position.y + 4 + stereoH + taggedH;
+      inPlaceW = Math.max(40, node.size.width - 16);
+      inPlaceH = Math.max(24, 28);
+      textAlign = "center";
+    } else if (node.kind === "uml.actor") {
+      inPlaceX = node.position.x + 4;
+      inPlaceY = node.position.y + Math.max(0, node.size.height - 28);
+      inPlaceW = Math.max(40, node.size.width - 8);
+      inPlaceH = 24;
+      textAlign = "center";
+    } else if (node.kind === "generic.note") {
+      inPlaceX = node.position.x + 10;
+      inPlaceY = node.position.y + 10;
+      inPlaceW = Math.max(40, node.size.width - 24);
+      inPlaceH = Math.max(26, node.size.height - 20);
+      textAlign = "left";
+    } else if (node.kind === "generic.stickyNote") {
+      inPlaceX = node.position.x + 10;
+      inPlaceY = node.position.y + 24;
+      inPlaceW = Math.max(40, node.size.width - 20);
+      inPlaceH = Math.max(26, node.size.height - 32);
+      textAlign = "left";
+    } else if (node.kind === "generic.image") {
+      inPlaceX = node.position.x + 8;
+      inPlaceY = node.position.y + Math.max(0, node.size.height - 38);
+      inPlaceW = Math.max(40, node.size.width - 16);
+      inPlaceH = 28;
+      textAlign = "center";
+    } else {
+      // General shapes: vertically and horizontally centered in node
+      inPlaceX = node.position.x + 8;
+      inPlaceW = Math.max(40, node.size.width - 16);
+      const fittedH = Math.min(node.size.height - 12, contentH);
+      inPlaceY = node.position.y + Math.max(6, (node.size.height - fittedH) / 2);
+      inPlaceH = Math.max(24, fittedH);
+      textAlign = "center";
+    }
+
+    return {
+      x: inPlaceX,
+      y: inPlaceY,
+      width: inPlaceW,
+      height: inPlaceH,
+      textAlign,
+    };
+  }
+
+  public updateInlineEditorPosition(): void {
+    if (!this.inlineEditorEl) return;
+
+    const nodeId = this.inlineEditorEl.getAttribute("data-node-id");
+    if (nodeId) {
+      const node = this.editor.diagram.nodes.find((n) => n.id === nodeId);
+      if (node) {
+        const bounds = this.getNodeInPlaceEditorBounds(node);
+        const screenPos = canvasToScreen({ x: bounds.x, y: bounds.y }, this.transform);
+        const screenW = bounds.width * this.transform.zoom;
+        const screenH = bounds.height * this.transform.zoom;
+        const fontSize = Math.max(10, Math.round(13 * this.transform.zoom));
+        const lineHeight = Math.round(fontSize * 1.35);
+
+        this.inlineEditorEl.setCssStyles({
+          left: `${screenPos.x}px`,
+          top: `${screenPos.y}px`,
+          width: `${screenW}px`,
+          height: `${screenH}px`,
+          fontSize: `${fontSize}px`,
+          lineHeight: `${lineHeight}px`,
+          textAlign: bounds.textAlign,
+        });
+      }
+      return;
+    }
+
+    const edgeId = this.inlineEditorEl.getAttribute("data-edge-id");
+    if (edgeId) {
+      const edge = this.editor.diagram.edges.find((ed) => ed.id === edgeId);
+      if (edge) {
+        const centerCanvas = this.getEdgeCenter(edge);
+        const screenPos = canvasToScreen(centerCanvas, this.transform);
+        const width = Math.max(120, 140 * this.transform.zoom);
+        this.inlineEditorEl.setCssStyles({
+          left: `${screenPos.x - width / 2}px`,
+          top: `${screenPos.y - 14 * this.transform.zoom}px`,
+          width: `${width}px`,
+        });
+      }
+      return;
+    }
+
+    const groupId = this.inlineEditorEl.getAttribute("data-group-id");
+    if (groupId) {
+      const group = this.editor.diagram.groups.find((g) => g.id === groupId);
+      if (group) {
+        const bounds = this.getGroupBounds(group);
+        const screenPos = canvasToScreen(
+          { x: bounds.position.x + 24, y: bounds.position.y + 4 },
+          this.transform
+        );
+        const width = Math.max(
+          120,
+          Math.min(240, (bounds.size.width - 40) * this.transform.zoom)
+        );
+        const fontSize = Math.max(10, Math.round(12 * this.transform.zoom));
+        this.inlineEditorEl.setCssStyles({
+          left: `${screenPos.x}px`,
+          top: `${screenPos.y}px`,
+          width: `${width}px`,
+          fontSize: `${fontSize}px`,
+        });
+      }
+      return;
+    }
+  }
+
+  private adjustInlineEditorHeight(): void {
+    if (!this.inlineEditorEl) return;
+    const nodeId = this.inlineEditorEl.getAttribute("data-node-id");
+    if (!nodeId) return;
+    const node = this.editor.diagram.nodes.find((n) => n.id === nodeId);
+    if (!node) return;
+
+    const lines = this.inlineEditorEl.value.split("\n");
+    const lineCount = Math.max(1, lines.length);
+    const bounds = this.getNodeInPlaceEditorBounds(node);
+    const contentH = Math.max(bounds.height, lineCount * 20);
+    const screenH = contentH * this.transform.zoom;
+
+    this.inlineEditorEl.setCssStyles({
+      height: `${screenH}px`,
+    });
+  }
+
   public startInlineEditor(node: DiagramNode): void {
     if (this.inlineEditorEl) {
+      if (this.editingNodeId === node.id) {
+        this.inlineEditorEl.focus();
+        return;
+      }
       this.commitInlineEditor();
     }
 
-    const screenPos = canvasToScreen(node.position, this.transform);
-    const screenWidth = node.size.width * this.transform.zoom;
+    this.editingNodeId = node.id;
+    const nodeEl = this.nodesLayerEl.querySelector<SVGGElement>(
+      `[data-node-id="${node.id}"]`
+    );
+    if (nodeEl) {
+      nodeEl.classList.add("umlcanvas-node-editing");
+    }
 
-    const input = this.container.createEl("input", {
-      type: "text",
-      value: node.labels[0]?.text ?? "",
-      cls: "umlcanvas-inline-editor",
-      attr: { "data-node-id": node.id },
+    const currentText = node.labels[0]?.text ?? "";
+    const bounds = this.getNodeInPlaceEditorBounds(node);
+    const screenPos = canvasToScreen({ x: bounds.x, y: bounds.y }, this.transform);
+    const screenW = bounds.width * this.transform.zoom;
+    const screenH = bounds.height * this.transform.zoom;
+    const fontSize = Math.max(10, Math.round(13 * this.transform.zoom));
+    const lineHeight = Math.round(fontSize * 1.35);
+
+    const textarea = this.container.createEl("textarea", {
+      cls: "umlcanvas-inline-editor umlcanvas-node-inline-editor",
+      attr: {
+        "data-node-id": node.id,
+        rows: "1",
+        spellcheck: "false",
+      },
     });
-    input.setCssStyles({
+    textarea.value = currentText;
+
+    textarea.setCssStyles({
       left: `${screenPos.x}px`,
-      top: `${screenPos.y + 6 * this.transform.zoom}px`,
-      width: `${screenWidth}px`,
+      top: `${screenPos.y}px`,
+      width: `${screenW}px`,
+      height: `${screenH}px`,
+      fontSize: `${fontSize}px`,
+      lineHeight: `${lineHeight}px`,
+      textAlign: bounds.textAlign,
     });
 
-    input.addEventListener("keydown", (e) => {
+    textarea.addEventListener("keydown", (e: KeyboardEvent) => {
+      e.stopPropagation();
       if (e.key === "Enter") {
+        if (e.shiftKey) {
+          // Shift+Enter inserts a newline for multiline in-place editing
+          return;
+        }
+        // Enter, Ctrl+Enter, or Cmd+Enter commits the edit
         e.preventDefault();
         this.commitInlineEditor();
       } else if (e.key === "Escape") {
         e.preventDefault();
-        this.cancelInlineEditor();
+        // Native Obsidian canvas: Escape commits edited card content and returns to selection
+        this.commitInlineEditor();
       }
     });
 
-    input.addEventListener("blur", () => {
+    textarea.addEventListener("blur", () => {
       this.commitInlineEditor();
     });
 
-    input.focus();
-    if (typeof input.select === "function") {
-      input.select();
+    textarea.addEventListener("input", () => {
+      this.adjustInlineEditorHeight();
+    });
+
+    textarea.addEventListener("mousedown", (e: MouseEvent) => {
+      e.stopPropagation();
+    });
+    textarea.addEventListener("click", (e: MouseEvent) => {
+      e.stopPropagation();
+    });
+    textarea.addEventListener("dblclick", (e: MouseEvent) => {
+      e.stopPropagation();
+    });
+    textarea.addEventListener("wheel", (e: WheelEvent) => {
+      e.stopPropagation();
+    });
+
+    textarea.focus();
+    if (typeof textarea.select === "function") {
+      textarea.select();
     }
-    this.inlineEditorEl = input;
+    this.inlineEditorEl = textarea;
   }
 
   public getEdgeCenter(edge: DiagramEdge): Point {
@@ -2545,6 +3084,60 @@ export class SvgSceneRenderer {
     };
   }
 
+  public findWaypointInsertIndex(edge: DiagramEdge, pt: Point): number {
+    if (!edge.waypoints || edge.waypoints.length === 0) {
+      return 0;
+    }
+
+    const fromNode = this.editor.diagram.nodes.find((n) => n.id === edge.fromNodeId);
+    const toNode = this.editor.diagram.nodes.find((n) => n.id === edge.toNodeId);
+    if (!fromNode || !toNode) {
+      return edge.waypoints.length;
+    }
+
+    const fromPort = fromNode.ports?.find((p) => p.id === edge.fromPortId);
+    const toPort = toNode.ports?.find((p) => p.id === edge.toPortId);
+    const fromSide = fromPort?.side ?? edge.fromSide;
+    const toSide = toPort?.side ?? edge.toSide;
+
+    const fromPt = getSidePoint(
+      fromNode.position,
+      fromNode.size,
+      fromSide ?? getFacingSide(fromNode.position, fromNode.size, getRectCenter(toNode.position, toNode.size)),
+      fromPort?.offset ?? 0.5
+    );
+    const toPt = getSidePoint(
+      toNode.position,
+      toNode.size,
+      toSide ?? getFacingSide(toNode.position, toNode.size, getRectCenter(fromNode.position, fromNode.size)),
+      toPort?.offset ?? 0.5
+    );
+
+    const fullPoints = [fromPt, ...edge.waypoints, toPt];
+    let bestIndex = 0;
+    let minDistance = Infinity;
+
+    for (let i = 0; i < fullPoints.length - 1; i++) {
+      const pA = fullPoints[i];
+      const pB = fullPoints[i + 1];
+      const dist = this.pointToSegmentDistance(pt, pA, pB);
+      if (dist < minDistance) {
+        minDistance = dist;
+        bestIndex = i;
+      }
+    }
+
+    return bestIndex;
+  }
+
+  private pointToSegmentDistance(p: Point, a: Point, b: Point): number {
+    const l2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2;
+    if (l2 === 0) return Math.hypot(p.x - a.x, p.y - a.y);
+    let t = ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / l2;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(p.x - (a.x + t * (b.x - a.x)), p.y - (a.y + t * (b.y - a.y)));
+  }
+
   public startEdgeInlineEditor(edge: DiagramEdge, atPoint?: Point): void {
     if (this.inlineEditorEl) {
       this.commitInlineEditor();
@@ -2590,7 +3183,19 @@ export class SvgSceneRenderer {
 
   public startGroupInlineEditor(group: Group, atPoint?: Point): void {
     if (this.inlineEditorEl) {
+      if (this.editingGroupId === group.id) {
+        this.inlineEditorEl.focus();
+        return;
+      }
       this.commitInlineEditor();
+    }
+
+    this.editingGroupId = group.id;
+    const groupEl = this.groupsLayerEl.querySelector<SVGGElement>(
+      `[data-group-id="${group.id}"]`
+    );
+    if (groupEl) {
+      groupEl.classList.add("umlcanvas-group-editing");
     }
 
     const bounds = this.getGroupBounds(group);
@@ -2598,6 +3203,8 @@ export class SvgSceneRenderer {
     const screenPos = canvasToScreen(canvasPos, this.transform);
 
     const width = Math.max(120, Math.min(240, (bounds.size.width - 40) * this.transform.zoom));
+    const fontSize = Math.max(10, Math.round(12 * this.transform.zoom));
+
     const input = this.container.createEl("input", {
       type: "text",
       value: group.name,
@@ -2609,20 +3216,35 @@ export class SvgSceneRenderer {
       left: `${screenPos.x}px`,
       top: `${screenPos.y}px`,
       width: `${width}px`,
+      fontSize: `${fontSize}px`,
     });
 
-    input.addEventListener("keydown", (e) => {
+    input.addEventListener("keydown", (e: KeyboardEvent) => {
+      e.stopPropagation();
       if (e.key === "Enter") {
         e.preventDefault();
         this.commitInlineEditor();
       } else if (e.key === "Escape") {
         e.preventDefault();
-        this.cancelInlineEditor();
+        this.commitInlineEditor();
       }
     });
 
     input.addEventListener("blur", () => {
       this.commitInlineEditor();
+    });
+
+    input.addEventListener("mousedown", (e: MouseEvent) => {
+      e.stopPropagation();
+    });
+    input.addEventListener("click", (e: MouseEvent) => {
+      e.stopPropagation();
+    });
+    input.addEventListener("dblclick", (e: MouseEvent) => {
+      e.stopPropagation();
+    });
+    input.addEventListener("wheel", (e: WheelEvent) => {
+      e.stopPropagation();
     });
 
     input.focus();
@@ -2632,33 +3254,66 @@ export class SvgSceneRenderer {
     this.inlineEditorEl = input;
   }
 
-  private commitInlineEditor(): void {
+  public commitInlineEditor(): void {
     if (!this.inlineEditorEl) return;
     const nodeId = this.inlineEditorEl.getAttribute("data-node-id");
     const edgeId = this.inlineEditorEl.getAttribute("data-edge-id");
     const groupId = this.inlineEditorEl.getAttribute("data-group-id");
     const newText = this.inlineEditorEl.value.trim();
 
-    if (nodeId && newText) {
-      this.editor.updateNodeLabel(nodeId, newText);
+    this.cleanupInlineEditor();
+
+    if (nodeId) {
+      if (newText) {
+        this.editor.updateNodeLabel(nodeId, newText);
+      }
     } else if (edgeId) {
       this.editor.updateEdgeLabel(edgeId, newText);
     } else if (groupId && newText) {
       this.editor.renameGroup(groupId, newText);
     }
-
-    this.cleanupInlineEditor();
   }
 
-  private cancelInlineEditor(): void {
+  public cancelInlineEditor(): void {
     this.cleanupInlineEditor();
+    this.render();
   }
 
-  private cleanupInlineEditor(): void {
+  public cleanupInlineEditor(): void {
+    if (this.editingNodeId) {
+      const nodeEl = this.nodesLayerEl.querySelector<SVGGElement>(
+        `[data-node-id="${this.editingNodeId}"]`
+      );
+      if (nodeEl) {
+        nodeEl.classList.remove("umlcanvas-node-editing");
+      }
+      this.editingNodeId = null;
+    }
+    if (this.editingGroupId) {
+      const groupEl = this.groupsLayerEl.querySelector<SVGGElement>(
+        `[data-group-id="${this.editingGroupId}"]`
+      );
+      if (groupEl) {
+        groupEl.classList.remove("umlcanvas-group-editing");
+      }
+      this.editingGroupId = null;
+    }
     if (this.inlineEditorEl) {
       this.inlineEditorEl.remove();
       this.inlineEditorEl = null;
     }
+  }
+
+  public get activeEditingNodeId(): string | null {
+    return this.editingNodeId;
+  }
+
+  public get activeEditingGroupId(): string | null {
+    return this.editingGroupId;
+  }
+
+  public get activeInlineEditor(): HTMLInputElement | HTMLTextAreaElement | null {
+    return this.inlineEditorEl;
   }
 
   private handleKeyDown(e: KeyboardEvent): void {
@@ -2785,18 +3440,19 @@ export class SvgSceneRenderer {
       return;
     }
 
-    // Arrow keys nudge selected nodes
+    // Arrow keys nudge selected nodes or edges
     if (
       e.key === "ArrowUp" ||
       e.key === "ArrowDown" ||
       e.key === "ArrowLeft" ||
       e.key === "ArrowRight"
     ) {
+      const step = e.shiftKey ? 20 : 5;
+      const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
+      const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
+
       if (this.editor.selectedNodeIds.length > 0) {
         e.preventDefault();
-        const step = e.shiftKey ? 20 : 5;
-        const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
-        const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
         const moves: Array<{ nodeId: string; oldPos: Point; newPos: Point }> = [];
         for (const id of this.editor.selectedNodeIds) {
           const node = this.editor.diagram.nodes.find((n) => n.id === id);
@@ -2810,6 +3466,26 @@ export class SvgSceneRenderer {
         }
         if (moves.length > 0) {
           this.editor.moveNodes(moves);
+        }
+        return;
+      } else if (this.editor.selectedEdgeIds.length > 0) {
+        e.preventDefault();
+        const moves: Array<{ edgeId: string; oldWaypoints?: Point[]; newWaypoints?: Point[] }> = [];
+        for (const edgeId of this.editor.selectedEdgeIds) {
+          const edge = this.editor.diagram.edges.find((e) => e.id === edgeId);
+          if (!edge) continue;
+          const oldWps = edge.waypoints ? edge.waypoints.map((p) => ({ ...p })) : undefined;
+          let newWps: Point[];
+          if (oldWps && oldWps.length > 0) {
+            newWps = oldWps.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+          } else {
+            const center = this.getEdgeCenter(edge);
+            newWps = [{ x: center.x + dx, y: center.y + dy }];
+          }
+          moves.push({ edgeId: edge.id, oldWaypoints: oldWps, newWaypoints: newWps });
+        }
+        if (moves.length > 0) {
+          this.editor.moveEdges(moves);
         }
         return;
       }
@@ -2842,11 +3518,18 @@ export class SvgSceneRenderer {
       }
     }
 
-    // Draw tool shortcut: P
+    // Draw tool shortcut: P (toggle Draw mode) or Shift+P (toggle Auto Shape detection)
     if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "p" && this.enableFreehand) {
-      if (!this.isFreehandMode) {
+      if (e.shiftKey) {
         e.preventDefault();
-        this.setFreehandMode(true);
+        this.setAutoShapeDetection(!this.autoShapeDetection);
+        if (!this.isFreehandMode) {
+          this.setFreehandMode(true);
+        }
+        return;
+      } else {
+        e.preventDefault();
+        this.setFreehandMode(!this.isFreehandMode);
         return;
       }
     }
@@ -2859,6 +3542,52 @@ export class SvgSceneRenderer {
     }
   }
 
+  public toggleNoteScaleMode(nodeId: string): void {
+    const node = this.editor.diagram.nodes.find((n) => n.id === nodeId);
+    if (!node) return;
+    const currentMode = node.customData?.scaleMode ?? "fit";
+    const nextMode = currentMode === "fit" ? "custom" : "fit";
+    const nextScale = nextMode === "custom" ? 1.0 : undefined;
+    this.editor.updateNode(nodeId, {
+      customData: {
+        ...node.customData,
+        scaleMode: nextMode,
+        ...(nextScale !== undefined ? { scale: nextScale } : {}),
+      },
+    });
+  }
+
+  public adjustNoteScale(nodeId: string, delta: number): void {
+    const node = this.editor.diagram.nodes.find((n) => n.id === nodeId);
+    if (!node) return;
+    const currentScale =
+      typeof node.customData?.scale === "number"
+        ? node.customData.scale
+        : (node.customData?.scaleMode === "fit" ? this.getNoteFitScale(node) : 1.0);
+    const newScale = Math.round(Math.max(0.15, Math.min(3.0, currentScale + delta)) * 100) / 100;
+    this.editor.updateNode(nodeId, {
+      customData: {
+        ...node.customData,
+        scaleMode: "custom",
+        scale: newScale,
+      },
+    });
+  }
+
+  public getNoteFitScale(node: DiagramNode): number {
+    const bodyHeight = Math.max(10, node.size.height - 32);
+    const markdown =
+      (node.customData?.content as string) ||
+      (node.customData?.snippet as string) ||
+      "";
+    const estHeight =
+      typeof node.customData?.contentHeight === "number" && node.customData.contentHeight > 0
+        ? node.customData.contentHeight
+        : estimateMarkdownContentHeight(markdown, node.size.width);
+    if (estHeight <= bodyHeight) return 1.0;
+    return Math.round(Math.max(0.15, Math.min(1.0, bodyHeight / estHeight)) * 100) / 100;
+  }
+
   destroy(): void {
     this.cleanupInlineEditor();
 
@@ -2869,6 +3598,7 @@ export class SvgSceneRenderer {
 
     this.svgEl.removeEventListener("wheel", this.onWheelBound);
     this.svgEl.removeEventListener("mousedown", this.onMouseDownBound);
+    this.container.removeEventListener("mousedown", this.onMouseDownBound);
     window.removeEventListener("mousemove", this.onMouseMoveBound);
     window.removeEventListener("mouseup", this.onMouseUpBound);
     window.removeEventListener("keydown", this.onKeyDownBound);

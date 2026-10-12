@@ -1,20 +1,48 @@
+export interface RibbonIconItem {
+  icon: string;
+  title: string;
+  callback: (evt?: any) => any;
+  element: HTMLElement;
+}
+
 export class Plugin {
-  app: any = {};
+  app: any = new App();
   manifest: any = {};
+  ribbonIcons: RibbonIconItem[] = [];
+  constructor(app?: any, manifest?: any) {
+    if (app) this.app = app;
+    if (manifest) this.manifest = manifest;
+  }
   async loadData() { return {}; }
   async saveData(_data: any) {}
   registerView(_type: string, _viewCreator: any) {}
   registerExtensions(_extensions: string[], _viewType: string) {}
   addSettingTab(_tab: any) {}
-  addRibbonIcon(_icon: string, _title: string, _callback: any) { return {} as HTMLElement; }
+  addRibbonIcon(icon: string, title: string, callback: any): HTMLElement {
+    const el = (typeof document !== "undefined"
+      ? document.createElement("div")
+      : {
+          setAttribute: () => {},
+          getAttribute: () => null,
+          classList: { add: () => {}, remove: () => {}, contains: () => false },
+          addEventListener: (_ev: string, cb: any) => {
+            (el as any).onclick = cb;
+          },
+          click: () => callback(),
+        }) as unknown as HTMLElement;
+    const item: RibbonIconItem = { icon, title, callback, element: el };
+    this.ribbonIcons.push(item);
+    return el;
+  }
   addCommand(_command: any) { return {}; }
   registerEvent(_ref: any) {}
+  register(_fn: any) {}
 }
 
 export class PluginSettingTab {
   app: any;
   plugin: any;
-  containerEl: HTMLElement = document.createElement("div");
+  containerEl: HTMLElement = typeof document !== "undefined" ? document.createElement("div") : ({} as any);
   constructor(app: any, plugin: any) {
     this.app = app;
     this.plugin = plugin;
@@ -29,7 +57,7 @@ export class PluginSettingTab {
 export type SettingDefinitionItem<K extends string = string> = any;
 
 export class Setting {
-  settingEl: HTMLElement = document.createElement("div");
+  settingEl: HTMLElement = typeof document !== "undefined" ? document.createElement("div") : ({} as any);
   constructor(_containerEl: HTMLElement) {}
   setName(_name: string) { return this; }
   setDesc(_desc: string) { return this; }
@@ -41,7 +69,7 @@ export class Setting {
 
 export class Modal {
   app: any;
-  contentEl: HTMLElement = document.createElement("div");
+  contentEl: HTMLElement = typeof document !== "undefined" ? document.createElement("div") : ({} as any);
   constructor(app: any) { this.app = app; }
   open() {}
   close() {}
@@ -57,25 +85,69 @@ export class FuzzySuggestModal<T> {
 export class TextFileView {
   app: any;
   leaf: any;
-  contentEl: HTMLElement = document.createElement("div");
+  contentEl: HTMLElement = typeof document !== "undefined" ? document.createElement("div") : ({} as any);
   constructor(leaf: any) { this.leaf = leaf; }
 }
 
 export class WorkspaceLeaf {}
-export class Menu {}
-export class TFile {
-  path: string = "";
-  basename: string = "";
-  extension: string = "";
+export class MenuItem {
+  title: string = "";
+  icon: string = "";
+  onClickHandler?: () => any;
+  setTitle(title: string) {
+    this.title = title;
+    return this;
+  }
+  setIcon(icon: string) {
+    this.icon = icon;
+    return this;
+  }
+  onClick(cb: () => any) {
+    this.onClickHandler = cb;
+    return this;
+  }
 }
-export class TFolder {
-  path: string = "";
-  name: string = "";
+
+export class Menu {
+  items: MenuItem[] = [];
+  addItem(cb: (item: MenuItem) => any) {
+    const item = new MenuItem();
+    cb(item);
+    this.items.push(item);
+    return this;
+  }
+  addSeparator() {
+    return this;
+  }
+  showAtMouseEvent(_e: any) {}
 }
 export class TAbstractFile {
   path: string = "";
   name: string = "";
+  parent?: any;
+  constructor(path = "", name = "") {
+    this.path = path;
+    this.name = name || (path ? path.split("/").pop() || "" : "");
+  }
 }
+
+export class TFolder extends TAbstractFile {
+  children?: any[] = [];
+  isRoot?(): boolean {
+    return this.path === "" || this.path === "/";
+  }
+}
+
+export class TFile extends TAbstractFile {
+  basename: string = "";
+  extension: string = "";
+  constructor(path = "", basename = "", extension = "") {
+    super(path, basename ? (extension ? `${basename}.${extension}` : basename) : "");
+    this.basename = basename;
+    this.extension = extension;
+  }
+}
+
 export class Vault {}
 export class Notice {
   constructor(_msg: string) {}
@@ -91,7 +163,27 @@ export const Platform = {
   isDesktop: true,
 };
 
-export class App {}
+export class App {
+  vault: any = {
+    _files: new Map<string, any>(),
+    on: () => ({}),
+    getAbstractFileByPath(path: string) {
+      return this._files?.get(path) ?? null;
+    },
+    create: async (_path: string, _data: string) => ({ path: _path }),
+  };
+  workspace: any = {
+    on: (_name: string, _cb: any) => ({}),
+    onLayoutReady: (_cb: any) => {},
+    getLeavesOfType: () => [],
+    getActiveFile: () => null,
+    getActiveViewOfType: () => null,
+    getLeaf: () => ({ openFile: async () => {} }),
+  };
+  fileManager: any = {
+    getNewFileParent: () => null,
+  };
+}
 
 export function setIcon(_parent: HTMLElement, _iconId: string): void {}
 

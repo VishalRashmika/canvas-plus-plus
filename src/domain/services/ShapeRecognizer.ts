@@ -17,6 +17,8 @@ export type RecognizedShapeKind =
   | "rectangle"
   | "diamond"
   | "ellipse"
+  | "circle"
+  | "triangle"
   | "line"
   | "arrow"
   | "none";
@@ -306,12 +308,58 @@ export class ShapeRecognizer {
     const normRectDist = rectCornerDistSum / (4 * diag);
     const normDiamondDist = diamondCornerDistSum / (4 * diag);
 
+    // 4. Triangle perimeter fit
+    const candidateTriangles: [Point, Point, Point][] = [
+      // Upright
+      [{ x: cx, y: by }, { x: bx + bw, y: by + bh }, { x: bx, y: by + bh }],
+      // Inverted
+      [{ x: cx, y: by + bh }, { x: bx + bw, y: by }, { x: bx, y: by }],
+      // Right-pointing
+      [{ x: bx + bw, y: cy }, { x: bx, y: by }, { x: bx, y: by + bh }],
+      // Left-pointing
+      [{ x: bx, y: cy }, { x: bx + bw, y: by }, { x: bx + bw, y: by + bh }],
+    ];
+
+    if (cornerCount === 3 && simplified.length >= 4) {
+      candidateTriangles.push([simplified[0], simplified[1], simplified[2]]);
+    }
+
+    let bestTriangleNormDist = Infinity;
+    for (const [t1, t2, t3] of candidateTriangles) {
+      let distSum = 0;
+      for (const p of points) {
+        distSum += this.distToTriangle(p, t1, t2, t3);
+      }
+      const normDist = distSum / (points.length * diag);
+      if (normDist < bestTriangleNormDist) {
+        bestTriangleNormDist = normDist;
+      }
+    }
+
+    const aspectRatio = bw / bh;
+
     // Classification Logic:
 
-    // A. Diamond: area ratio around 0.45 - 0.65, diamond midpoints matched better than corners
+    // A. Triangle: 3 corners or good triangle fit, area ratio roughly 0.28-0.68
+    if (
+      areaRatio >= 0.28 &&
+      areaRatio <= 0.68 &&
+      bestTriangleNormDist < 0.14 &&
+      bestTriangleNormDist < normDiamondDist &&
+      bestTriangleNormDist < normRectDist
+    ) {
+      const confidence = Math.max(
+        0.75,
+        Math.min(0.98, 1.0 - bestTriangleNormDist * 2 - Math.abs(areaRatio - 0.5) * 0.4)
+      );
+      return { shape: "triangle", confidence, bounds };
+    }
+
+    // B. Diamond: area ratio around 0.42 - 0.68, diamond midpoints matched better than corners/triangle
     if (
       areaRatio < 0.68 &&
       normDiamondDist < normRectDist &&
+      normDiamondDist <= bestTriangleNormDist &&
       normDiamondDist < 0.22
     ) {
       const confidence = Math.max(
@@ -321,17 +369,22 @@ export class ShapeRecognizer {
       return { shape: "diamond", confidence, bounds };
     }
 
-    // B. Ellipse / Circle: low standard deviation from ellipse radial equation and area ratio ~0.78
+    // C. Circle / Ellipse: low standard deviation from ellipse radial equation and area ratio ~0.78
     if (stdDev < 0.16 && areaRatio >= 0.65 && areaRatio <= 0.88) {
+      const isCircle = aspectRatio >= 0.72 && aspectRatio <= 1.38;
+      const aspectDiff = Math.abs(aspectRatio - 1.0);
       const confidence = Math.max(
         0.75,
-        Math.min(0.98, 1.0 - stdDev * 2 - Math.abs(areaRatio - 0.785))
+        Math.min(
+          0.98,
+          1.0 - stdDev * 2 - Math.abs(areaRatio - 0.785) - (isCircle ? aspectDiff * 0.08 : 0)
+        )
       );
-      return { shape: "ellipse", confidence, bounds };
+      return { shape: isCircle ? "circle" : "ellipse", confidence, bounds };
     }
 
-    // C. Rectangle: area ratio >= 0.70, rect corners matched well
-    if (areaRatio >= 0.70 && normRectDist < 0.20) {
+    // D. Rectangle: area ratio >= 0.70, rect corners matched well
+    if (areaRatio >= 0.70 && normRectDist < 0.20 && normRectDist <= normDiamondDist) {
       const confidence = Math.max(
         0.75,
         Math.min(0.98, 1.0 - normRectDist * 2)
@@ -339,19 +392,46 @@ export class ShapeRecognizer {
       return { shape: "rectangle", confidence, bounds };
     }
 
-    // Secondary checks based on corner count
+    // Secondary checks based on corner count & fits
+    if (cornerCount === 3 && bestTriangleNormDist < 0.18) {
+      return { shape: "triangle", confidence: 0.75, bounds };
+    }
+
     if (cornerCount >= 4 && cornerCount <= 6) {
-      if (normDiamondDist < normRectDist) {
+      if (normDiamondDist < normRectDist && normDiamondDist < bestTriangleNormDist) {
         return { shape: "diamond", confidence: 0.72, bounds };
       }
       return { shape: "rectangle", confidence: 0.75, bounds };
     }
 
     if (stdDev < 0.22) {
-      return { shape: "ellipse", confidence: 0.68, bounds };
+      const isCircle = aspectRatio >= 0.72 && aspectRatio <= 1.38;
+      return { shape: isCircle ? "circle" : "ellipse", confidence: 0.68, bounds };
+    }
+
+    if (bestTriangleNormDist < normDiamondDist && bestTriangleNormDist < normRectDist) {
+      return { shape: "triangle", confidence: 0.68, bounds };
     }
 
     return { shape: "rectangle", confidence: 0.65, bounds };
+  }
+
+  private distToSegment(p: Point, v: Point, w: Point): number {
+    const l2 = (v.x - w.x) * (v.x - w.x) + (v.y - w.y) * (v.y - w.y);
+    if (l2 === 0) return Math.hypot(p.x - v.x, p.y - v.y);
+    let t = ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2;
+    t = Math.max(0, Math.min(1, t));
+    const projX = v.x + t * (w.x - v.x);
+    const projY = v.y + t * (w.y - v.y);
+    return Math.hypot(p.x - projX, p.y - projY);
+  }
+
+  private distToTriangle(p: Point, a: Point, b: Point, c: Point): number {
+    return Math.min(
+      this.distToSegment(p, a, b),
+      this.distToSegment(p, b, c),
+      this.distToSegment(p, c, a)
+    );
   }
 
   private calculateShoelaceArea(points: StrokePoint[]): number {

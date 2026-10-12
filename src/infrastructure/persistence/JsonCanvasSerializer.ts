@@ -66,6 +66,7 @@ export class JsonCanvasSerializer {
         stereotype: node.stereotype,
         taggedValues: node.taggedValues,
         style: node.style,
+        customData: node.customData,
         childDiagramId: node.childDiagramId,
         metadata: node.metadata ?? {},
       })),
@@ -149,14 +150,10 @@ export class JsonCanvasSerializer {
       throw new InvalidDiagramJsonError("Missing or invalid required field 'id'");
     }
 
-    if (
-      typeof record.diagramType !== "string" ||
-      record.diagramType.trim() === ""
-    ) {
-      throw new InvalidDiagramJsonError(
-        "Missing or invalid required field 'diagramType'"
-      );
-    }
+    const diagramType =
+      typeof record.diagramType === "string" && record.diagramType.trim() !== ""
+        ? record.diagramType
+        : "general";
 
     const title = typeof record.title === "string" ? record.title : "Untitled Diagram";
 
@@ -212,6 +209,10 @@ export class JsonCanvasSerializer {
             style:
               nr.style && typeof nr.style === "object"
                 ? nr.style
+                : undefined,
+            customData:
+              nr.customData && typeof nr.customData === "object"
+                ? (nr.customData as Record<string, unknown>)
                 : undefined,
             childDiagramId:
               typeof nr.childDiagramId === "string"
@@ -388,7 +389,7 @@ export class JsonCanvasSerializer {
 
     return createDiagram({
       id: record.id,
-      diagramType: record.diagramType,
+      diagramType,
       title,
       nodes,
       edges,

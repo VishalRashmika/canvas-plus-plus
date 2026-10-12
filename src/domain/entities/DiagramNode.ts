@@ -61,7 +61,7 @@ export function createDiagramNode(params: {
 }): DiagramNode {
   return {
     id: params.id,
-    kind: params.kind ?? "uml.class",
+    kind: params.kind ?? "generic.rectangle",
     position: params.position ?? { x: 0, y: 0 },
     size: params.size ?? { width: 100, height: 60 },
     ports: params.ports ?? [],

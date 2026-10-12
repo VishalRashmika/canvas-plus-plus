@@ -7,6 +7,8 @@ export interface UmlCanvasSettings {
   autosaveDelayMs: number;
   enableCliBridge: boolean;
   enableFreehand: boolean;
+  autoShapeDetection: boolean;
+  theme?: "system" | "light" | "dark";
 }
 
 export const DEFAULT_SETTINGS: UmlCanvasSettings = {
@@ -14,8 +16,10 @@ export const DEFAULT_SETTINGS: UmlCanvasSettings = {
   defaultNodeHeight: 80,
   showGrid: true,
   gridSize: 20,
-  defaultDiagramType: "uml.class",
+  defaultDiagramType: "general",
   autosaveDelayMs: 500,
   enableCliBridge: true,
   enableFreehand: true,
+  autoShapeDetection: true,
+  theme: "system",
 };

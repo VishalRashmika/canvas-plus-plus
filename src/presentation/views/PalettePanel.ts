@@ -17,7 +17,17 @@ export const SHAPE_CATEGORIES: ShapeCategory[] = [
   {
     id: "general",
     name: "General Shapes",
-    shapeKinds: ["generic.rectangle", "generic.note", "obsidian.note"],
+    shapeKinds: [
+      "generic.rectangle",
+      "generic.circle",
+      "generic.triangle",
+      "generic.diamond",
+      "generic.ellipse",
+      "generic.stickyNote",
+      "generic.image",
+      "generic.note",
+      "obsidian.note",
+    ],
   },
   {
     id: "class",
@@ -197,31 +207,9 @@ export class PalettePanel {
   }
 
   private initDefaultExpandedState(): void {
-    const activeType = this.editor.diagram.diagramType;
-    for (const cat of SHAPE_CATEGORIES) {
-      const isCurrent =
-        (activeType === "uml.class" && cat.id === "class") ||
-        (activeType === "uml.object" && cat.id === "class") ||
-        (activeType === "uml.usecase" && cat.id === "usecase") ||
-        (activeType === "uml.activity" && cat.id === "activity") ||
-        (activeType === "uml.state" && cat.id === "state") ||
-        (activeType === "uml.sequence" && cat.id === "sequence") ||
-        (activeType === "uml.component" && cat.id === "component") ||
-        (activeType === "uml.deployment" && cat.id === "deployment") ||
-        (activeType === "uml.package" && cat.id === "class") ||
-        (activeType === "uml.composite" && cat.id === "component") ||
-        (activeType === "uml.timing" && cat.id === "timing") ||
-        (activeType === "uml.profile" && cat.id === "profile") ||
-        (activeType === "schematic" && cat.id === "schematic");
-
-      if (!isCurrent && cat.id !== "general") {
-        this.collapsedCategories.add(cat.id);
-      }
-    }
-    this.collapsedCategories.add("connectors");
-    if (activeType !== "schematic") {
-      this.collapsedCategories.add("customChips");
-    }
+    // In general-purpose diagramming mode, all shape library categories
+    // are accessible so users can pick components freely to build any diagram.
+    // By default, categories remain open and accessible.
   }
 
   private createHeader(): void {

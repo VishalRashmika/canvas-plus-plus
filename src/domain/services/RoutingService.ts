@@ -123,10 +123,43 @@ export class RoutingService {
       toPt.y + toDir.y * clearance
     );
 
-    // If manual waypoints provided, route through them
+    // If manual waypoints provided, route through them orthogonally
     if (options?.manualWaypoints && options.manualWaypoints.length > 0) {
-      const raw = [fromPt, stubStart, ...options.manualWaypoints, stubEnd, toPt];
-      return this.simplifyCollinear(raw);
+      const waypoints = options.manualWaypoints;
+      const pts: Point[] = [fromPt, stubStart];
+      let currentDir = fromDir;
+
+      for (let i = 0; i < waypoints.length; i++) {
+        const prev = pts[pts.length - 1];
+        const next = waypoints[i];
+        if (prev.x !== next.x && prev.y !== next.y) {
+          if (currentDir.x !== 0) {
+            pts.push(point(next.x, prev.y));
+            currentDir = { x: 0, y: Math.sign(next.y - prev.y) || 1 };
+          } else {
+            pts.push(point(prev.x, next.y));
+            currentDir = { x: Math.sign(next.x - prev.x) || 1, y: 0 };
+          }
+        } else if (prev.x !== next.x) {
+          currentDir = { x: Math.sign(next.x - prev.x), y: 0 };
+        } else if (prev.y !== next.y) {
+          currentDir = { x: 0, y: Math.sign(next.y - prev.y) };
+        }
+        pts.push(next);
+      }
+
+      const lastWp = pts[pts.length - 1];
+      if (lastWp.x !== stubEnd.x && lastWp.y !== stubEnd.y) {
+        if (currentDir.x !== 0) {
+          pts.push(point(stubEnd.x, lastWp.y));
+        } else {
+          pts.push(point(lastWp.x, stubEnd.y));
+        }
+      }
+      pts.push(stubEnd);
+      pts.push(toPt);
+
+      return this.simplifyCollinear(pts);
     }
 
     // Filter obstacles: exclude source and target

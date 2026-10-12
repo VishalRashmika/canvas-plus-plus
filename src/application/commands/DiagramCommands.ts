@@ -6,8 +6,8 @@ import { Layer } from "../../domain/entities/Layer";
 import { Group, createGroup } from "../../domain/entities/Group";
 import { Port } from "../../domain/entities/Port";
 import { Compartment } from "../../domain/entities/Compartment";
-import { Point } from "../../domain/value-objects/Point";
-import { Size } from "../../domain/value-objects/Rect";
+import { Point, point } from "../../domain/value-objects/Point";
+import { Rect, Size, rect, size, contains, center } from "../../domain/value-objects/Rect";
 import { EdgeRouting, DiagramTypeId, Side } from "../../domain/types";
 import { Command } from "./Command";
 import {
@@ -98,8 +98,55 @@ export interface NodeMove {
   newPos: Point;
 }
 
+export function computeGroupBounds(
+  diagram: Diagram,
+  group: Group,
+  moves?: NodeMove[]
+): Rect {
+  if (group.position && group.size) {
+    return rect(group.position, group.size);
+  }
+
+  const padding = 20;
+  const headerHeight = 28;
+
+  if (group.nodeIds.length === 0) {
+    return rect(point(100, 100), size(200, 120));
+  }
+
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  for (const nodeId of group.nodeIds) {
+    const node = diagram.nodes.find((n) => n.id === nodeId);
+    if (!node) continue;
+
+    const move = moves?.find((m) => m.nodeId === nodeId);
+    const pos = move ? move.oldPos : node.position;
+
+    minX = Math.min(minX, pos.x);
+    minY = Math.min(minY, pos.y);
+    maxX = Math.max(maxX, pos.x + node.size.width);
+    maxY = Math.max(maxY, node.position.y + node.size.height);
+  }
+
+  if (!isFinite(minX)) {
+    return rect(point(100, 100), size(200, 120));
+  }
+
+  const gx = minX - padding;
+  const gy = minY - padding - headerHeight;
+  const gw = maxX - minX + padding * 2;
+  const gh = maxY - minY + padding * 2 + headerHeight;
+
+  return rect(point(Math.round(gx), Math.round(gy)), size(Math.round(gw), Math.round(gh)));
+}
+
 export class MoveNodesCommand implements Command {
   readonly description = "Move nodes";
+  private removedGroupMemberships: { groupId: string; nodeId: string }[] = [];
 
   constructor(
     private readonly diagram: Diagram,
@@ -107,19 +154,59 @@ export class MoveNodesCommand implements Command {
   ) {}
 
   execute(): void {
+    // 1. Capture group bounds before moving nodes
+    const groupBoundsMap = new Map<string, Rect>();
+    for (const group of this.diagram.groups) {
+      groupBoundsMap.set(group.id, computeGroupBounds(this.diagram, group, this.moves));
+    }
+
+    // 2. Apply moves
     for (const move of this.moves) {
       const node = this.diagram.nodes.find((n) => n.id === move.nodeId);
       if (node) {
         node.position = { x: move.newPos.x, y: move.newPos.y };
       }
     }
+
+    // 3. Remove nodes moved outside their group boundary
+    this.removedGroupMemberships = [];
+    for (const move of this.moves) {
+      const node = this.diagram.nodes.find((n) => n.id === move.nodeId);
+      if (!node) continue;
+
+      const nodeCenter = center(rect(node.position, node.size));
+
+      for (const group of this.diagram.groups) {
+        if (!group.nodeIds.includes(node.id)) continue;
+
+        const bounds = groupBoundsMap.get(group.id);
+        if (!bounds) continue;
+
+        if (!contains(bounds, nodeCenter)) {
+          group.nodeIds = group.nodeIds.filter((id) => id !== node.id);
+          this.removedGroupMemberships.push({
+            groupId: group.id,
+            nodeId: node.id,
+          });
+        }
+      }
+    }
   }
 
   undo(): void {
+    // 1. Restore node positions
     for (const move of this.moves) {
       const node = this.diagram.nodes.find((n) => n.id === move.nodeId);
       if (node) {
         node.position = { x: move.oldPos.x, y: move.oldPos.y };
+      }
+    }
+
+    // 2. Restore group memberships
+    for (const { groupId, nodeId } of this.removedGroupMemberships) {
+      const group = this.diagram.groups.find((g) => g.id === groupId);
+      if (group && !group.nodeIds.includes(nodeId)) {
+        group.nodeIds.push(nodeId);
       }
     }
   }
@@ -333,10 +420,12 @@ export class RenameGroupCommand implements Command {
   }
 
   execute(): void {
+    if (this.group.locked) return;
     this.group.name = this.newName;
   }
 
   undo(): void {
+    if (this.group.locked) return;
     this.group.name = this.previousName;
   }
 }
@@ -914,6 +1003,113 @@ export class UpdateEdgeWaypointsCommand implements Command {
     if (edge) {
       edge.waypoints = this.prevWaypoints ? this.prevWaypoints.map((p) => ({ ...p })) : undefined;
     }
+  }
+}
+
+export interface EdgeMove {
+  edgeId: string;
+  oldWaypoints?: Point[];
+  newWaypoints?: Point[];
+}
+
+export class MoveEdgesCommand implements Command {
+  readonly description = "Move edges";
+
+  constructor(
+    private readonly diagram: Diagram,
+    private readonly moves: EdgeMove[]
+  ) {}
+
+  execute(): void {
+    for (const move of this.moves) {
+      const edge = this.diagram.edges.find((e) => e.id === move.edgeId);
+      if (edge) {
+        edge.waypoints = move.newWaypoints
+          ? move.newWaypoints.map((p) => ({ ...p }))
+          : undefined;
+      }
+    }
+  }
+
+  undo(): void {
+    for (const move of this.moves) {
+      const edge = this.diagram.edges.find((e) => e.id === move.edgeId);
+      if (edge) {
+        edge.waypoints = move.oldWaypoints
+          ? move.oldWaypoints.map((p) => ({ ...p }))
+          : undefined;
+      }
+    }
+  }
+}
+
+export class ReverseEdgeCommand implements Command {
+  readonly description = "Reverse edge direction";
+
+  private prevFrom: { nodeId: string; portId?: string; side?: Side };
+  private prevTo: { nodeId: string; portId?: string; side?: Side };
+  private prevWaypoints?: Point[];
+  private prevSourceMultiplicity?: string;
+  private prevTargetMultiplicity?: string;
+
+  constructor(
+    private readonly diagram: Diagram,
+    private readonly edgeId: string
+  ) {
+    const edge = this.diagram.edges.find((e) => e.id === this.edgeId);
+    this.prevFrom = {
+      nodeId: edge?.fromNodeId ?? "",
+      portId: edge?.fromPortId,
+      side: edge?.fromSide,
+    };
+    this.prevTo = {
+      nodeId: edge?.toNodeId ?? "",
+      portId: edge?.toPortId,
+      side: edge?.toSide,
+    };
+    this.prevWaypoints = edge?.waypoints
+      ? edge.waypoints.map((p) => ({ ...p }))
+      : undefined;
+    this.prevSourceMultiplicity = edge?.multiplicitySource;
+    this.prevTargetMultiplicity = edge?.multiplicityTarget;
+  }
+
+  execute(): void {
+    const edge = this.diagram.edges.find((e) => e.id === this.edgeId);
+    if (!edge) return;
+
+    edge.fromNodeId = this.prevTo.nodeId;
+    edge.fromPortId = this.prevTo.portId;
+    edge.fromSide = this.prevTo.side;
+
+    edge.toNodeId = this.prevFrom.nodeId;
+    edge.toPortId = this.prevFrom.portId;
+    edge.toSide = this.prevFrom.side;
+
+    if (edge.waypoints) {
+      edge.waypoints = [...edge.waypoints].reverse();
+    }
+    edge.multiplicitySource = this.prevTargetMultiplicity;
+    edge.multiplicityTarget = this.prevSourceMultiplicity;
+  }
+
+  undo(): void {
+    const edge = this.diagram.edges.find((e) => e.id === this.edgeId);
+    if (!edge) return;
+
+    edge.fromNodeId = this.prevFrom.nodeId;
+    edge.fromPortId = this.prevFrom.portId;
+    edge.fromSide = this.prevFrom.side;
+
+    edge.toNodeId = this.prevTo.nodeId;
+    edge.toPortId = this.prevTo.portId;
+    edge.toSide = this.prevTo.side;
+
+    edge.waypoints = this.prevWaypoints
+      ? this.prevWaypoints.map((p) => ({ ...p }))
+      : undefined;
+    edge.multiplicitySource = this.prevSourceMultiplicity;
+    edge.multiplicityTarget = this.prevTargetMultiplicity;
   }
 }
 

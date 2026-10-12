@@ -99,9 +99,9 @@ Build professional UML 2.x software engineering diagrams, Logisim-style digital 
 ## Usage
 
 ### Creating a Diagram
-- **Command Palette**: Press `Ctrl+P` (or `Cmd+P`), type `Canvas++`, and select **Create UML diagram** or **Create schematic**.
-- **Ribbon Icon**: Click the **Git Fork** icon in Obsidian's left ribbon to create a new diagram file.
-- **File Explorer**: Right-click any folder and select **New UML canvas** or **New schematic canvas**.
+- **Command Palette**: Press `Ctrl+P` (or `Cmd+P`), type `Canvas++`, and select **Create Canvas++** (or **Create diagram**).
+- **Ribbon Icon**: Click the **Canvas++** icon in Obsidian's left ribbon to create a new Canvas++ file.
+- **File Explorer**: Right-click any folder or file and select **New Canvas++**.
 
 ### Keyboard & Mouse Shortcuts
 

@@ -200,3 +200,107 @@ export function getCirclePerimeterIntersection(
   };
 }
 
+/**
+ * Calculates the intersection point between a ray from an upright triangle center
+ * to a target point and the perimeter of the triangle.
+ * Top vertex: (cx, by); Bottom-right: (bx + bw, by + bh); Bottom-left: (bx, by + bh).
+ */
+export function getTrianglePerimeterIntersection(
+  boundary: { position: Point; size: Size },
+  target: Point
+): Point {
+  const bx = boundary.position.x;
+  const by = boundary.position.y;
+  const bw = boundary.size.width;
+  const bh = boundary.size.height;
+  const cx = bx + bw / 2;
+  const cy = by + bh / 2;
+
+  const dx = target.x - cx;
+  const dy = target.y - cy;
+
+  if (dx === 0 && dy === 0) {
+    return { x: Math.round(cx), y: Math.round(by) };
+  }
+
+  const v1 = { x: cx, y: by };
+  const v2 = { x: bx + bw, y: by + bh };
+  const v3 = { x: bx, y: by + bh };
+
+  const edges = [
+    [v1, v2],
+    [v2, v3],
+    [v3, v1],
+  ];
+
+  let closestPt: Point = { x: Math.round(cx), y: Math.round(by) };
+  let minT = Infinity;
+
+  for (const [a, b] of edges) {
+    const ex = b.x - a.x;
+    const ey = b.y - a.y;
+    const denom = dx * ey - dy * ex;
+    if (Math.abs(denom) < 1e-6) continue;
+
+    const t = ((a.x - cx) * ey - (a.y - cy) * ex) / denom;
+    const u = ((a.x - cx) * dy - (a.y - cy) * dx) / denom;
+
+    if (t > 0 && u >= 0 && u <= 1 && t < minT) {
+      minT = t;
+      closestPt = {
+        x: Math.round(cx + t * dx),
+        y: Math.round(cy + t * dy),
+      };
+    }
+  }
+
+  return closestPt;
+}
+
+function ccw(p1: Point, p2: Point, p3: Point): boolean {
+  return (p3.y - p1.y) * (p2.x - p1.x) > (p2.y - p1.y) * (p3.x - p1.x);
+}
+
+export function segmentsIntersect(p1: Point, p2: Point, p3: Point, p4: Point): boolean {
+  return (
+    ccw(p1, p3, p4) !== ccw(p2, p3, p4) &&
+    ccw(p1, p2, p3) !== ccw(p1, p2, p4)
+  );
+}
+
+export function lineSegmentIntersectsRect(
+  p1: Point,
+  p2: Point,
+  r: { position: Point; size: Size }
+): boolean {
+  const minX = r.position.x;
+  const maxX = r.position.x + r.size.width;
+  const minY = r.position.y;
+  const maxY = r.position.y + r.size.height;
+
+  // Check if either endpoint is inside the rect
+  if (
+    (p1.x >= minX && p1.x <= maxX && p1.y >= minY && p1.y <= maxY) ||
+    (p2.x >= minX && p2.x <= maxX && p2.y >= minY && p2.y <= maxY)
+  ) {
+    return true;
+  }
+
+  // Check intersection with all 4 rectangle boundary edges
+  const rectEdges: [Point, Point][] = [
+    [{ x: minX, y: minY }, { x: maxX, y: minY }],
+    [{ x: maxX, y: minY }, { x: maxX, y: maxY }],
+    [{ x: maxX, y: maxY }, { x: minX, y: maxY }],
+    [{ x: minX, y: maxY }, { x: minX, y: minY }],
+  ];
+
+  for (const [e1, e2] of rectEdges) {
+    if (segmentsIntersect(p1, p2, e1, e2)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+

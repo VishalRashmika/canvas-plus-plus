@@ -6,6 +6,7 @@ import { DiagramNode } from "../../domain/entities/DiagramNode";
 import { DiagramEdge } from "../../domain/entities/DiagramEdge";
 import { Group } from "../../domain/entities/Group";
 import { Point } from "../../domain/value-objects/Point";
+import { Size } from "../../domain/value-objects/Rect";
 import { DiagramEditor } from "../../application/use-cases/DiagramEditor";
 import { AutosaveCoordinator } from "../../application/use-cases/AutosaveCoordinator";
 import { JsonCanvasSerializer } from "../../infrastructure/persistence/JsonCanvasSerializer";
@@ -14,6 +15,7 @@ import { Toolbar } from "./Toolbar";
 import { PalettePanel } from "./PalettePanel";
 import { MinimapView } from "./MinimapView";
 import { NoteSuggestModal } from "./NoteSuggestModal";
+import { ImageSuggestModal, isImageFile } from "./ImageSuggestModal";
 import { ChipDefinitionModal } from "./ChipDefinitionModal";
 import { ChipInterfaceDefinition } from "../../domain/entities/ChipInterfaceDefinition";
 import { defaultCustomChipRegistry } from "../../domain/services/CustomChipRegistry";
@@ -60,6 +62,11 @@ export class UmlCanvasView extends TextFileView {
         }
       })
     );
+    this.registerEvent(
+      this.app.workspace.on("css-change", () => {
+        this.applyTheme();
+      })
+    );
   }
 
   getViewType(): string {
@@ -93,7 +100,7 @@ export class UmlCanvasView extends TextFileView {
       // Blank new file
       diagram = createDiagram({
         id: this.file ? this.file.path : `diag-${Date.now()}`,
-        diagramType: this.plugin.settings.defaultDiagramType || "uml.class",
+        diagramType: this.plugin.settings.defaultDiagramType || "general",
         title: this.file ? this.file.basename : "New Diagram",
       });
     } else {
@@ -103,7 +110,7 @@ export class UmlCanvasView extends TextFileView {
         // Fallback for corrupted/invalid files
         diagram = createDiagram({
           id: this.file ? this.file.path : `diag-${Date.now()}`,
-          diagramType: this.plugin.settings.defaultDiagramType || "uml.class",
+          diagramType: this.plugin.settings.defaultDiagramType || "general",
           title: this.file ? this.file.basename : "Recovered Diagram",
         });
       }
@@ -153,6 +160,7 @@ export class UmlCanvasView extends TextFileView {
     this.contentEl.empty();
 
     this.rootEl = this.contentEl.createDiv({ cls: "umlcanvas-view-container" });
+    this.applyTheme();
     const svgContainer = this.rootEl.createDiv({ cls: "umlcanvas-svg-container" });
 
     this.editor = new DiagramEditor(diagram);
@@ -170,6 +178,7 @@ export class UmlCanvasView extends TextFileView {
     this.renderer = new SvgSceneRenderer(svgContainer, this.editor, {
       showGrid: this.plugin.settings.showGrid,
       enableFreehand: this.plugin.settings.enableFreehand,
+      autoShapeDetection: this.plugin.settings.autoShapeDetection ?? true,
       onModeChange: () => {
         if (this.toolbar) {
           this.toolbar.updateToolMode();
@@ -183,11 +192,16 @@ export class UmlCanvasView extends TextFileView {
           this.minimap.update();
         }
       },
-      onStrokeComplete: (stroke) => {
+      onStrokeComplete: (stroke, strokeOpts) => {
         if (!this.editor) return;
-        const result = this.editor.snapStrokeToShape(stroke);
-        if (result) {
-          this.showFreehandEscapeHatch(stroke);
+        const autoDetect = strokeOpts?.autoDetect ?? this.renderer?.isAutoShapeDetection ?? true;
+        if (autoDetect) {
+          const result = this.editor.snapStrokeToShape(stroke);
+          if (result) {
+            this.showFreehandEscapeHatch(stroke);
+          } else {
+            this.editor.keepAsFreehand(stroke);
+          }
         } else {
           this.editor.keepAsFreehand(stroke);
         }
@@ -244,8 +258,34 @@ export class UmlCanvasView extends TextFileView {
         }
 
         if (file) {
-          await this.addNoteToCanvas(file, canvasPoint);
+          if (isImageFile(file)) {
+            await this.addImageToCanvas({ file, canvasPoint });
+          } else {
+            await this.addNoteToCanvas(file, canvasPoint);
+          }
           return true;
+        }
+
+        // 3. Check dataTransfer files from OS file manager
+        if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
+          for (let i = 0; i < e.dataTransfer.files.length; i++) {
+            const osFile = e.dataTransfer.files[i];
+            if (osFile.type.startsWith("image/") || isImageFile(osFile.name)) {
+              if (typeof FileReader !== "undefined") {
+                const reader = new FileReader();
+                reader.onload = () => {
+                  const dataUrl = reader.result as string;
+                  void this.addImageToCanvas({
+                    src: dataUrl,
+                    title: osFile.name.replace(/\.[^/.]+$/, ""),
+                    canvasPoint,
+                  });
+                };
+                reader.readAsDataURL(osFile);
+              }
+              return true;
+            }
+          }
         }
         return false;
       },
@@ -288,8 +328,32 @@ export class UmlCanvasView extends TextFileView {
       },
       () => {
         this.openNotePickerModal();
+      },
+      () => {
+        void this.toggleTheme();
+      },
+      () => {
+        this.openImagePickerModal();
       }
     );
+
+    // Deselect currently selected component(s) when clicking empty canvas space (#9)
+    this.rootEl.addEventListener("mousedown", (e: MouseEvent) => {
+      if ((e as any)._umlHandled) return;
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      if (
+        target.closest(
+          ".umlcanvas-toolbar, .umlcanvas-menu-dropdown, .umlcanvas-palette-panel, .umlcanvas-minimap, .umlcanvas-color-palette-popover, .umlcanvas-align-popover, .umlcanvas-inline-editor, .modal"
+        )
+      ) {
+        return;
+      }
+      (e as any)._umlHandled = true;
+      if (!e.shiftKey && !e.metaKey && !e.ctrlKey) {
+        this.editor?.clearSelection();
+      }
+    });
 
     // Setup Copy / Paste (F-012) and Minimap (F-011) shortcuts
     this.rootEl.addEventListener("keydown", (e: KeyboardEvent) => {
@@ -307,6 +371,32 @@ export class UmlCanvasView extends TextFileView {
         if (target.tagName !== "INPUT" && target.tagName !== "TEXTAREA") {
           e.preventDefault();
           this.minimap?.toggle();
+        }
+      }
+    });
+
+    // Setup Image Paste listener
+    this.rootEl.addEventListener("paste", (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (items) {
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i];
+          if (item.type.startsWith("image/")) {
+            e.preventDefault();
+            const blob = item.getAsFile();
+            if (blob && typeof FileReader !== "undefined") {
+              const reader = new FileReader();
+              reader.onload = () => {
+                const dataUrl = reader.result as string;
+                void this.addImageToCanvas({
+                  src: dataUrl,
+                  title: "Pasted Photo",
+                });
+              };
+              reader.readAsDataURL(blob);
+              return;
+            }
+          }
         }
       }
     });
@@ -374,13 +464,51 @@ export class UmlCanvasView extends TextFileView {
   }
 
   updateSettings(settings: UmlCanvasSettings): void {
+    this.applyTheme();
     if (this.renderer) {
       this.renderer.setEnableFreehand(settings.enableFreehand);
+      this.renderer.setAutoShapeDetection(settings.autoShapeDetection ?? true);
       this.renderer.setGridVisible(settings.showGrid);
     }
     if (this.toolbar) {
       this.toolbar.setFreehandEnabled(settings.enableFreehand);
+      this.toolbar.updateToolMode();
     }
+  }
+
+  public applyTheme(): void {
+    if (!this.rootEl) return;
+    const settingTheme = this.plugin?.settings?.theme ?? "system";
+    let isLight = false;
+
+    if (settingTheme === "light") {
+      isLight = true;
+    } else if (settingTheme === "dark") {
+      isLight = false;
+    } else {
+      // "system": match Obsidian theme
+      const bodyHasLight =
+        typeof document !== "undefined" &&
+        document.body?.classList?.contains("theme-light");
+      isLight = Boolean(bodyHasLight);
+    }
+
+    if (isLight) {
+      this.rootEl.classList.remove("umlcanvas-theme-dark", "theme-dark");
+      this.rootEl.classList.add("umlcanvas-theme-light", "theme-light");
+    } else {
+      this.rootEl.classList.remove("umlcanvas-theme-light", "theme-light");
+      this.rootEl.classList.add("umlcanvas-theme-dark", "theme-dark");
+    }
+  }
+
+  public async toggleTheme(): Promise<void> {
+    const isCurrentlyLight =
+      this.rootEl?.classList?.contains("umlcanvas-theme-light") ||
+      this.rootEl?.classList?.contains("theme-light") ||
+      false;
+    this.plugin.settings.theme = isCurrentlyLight ? "dark" : "light";
+    await this.plugin.saveSettings();
   }
 
   private showContextMenu(
@@ -436,6 +564,17 @@ export class UmlCanvasView extends TextFileView {
           });
       });
 
+      if (node.kind === "generic.image") {
+        menu.addItem((item) => {
+          item
+            .setTitle("Change image...")
+            .setIcon("image")
+            .onClick(() => {
+              this.openImagePickerModal(node.position);
+            });
+        });
+      }
+
       const filePath =
         (node.metadata?.filePath as string) ||
         (node.customData?.filePath as string);
@@ -446,6 +585,34 @@ export class UmlCanvasView extends TextFileView {
             .setIcon("external-link")
             .onClick(() => {
               void this.app.workspace.openLinkText(filePath, "", false);
+            });
+        });
+      }
+
+      if (node.kind === "obsidian.note") {
+        const isFit = (node.customData?.scaleMode ?? "fit") === "fit";
+        menu.addItem((item) => {
+          item
+            .setTitle(isFit ? "Scale: 100% (Original size)" : "Scale: Fit content to card")
+            .setIcon("scaling")
+            .onClick(() => {
+              this.renderer?.toggleNoteScaleMode(node.id);
+            });
+        });
+        menu.addItem((item) => {
+          item
+            .setTitle("Scale: Zoom in (+15%)")
+            .setIcon("zoom-in")
+            .onClick(() => {
+              this.renderer?.adjustNoteScale(node.id, 0.15);
+            });
+        });
+        menu.addItem((item) => {
+          item
+            .setTitle("Scale: Zoom out (−15%)")
+            .setIcon("zoom-out")
+            .onClick(() => {
+              this.renderer?.adjustNoteScale(node.id, -0.15);
             });
         });
       }
@@ -463,8 +630,20 @@ export class UmlCanvasView extends TextFileView {
 
       for (const preset of CANVAS_COLOR_PRESETS) {
         menu.addItem((item) => {
+          let label = preset.label;
+          if (node.kind === "generic.stickyNote" || node.kind === "generic.note") {
+            const stickyLabels: Record<string, string> = {
+              "1": "Pink",
+              "2": "Orange",
+              "3": "Yellow (Classic)",
+              "4": "Green (Mint)",
+              "5": "Blue (Sky)",
+              "6": "Purple",
+            };
+            label = stickyLabels[preset.id] ?? preset.label;
+          }
           item
-            .setTitle(`Color: ${preset.label} (${preset.id})`)
+            .setTitle(`Color: ${label} (${preset.id})`)
             .setIcon("palette")
             .onClick(() => {
               this.editor?.setColorForSelection(preset.id);
@@ -647,6 +826,24 @@ export class UmlCanvasView extends TextFileView {
         });
       }
 
+      menu.addItem((item) => {
+        item
+          .setTitle("Reroute line (Auto)")
+          .setIcon("refresh-cw")
+          .onClick(() => {
+            this.editor?.rerouteEdge(edge.id);
+          });
+      });
+
+      menu.addItem((item) => {
+        item
+          .setTitle("Reverse line direction")
+          .setIcon("arrow-left-right")
+          .onClick(() => {
+            this.editor?.reverseEdge(edge.id);
+          });
+      });
+
       menu.addSeparator();
 
       menu.addItem((item) => {
@@ -699,6 +896,15 @@ export class UmlCanvasView extends TextFileView {
       }
 
       menu.addSeparator();
+
+      menu.addItem((item) => {
+        item
+          .setTitle("Duplicate (Ctrl+D)")
+          .setIcon("copy-plus")
+          .onClick(() => {
+            this.editor?.duplicateSelection();
+          });
+      });
 
       menu.addItem((item) => {
         item
@@ -827,6 +1033,24 @@ export class UmlCanvasView extends TextFileView {
 
       menu.addItem((item) => {
         item
+          .setTitle("Add sticky note")
+          .setIcon("sticky-note")
+          .onClick(() => {
+            this.addStickyNoteToCanvas({ canvasPoint });
+          });
+      });
+
+      menu.addItem((item) => {
+        item
+          .setTitle("Insert image (photo frame)...")
+          .setIcon("image")
+          .onClick(() => {
+            this.openImagePickerModal(canvasPoint);
+          });
+      });
+
+      menu.addItem((item) => {
+        item
           .setTitle("Paste")
           .setIcon("clipboard")
           .onClick(() => {
@@ -877,6 +1101,139 @@ export class UmlCanvasView extends TextFileView {
     }).open();
   }
 
+  public openImagePickerModal(canvasPoint?: Point): void {
+    const vaultImages = this.app.vault.getFiles().filter((f: TFile) => isImageFile(f));
+    if (vaultImages.length > 0) {
+      new ImageSuggestModal(this.app, (file: TFile) => {
+        void this.addImageToCanvas({ file, canvasPoint });
+      }).open();
+    } else {
+      this.openLocalImageFileDialog(canvasPoint);
+    }
+  }
+
+  public openLocalImageFileDialog(canvasPoint?: Point): void {
+    if (typeof document === "undefined") return;
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.style.display = "none";
+    input.addEventListener("change", () => {
+      const file = input.files?.[0];
+      if (file && typeof FileReader !== "undefined") {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const dataUrl = reader.result as string;
+          void this.addImageToCanvas({
+            src: dataUrl,
+            title: file.name.replace(/\.[^/.]+$/, ""),
+            canvasPoint,
+          });
+        };
+        reader.readAsDataURL(file);
+      }
+      input.remove();
+    });
+    document.body.appendChild(input);
+    input.click();
+  }
+
+  public async addImageToCanvas(options: {
+    file?: TFile;
+    filePath?: string;
+    src?: string;
+    title?: string;
+    canvasPoint?: Point;
+    size?: Size;
+  }): Promise<DiagramNode | null> {
+    if (!this.editor) return null;
+
+    let targetPoint = options.canvasPoint;
+    if (!targetPoint) {
+      const transform = this.renderer?.currentTransform ?? { panX: 0, panY: 0, zoom: 1 };
+      const centerScreen = {
+        x: (this.rootEl?.clientWidth ?? 800) / 2,
+        y: (this.rootEl?.clientHeight ?? 600) / 2,
+      };
+      targetPoint = {
+        x: Math.round((centerScreen.x - transform.panX) / transform.zoom - 110),
+        y: Math.round((centerScreen.y - transform.panY) / transform.zoom - 130),
+      };
+    }
+
+    let src = options.src || "";
+    const filePath = options.filePath || (options.file ? options.file.path : "");
+    const title = options.title || (options.file ? options.file.basename : "Photo");
+
+    if (options.file) {
+      try {
+        if (typeof this.app.vault.getResourcePath === "function") {
+          src = this.app.vault.getResourcePath(options.file);
+        } else {
+          src = options.file.path;
+        }
+      } catch {
+        src = options.file.path;
+      }
+    }
+
+    const imageNode = this.editor.addNode({
+      kind: "generic.image",
+      title,
+      position: targetPoint,
+      size: options.size ?? { width: 220, height: 260 },
+      metadata: {
+        filePath,
+        src,
+      },
+      customData: {
+        filePath,
+        src,
+      },
+    });
+
+    this.editor.selectNode(imageNode.id, false);
+    return imageNode;
+  }
+
+  public addStickyNoteToCanvas(options?: {
+    text?: string;
+    color?: string;
+    canvasPoint?: Point;
+    size?: Size;
+  }): DiagramNode | null {
+    if (!this.editor) return null;
+
+    let targetPoint = options?.canvasPoint;
+    if (!targetPoint) {
+      const transform = this.renderer?.currentTransform ?? { panX: 0, panY: 0, zoom: 1 };
+      const centerScreen = {
+        x: (this.rootEl?.clientWidth ?? 800) / 2,
+        y: (this.rootEl?.clientHeight ?? 600) / 2,
+      };
+      targetPoint = {
+        x: Math.round((centerScreen.x - transform.panX) / transform.zoom - 90),
+        y: Math.round((centerScreen.y - transform.panY) / transform.zoom - 70),
+      };
+    }
+
+    const stickyNode = this.editor.addNode({
+      kind: "generic.stickyNote",
+      title: options?.text ?? "Sticky Note",
+      position: targetPoint,
+      size: options?.size ?? { width: 180, height: 140 },
+      style: {
+        color: options?.color ?? "3",
+      },
+    });
+
+    this.editor.selectNode(stickyNode.id, false);
+    if (this.renderer) {
+      this.renderer.startInlineEditor(stickyNode);
+    }
+    return stickyNode;
+  }
+
   public async addNoteToCanvas(file: TFile, canvasPoint?: Point): Promise<DiagramNode | null> {
     if (!this.editor) return null;
 
@@ -920,6 +1277,8 @@ export class UmlCanvasView extends TextFileView {
         filePath: file.path,
         content,
         snippet,
+        scaleMode: "fit",
+        scale: 1.0,
       },
     });
 
@@ -959,6 +1318,7 @@ export class UmlCanvasView extends TextFileView {
                 filePath: file.path,
                 content,
                 snippet,
+                scaleMode: node.customData?.scaleMode ?? "fit",
               },
             });
           }

@@ -4,7 +4,6 @@ import {
   DiagramEdge,
   EdgeStyle,
   LinePatternType,
-  LineEndingType,
   createDiagramEdge,
 } from "../../domain/entities/DiagramEdge";
 import { Point } from "../../domain/value-objects/Point";
@@ -1081,7 +1080,7 @@ export class DiagramEditor {
   public inferEdgeKind(
     markerStart: string,
     markerEnd: string,
-    lineType: LinePatternType | string,
+    lineType: string,
     fallbackKind?: string
   ): string {
     const s = markerStart.replace(/^uml-marker-/, "");

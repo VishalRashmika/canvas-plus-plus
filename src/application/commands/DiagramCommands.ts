@@ -302,7 +302,7 @@ export class ResizeNodeCommand implements Command {
       node.position = { ...this.newGeometry.position };
       node.size = { ...this.newGeometry.size };
       if (this.newGeometry.customData) {
-        node.customData = JSON.parse(JSON.stringify(this.newGeometry.customData));
+        node.customData = JSON.parse(JSON.stringify(this.newGeometry.customData)) as Record<string, unknown>;
       }
     }
   }
@@ -313,7 +313,7 @@ export class ResizeNodeCommand implements Command {
       node.position = { ...this.oldGeometry.position };
       node.size = { ...this.oldGeometry.size };
       if (this.oldGeometry.customData) {
-        node.customData = JSON.parse(JSON.stringify(this.oldGeometry.customData));
+        node.customData = JSON.parse(JSON.stringify(this.oldGeometry.customData)) as Record<string, unknown>;
       }
     }
   }
@@ -1546,15 +1546,14 @@ export class SetFontCommand implements Command {
     }
     if (targets.groups) {
       for (const group of targets.groups) {
-        const g = group as any;
         this.previousGroupFonts.set(group.id, {
-          fontSize: g.fontSize ?? g.style?.fontSize,
-          bold: g.bold ?? g.style?.bold,
-          italic: g.italic ?? g.style?.italic,
-          fontWeight: g.fontWeight ?? g.style?.fontWeight,
-          fontStyle: g.fontStyle ?? g.style?.fontStyle,
-          fontFamily: g.fontFamily ?? g.style?.fontFamily,
-          labelStyle: g.style ? { ...g.style } : undefined,
+          fontSize: group.fontSize ?? group.style?.fontSize,
+          bold: group.bold ?? group.style?.bold,
+          italic: group.italic ?? group.style?.italic,
+          fontWeight: group.fontWeight ?? group.style?.fontWeight,
+          fontStyle: group.fontStyle ?? group.style?.fontStyle,
+          fontFamily: group.fontFamily ?? group.style?.fontFamily,
+          labelStyle: group.style ? { ...group.style } : undefined,
         });
       }
     }
@@ -1737,50 +1736,49 @@ export class SetFontCommand implements Command {
 
     if (this.targets.groups) {
       for (const group of this.targets.groups) {
-        const g = group as any;
         if (this.patch.reset) {
-          delete g.fontSize;
-          delete g.bold;
-          delete g.italic;
-          delete g.fontWeight;
-          delete g.fontStyle;
-          delete g.fontFamily;
-          if (g.style) {
-            delete g.style.fontSize;
-            delete g.style.bold;
-            delete g.style.italic;
-            delete g.style.fontFamily;
+          delete group.fontSize;
+          delete group.bold;
+          delete group.italic;
+          delete group.fontWeight;
+          delete group.fontStyle;
+          delete group.fontFamily;
+          if (group.style) {
+            delete group.style.fontSize;
+            delete group.style.bold;
+            delete group.style.italic;
+            delete group.style.fontFamily;
           }
         } else {
           if (this.patch.fontSize !== undefined) {
-            g.fontSize = this.patch.fontSize;
-            if (!g.style) g.style = {};
-            g.style.fontSize = this.patch.fontSize;
+            group.fontSize = this.patch.fontSize;
+            if (!group.style) group.style = {};
+            group.style.fontSize = this.patch.fontSize;
           }
           if (this.patch.bold !== undefined) {
-            g.bold = this.patch.bold;
-            g.fontWeight = this.patch.bold ? "bold" : "normal";
-            if (!g.style) g.style = {};
-            g.style.bold = this.patch.bold;
+            group.bold = this.patch.bold;
+            group.fontWeight = this.patch.bold ? "bold" : "normal";
+            if (!group.style) group.style = {};
+            group.style.bold = this.patch.bold;
           }
           if (this.patch.italic !== undefined) {
-            g.italic = this.patch.italic;
-            g.fontStyle = this.patch.italic ? "italic" : "normal";
-            if (!g.style) g.style = {};
-            g.style.italic = this.patch.italic;
+            group.italic = this.patch.italic;
+            group.fontStyle = this.patch.italic ? "italic" : "normal";
+            if (!group.style) group.style = {};
+            group.style.italic = this.patch.italic;
           }
           if (this.patch.fontWeight !== undefined) {
-            g.fontWeight = this.patch.fontWeight;
-            g.bold = this.patch.fontWeight === "bold" || this.patch.fontWeight === 700;
+            group.fontWeight = this.patch.fontWeight;
+            group.bold = this.patch.fontWeight === "bold" || this.patch.fontWeight === 700;
           }
           if (this.patch.fontStyle !== undefined) {
-            g.fontStyle = this.patch.fontStyle;
-            g.italic = this.patch.fontStyle === "italic";
+            group.fontStyle = this.patch.fontStyle;
+            group.italic = this.patch.fontStyle === "italic";
           }
           if (this.patch.fontFamily !== undefined) {
-            g.fontFamily = this.patch.fontFamily;
-            if (!g.style) g.style = {};
-            g.style.fontFamily = this.patch.fontFamily;
+            group.fontFamily = this.patch.fontFamily;
+            if (!group.style) group.style = {};
+            group.style.fontFamily = this.patch.fontFamily;
           }
         }
       }
@@ -1842,16 +1840,15 @@ export class SetFontCommand implements Command {
     if (this.targets.groups) {
       for (const group of this.targets.groups) {
         const prev = this.previousGroupFonts.get(group.id);
-        const g = group as any;
         if (!prev) continue;
-        if (prev.fontSize !== undefined) g.fontSize = prev.fontSize; else delete g.fontSize;
-        if (prev.bold !== undefined) g.bold = prev.bold; else delete g.bold;
-        if (prev.italic !== undefined) g.italic = prev.italic; else delete g.italic;
-        if (prev.fontWeight !== undefined) g.fontWeight = prev.fontWeight; else delete g.fontWeight;
-        if (prev.fontStyle !== undefined) g.fontStyle = prev.fontStyle; else delete g.fontStyle;
-        if (prev.fontFamily !== undefined) g.fontFamily = prev.fontFamily; else delete g.fontFamily;
-        if (prev.labelStyle) g.style = { ...prev.labelStyle };
-        else if (g.style) delete g.style;
+        if (prev.fontSize !== undefined) group.fontSize = prev.fontSize; else delete group.fontSize;
+        if (prev.bold !== undefined) group.bold = prev.bold; else delete group.bold;
+        if (prev.italic !== undefined) group.italic = prev.italic; else delete group.italic;
+        if (prev.fontWeight !== undefined) group.fontWeight = prev.fontWeight; else delete group.fontWeight;
+        if (prev.fontStyle !== undefined) group.fontStyle = prev.fontStyle; else delete group.fontStyle;
+        if (prev.fontFamily !== undefined) group.fontFamily = prev.fontFamily; else delete group.fontFamily;
+        if (prev.labelStyle) group.style = { ...prev.labelStyle };
+        else if (group.style) delete group.style;
       }
     }
   }

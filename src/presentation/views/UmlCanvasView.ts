@@ -1,9 +1,13 @@
-import { TextFileView, WorkspaceLeaf, Menu, MenuItem, TFile, MarkdownRenderer, Platform, App } from "obsidian";
+import { TextFileView, WorkspaceLeaf, Menu, TFile, MarkdownRenderer, Platform, App } from "obsidian";
 
 declare module "obsidian" {
   interface MenuItem {
     setSubmenu?(): Menu;
   }
+}
+
+interface HandledEvent extends Event {
+  _umlHandled?: boolean;
 }
 import type CanvasPlusPlusPlugin from "../../main";
 import { VIEW_TYPE_UML_CANVAS } from "../../main";
@@ -419,7 +423,7 @@ export class UmlCanvasView extends TextFileView {
 
     // Deselect currently selected component(s) when clicking empty canvas space (#9)
     this.rootEl.addEventListener("mousedown", (e: MouseEvent) => {
-      if ((e as any)._umlHandled) return;
+      if ((e as HandledEvent)._umlHandled) return;
       const target = e.target as HTMLElement | null;
       if (!target) return;
       if (
@@ -429,7 +433,7 @@ export class UmlCanvasView extends TextFileView {
       ) {
         return;
       }
-      (e as any)._umlHandled = true;
+      (e as HandledEvent)._umlHandled = true;
       if (!e.shiftKey && !e.metaKey && !e.ctrlKey) {
         this.editor?.clearSelection();
       }
@@ -1407,10 +1411,11 @@ export class UmlCanvasView extends TextFileView {
 
   public openLocalImageFileDialog(canvasPoint?: Point): void {
     if (typeof document === "undefined") return;
-    const input = document.createElement("input");
-    input.type = "file";
+    const input = createEl("input", {
+      type: "file",
+      cls: "umlcanvas-file-input-hidden",
+    });
     input.accept = "image/*";
-    input.style.display = "none";
     input.addEventListener("change", () => {
       const file = input.files?.[0];
       if (file && typeof FileReader !== "undefined") {

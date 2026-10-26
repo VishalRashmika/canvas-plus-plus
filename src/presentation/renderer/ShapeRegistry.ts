@@ -55,7 +55,7 @@ export function appendMultilineText(
       tspan.setAttribute("dominant-baseline", options?.dominantBaseline ?? "central");
       tspan.setAttribute("text-anchor", anchor);
       tspan.textContent = lineText || " ";
-      applyFontToSvgElement(tspan as any, nodeFont);
+      applyFontToSvgElement(tspan as SVGElement, nodeFont);
       text.appendChild(tspan);
     });
   }
@@ -350,7 +350,6 @@ export class ShapeRegistry {
         const hasTagged = Boolean(
           node.taggedValues && Object.keys(node.taggedValues).length > 0
         );
-        const headerHeight = hasStereo || hasTagged ? 46 : 32;
 
         const nodeFont = getNodeFontStyle(node);
         let currentY = 12;
@@ -1395,11 +1394,6 @@ export class ShapeRegistry {
         const containerDiv = safeCreateDiv({
           cls: "umlcanvas-obsidian-note-container",
         });
-        containerDiv.style.width = "100%";
-        containerDiv.style.height = "100%";
-        containerDiv.style.overflow = "auto";
-        containerDiv.style.boxSizing = "border-box";
-        containerDiv.style.position = "relative";
 
         const scalerDiv = safeCreateDiv({
           cls: "umlcanvas-obsidian-note-scale-wrapper",
@@ -1407,16 +1401,12 @@ export class ShapeRegistry {
         const scalerWidthPct = Math.round((100 / scale) * 100) / 100;
         const scalerMinHeightPx = Math.round((bodyH / scale) * 100) / 100;
         scalerDiv.style.transform = `scale(${scale})`;
-        scalerDiv.style.transformOrigin = "top left";
         scalerDiv.style.width = `${scalerWidthPct}%`;
         scalerDiv.style.minHeight = `${scalerMinHeightPx}px`;
-        scalerDiv.style.boxSizing = "border-box";
 
         const bodyDiv = safeCreateDiv({
           cls: "umlcanvas-obsidian-note-body markdown-rendered markdown-preview-view umlcanvas-scrollable",
         });
-        bodyDiv.style.width = "100%";
-        bodyDiv.style.boxSizing = "border-box";
 
         const fullMarkdown =
           (node.customData?.content as string) ||
@@ -2712,7 +2702,7 @@ export class ShapeRegistry {
         group.appendChild(divLine);
 
         // Header text (Classifier name)
-        const headerText = appendMultilineText(
+        appendMultilineText(
           group,
           node.labels[0]?.text ?? "Classifier",
           headerW / 2,
@@ -3976,12 +3966,12 @@ export function calculateNoteContentScale(
   };
 }
 
-function safeCreateDiv(options?: { cls?: string; text?: string; attr?: any }): HTMLDivElement {
+function safeCreateDiv(options?: { cls?: string; text?: string; attr?: Record<string, string | number | boolean> }): HTMLDivElement {
   if (typeof createDiv === "function") {
     return createDiv(options);
   }
   if (typeof document !== "undefined") {
-    const div = document.createElement("div");
+    const div = document.createElementNS("http://www.w3.org/1999/xhtml", "div") as unknown as HTMLDivElement;
     if (options?.cls) {
       div.className = options.cls;
       if (div.classList && typeof div.classList.add === "function") {
@@ -3999,9 +3989,9 @@ function safeCreateDiv(options?: { cls?: string; text?: string; attr?: any }): H
   return {
     className: options?.cls || "",
     textContent: options?.text || "",
-    style: {},
-    appendChild: (child: any) => child,
-    createDiv: (childOpts: any) => safeCreateDiv(childOpts),
-    createEl: () => ({}),
+    style: {} as CSSStyleDeclaration,
+    appendChild: (child: Node) => child,
+    createDiv: (childOpts?: unknown) => safeCreateDiv(childOpts as { cls?: string; text?: string }),
+    createEl: () => ({} as HTMLElement),
   } as unknown as HTMLDivElement;
 }

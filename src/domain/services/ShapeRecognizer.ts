@@ -270,7 +270,6 @@ export class ShapeRecognizer {
       (c) => Math.min(...points.map((p) => Math.hypot(p.x - c.x, p.y - c.y))) / diag
     );
     const avgCornerDist = cornerDists.reduce((a, b) => a + b, 0) / 4;
-    const minCornerDist = Math.min(...cornerDists);
     const cornersReached = cornerDists.filter((d) => d < 0.11).length;
 
     for (const p of points) {

@@ -17,6 +17,15 @@ import {
   getNextFontSize,
 } from "../theme/Typography";
 import { defaultEdgeStyleRegistry } from "../renderer/EdgeStyleRegistry";
+import { Group } from "../../domain/entities/Group";
+
+interface HandledEvent extends Event {
+  _umlHandled?: boolean;
+}
+
+function markEventHandled(e: Event): void {
+  (e as HandledEvent)._umlHandled = true;
+}
 
 function renderIcon(parent: HTMLElement, iconId: string): void {
   try {
@@ -97,7 +106,7 @@ export class Toolbar {
   // Align Popover
   private alignPopoverEl: HTMLElement | null = null;
   private alignWinClickBound: ((e: MouseEvent) => void) | null = null;
-  private alignCloseTimer: ReturnType<typeof setTimeout> | null = null;
+  private alignCloseTimer: number | null = null;
 
   // Color Palette Popover
   private colorPaletteEl: HTMLElement | null = null;
@@ -150,7 +159,7 @@ export class Toolbar {
       cls: "umlcanvas-toolbar umlcanvas-main-toolbar",
     });
     this.mainToolbarEl.addEventListener("mousedown", (e) => {
-      (e as any)._umlHandled = true;
+      markEventHandled(e);
       e.stopPropagation();
     });
     this.toolbarEl = this.mainToolbarEl;
@@ -160,7 +169,7 @@ export class Toolbar {
       cls: "umlcanvas-toolbar umlcanvas-floating-bottom-toolbar",
     });
     this.bottomToolbarEl.addEventListener("mousedown", (e) => {
-      (e as any)._umlHandled = true;
+      markEventHandled(e);
       e.stopPropagation();
     });
 
@@ -236,12 +245,12 @@ export class Toolbar {
     }
 
     btn.addEventListener("mousedown", (e) => {
-      (e as any)._umlHandled = true;
+      markEventHandled(e);
       e.stopPropagation();
     });
 
     btn.addEventListener("click", (e) => {
-      (e as any)._umlHandled = true;
+      markEventHandled(e);
       e.stopPropagation();
       onClick();
     });
@@ -349,7 +358,7 @@ export class Toolbar {
     }
   }
 
-  public addGroupBoxAtCenter(color?: string, name = "Group"): any {
+  public addGroupBoxAtCenter(color?: string, name = "Group"): Group {
     const transform = this.renderer.currentTransform;
     const centerScreen = {
       x: this.container.clientWidth / 2,
@@ -1641,7 +1650,7 @@ export class Toolbar {
         this.closeFileMenu();
       }
     };
-    setTimeout(() => {
+    window.setTimeout(() => {
       if (typeof window !== "undefined" && window?.addEventListener && this.fileWinClickBound) {
         window.addEventListener("mousedown", this.fileWinClickBound);
       }
@@ -1940,7 +1949,7 @@ export class Toolbar {
 
     const btnRect = anchor ? anchor.getBoundingClientRect() : { left: 10, top: 10, right: 10, bottom: 10 };
     const containerRect = this.container.getBoundingClientRect();
-    const isTopToolbar = anchor && this.mainToolbarEl && (this.mainToolbarEl === anchor || (typeof (this.mainToolbarEl as any).contains === "function" && this.mainToolbarEl.contains(anchor)));
+    const isTopToolbar = anchor && this.mainToolbarEl && (this.mainToolbarEl === anchor || this.mainToolbarEl.contains(anchor));
 
     const popoverWidth = popover.offsetWidth || 300;
     const maxLeft = Math.max(10, containerRect.width - popoverWidth - 10);
@@ -1971,7 +1980,7 @@ export class Toolbar {
         this.closeConnectorMenu();
       }
     };
-    setTimeout(() => {
+    window.setTimeout(() => {
       if (typeof window !== "undefined" && window?.addEventListener && this.connectorWinClickBound) {
         window.addEventListener("mousedown", this.connectorWinClickBound);
       }
@@ -2110,7 +2119,7 @@ export class Toolbar {
         this.closeColorPalette();
       }
     };
-    setTimeout(() => {
+    window.setTimeout(() => {
       if (typeof window !== "undefined" && window?.addEventListener && this.onWindowClickBound) {
         window.addEventListener("mousedown", this.onWindowClickBound);
       }
@@ -2228,7 +2237,7 @@ export class Toolbar {
       }
     };
     this.alignWinClickBound = onWinClick;
-    this.alignCloseTimer = setTimeout(() => {
+    this.alignCloseTimer = window.setTimeout(() => {
       this.alignCloseTimer = null;
       if (typeof window !== "undefined" && window?.addEventListener && this.alignWinClickBound) {
         window.addEventListener("mousedown", this.alignWinClickBound);
@@ -2238,7 +2247,7 @@ export class Toolbar {
 
   closeAlignMenu(): void {
     if (this.alignCloseTimer !== null) {
-      clearTimeout(this.alignCloseTimer);
+      window.clearTimeout(this.alignCloseTimer);
       this.alignCloseTimer = null;
     }
     if (this.alignWinClickBound) {
@@ -2312,7 +2321,7 @@ export class Toolbar {
 
     const popover = createDiv({ cls: "umlcanvas-font-size-popover" });
     popover.addEventListener("mousedown", (e) => {
-      (e as any)._umlHandled = true;
+      markEventHandled(e);
       e.stopPropagation();
     });
     const currentFont = this.editor.getSelectionFont();
@@ -2328,7 +2337,7 @@ export class Toolbar {
       attr: { "aria-label": "Decrease Font Size" },
     });
     decBtn.addEventListener("mousedown", (e) => {
-      (e as any)._umlHandled = true;
+      markEventHandled(e);
       e.stopPropagation();
       e.preventDefault();
     });
@@ -2339,7 +2348,7 @@ export class Toolbar {
     });
 
     decBtn.addEventListener("click", (e) => {
-      (e as any)._umlHandled = true;
+      markEventHandled(e);
       e.stopPropagation();
       this.stepFontSize(-1);
       const f = this.editor.getSelectionFont();
@@ -2353,12 +2362,12 @@ export class Toolbar {
       attr: { "aria-label": "Increase Font Size" },
     });
     incBtn.addEventListener("mousedown", (e) => {
-      (e as any)._umlHandled = true;
+      markEventHandled(e);
       e.stopPropagation();
       e.preventDefault();
     });
     incBtn.addEventListener("click", (e) => {
-      (e as any)._umlHandled = true;
+      markEventHandled(e);
       e.stopPropagation();
       this.stepFontSize(1);
       const f = this.editor.getSelectionFont();
@@ -2374,12 +2383,12 @@ export class Toolbar {
     });
     if (currentFont.isBold || currentFont.bold) popoverBoldBtn.classList.add("is-active");
     popoverBoldBtn.addEventListener("mousedown", (e) => {
-      (e as any)._umlHandled = true;
+      markEventHandled(e);
       e.stopPropagation();
       e.preventDefault();
     });
     popoverBoldBtn.addEventListener("click", (e) => {
-      (e as any)._umlHandled = true;
+      markEventHandled(e);
       e.stopPropagation();
       this.editor.toggleBoldForSelection();
       const f = this.editor.getSelectionFont();
@@ -2393,12 +2402,12 @@ export class Toolbar {
     });
     if (currentFont.isItalic || currentFont.italic) popoverItalicBtn.classList.add("is-active");
     popoverItalicBtn.addEventListener("mousedown", (e) => {
-      (e as any)._umlHandled = true;
+      markEventHandled(e);
       e.stopPropagation();
       e.preventDefault();
     });
     popoverItalicBtn.addEventListener("click", (e) => {
-      (e as any)._umlHandled = true;
+      markEventHandled(e);
       e.stopPropagation();
       this.editor.toggleItalicForSelection();
       const f = this.editor.getSelectionFont();
@@ -2423,12 +2432,12 @@ export class Toolbar {
         famBtn.classList.add("is-active");
       }
       famBtn.addEventListener("mousedown", (e) => {
-        (e as any)._umlHandled = true;
+        markEventHandled(e);
         e.stopPropagation();
         e.preventDefault();
       });
       famBtn.addEventListener("click", (e) => {
-        (e as any)._umlHandled = true;
+        markEventHandled(e);
         e.stopPropagation();
         this.editor.setFontFamilyForSelection(preset.fontFamily);
         this.closeFontSizeMenu();
@@ -2458,12 +2467,12 @@ export class Toolbar {
       });
 
       presetBtn.addEventListener("mousedown", (e) => {
-        (e as any)._umlHandled = true;
+        markEventHandled(e);
         e.stopPropagation();
         e.preventDefault();
       });
       presetBtn.addEventListener("click", (e) => {
-        (e as any)._umlHandled = true;
+        markEventHandled(e);
         e.stopPropagation();
         this.editor.setFontSizeForSelection(preset.size);
         this.closeFontSizeMenu();
@@ -2479,12 +2488,12 @@ export class Toolbar {
       attr: { "aria-label": "Apply to All Canvas Elements" },
     });
     applyAllBtn.addEventListener("mousedown", (e) => {
-      (e as any)._umlHandled = true;
+      markEventHandled(e);
       e.stopPropagation();
       e.preventDefault();
     });
     applyAllBtn.addEventListener("click", (e) => {
-      (e as any)._umlHandled = true;
+      markEventHandled(e);
       e.stopPropagation();
       const f = this.editor.getSelectionFont();
       this.editor.setFontForAllElements({
@@ -2503,12 +2512,12 @@ export class Toolbar {
       attr: { "aria-label": "Reset Typography" },
     });
     resetBtn.addEventListener("mousedown", (e) => {
-      (e as any)._umlHandled = true;
+      markEventHandled(e);
       e.stopPropagation();
       e.preventDefault();
     });
     resetBtn.addEventListener("click", (e) => {
-      (e as any)._umlHandled = true;
+      markEventHandled(e);
       e.stopPropagation();
       this.editor.resetFontForSelection();
       this.closeFontSizeMenu();
@@ -2545,7 +2554,7 @@ export class Toolbar {
         this.closeFontSizeMenu();
       }
     };
-    setTimeout(() => {
+    window.setTimeout(() => {
       if (typeof window !== "undefined" && window?.addEventListener && this.fontSizeWinClickBound) {
         window.addEventListener("mousedown", this.fontSizeWinClickBound);
       }

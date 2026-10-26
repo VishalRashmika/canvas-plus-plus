@@ -1,4 +1,4 @@
-import { Plugin, TFolder, TFile, Notice } from "obsidian";
+import { Plugin, TFolder, TFile, Notice, App } from "obsidian";
 import { UmlCanvasView } from "./presentation/views/UmlCanvasView";
 import { UmlCanvasSettingTab } from "./presentation/views/UmlCanvasSettingTab";
 import {
@@ -22,6 +22,33 @@ import { ExportForRAG } from "./application/use-cases/ExportForRAG";
  */
 
 export const VIEW_TYPE_UML_CANVAS = "uml-canvas-view";
+
+interface FileExplorerItemLike {
+  file?: unknown;
+  isFocused?: boolean;
+  isSelected?: boolean;
+  selected?: boolean;
+  active?: boolean;
+}
+
+interface FileExplorerTreeLike {
+  selectedFiles?: unknown[];
+  focusedItem?: unknown;
+  selectedItem?: unknown;
+  activeItem?: unknown;
+}
+
+interface FileExplorerViewLike {
+  selectedDirectory?: unknown;
+  selectedFolder?: unknown;
+  selectedFile?: unknown;
+  selectedFiles?: unknown[];
+  selectedItems?: Set<unknown> | unknown[];
+  tree?: FileExplorerTreeLike;
+  activeItem?: unknown;
+  fileItems?: Map<string, unknown> | Record<string, unknown>;
+  containerEl?: HTMLElement;
+}
 
 export default class CanvasPlusPlusPlugin extends Plugin {
   settings: UmlCanvasSettings = DEFAULT_SETTINGS;
@@ -60,7 +87,12 @@ export default class CanvasPlusPlusPlugin extends Plugin {
 
     // Attempt to register 'canvas' only if not already claimed by Obsidian core or another plugin
     try {
-      const viewRegistry = (this.app as any)?.viewRegistry;
+      const appWithRegistry = this.app as App & {
+        viewRegistry?: {
+          typeByExtension?: Record<string, string>;
+        };
+      };
+      const viewRegistry = appWithRegistry.viewRegistry;
       const isCanvasClaimed = Boolean(
         viewRegistry?.typeByExtension && viewRegistry.typeByExtension["canvas"]
       );
@@ -92,17 +124,6 @@ export default class CanvasPlusPlusPlugin extends Plugin {
     );
 
     // F-091: Register command palette entries
-    this.addCommand({
-      id: "create-canvas-plus-plus",
-      name: "Create Canvas++",
-      callback: async () => {
-        await this.createNewDiagramFile(
-          this.settings.defaultDiagramType || "general",
-          "Untitled Diagram"
-        );
-      },
-    });
-
     this.addCommand({
       id: "create-diagram",
       name: "Create diagram",
@@ -313,19 +334,28 @@ export default class CanvasPlusPlusPlugin extends Plugin {
   }
 
   getSelectedDirectory(): TFolder | null {
-    const isFolder = (obj: any): obj is TFolder => {
-      if (!obj) return false;
+    const isFolder = (obj: unknown): obj is TFolder => {
+      if (!obj || typeof obj !== "object") return false;
       if (obj instanceof TFolder) return true;
       if (obj instanceof TFile) return false;
-      if (typeof obj.extension === "string" && obj.extension.length > 0) return false;
+      const rec = obj as Record<string, unknown>;
+      if (typeof rec.extension === "string" && rec.extension.length > 0) return false;
       if (
-        obj.children !== undefined ||
+        rec.children !== undefined ||
         obj.constructor?.name === "TFolder" ||
-        typeof obj.isRoot === "function"
+        typeof (rec as { isRoot?: () => boolean }).isRoot === "function"
       ) {
         return true;
       }
       return false;
+    };
+
+    const getItemFile = (item: unknown): unknown => {
+      if (isFolder(item)) return item;
+      if (item && typeof item === "object" && "file" in item) {
+        return (item as FileExplorerItemLike).file;
+      }
+      return undefined;
     };
 
     const resolveFolderFromPath = (path: string): TFolder | null => {
@@ -344,7 +374,7 @@ export default class CanvasPlusPlusPlugin extends Plugin {
     // 1. Check workspace leaves for 'file-explorer'
     const leaves = this.app.workspace.getLeavesOfType("file-explorer");
     for (const leaf of leaves) {
-      const view = leaf.view as any;
+      const view = leaf.view as unknown as FileExplorerViewLike | undefined;
       if (!view) continue;
 
       // 1a. Explicit selectedDirectory or selectedFolder property on view
@@ -365,10 +395,10 @@ export default class CanvasPlusPlusPlugin extends Plugin {
       }
 
       // 1c. view.selectedFiles or view.tree?.selectedFiles
-      const selectedFiles = view.selectedFiles || (view.tree && view.tree.selectedFiles);
+      const selectedFiles = view.selectedFiles || view.tree?.selectedFiles;
       if (Array.isArray(selectedFiles) && selectedFiles.length > 0) {
         for (const item of selectedFiles) {
-          const file = isFolder(item) ? item : item?.file;
+          const file = getItemFile(item);
           if (isFolder(file)) return file;
         }
       }
@@ -382,7 +412,7 @@ export default class CanvasPlusPlusPlugin extends Plugin {
             ? view.selectedItems
             : [];
         for (const item of items) {
-          const file = isFolder(item) ? item : (item as any)?.file;
+          const file = getItemFile(item);
           if (isFolder(file)) return file;
         }
       }
@@ -392,7 +422,7 @@ export default class CanvasPlusPlusPlugin extends Plugin {
         const treeItem =
           view.tree.focusedItem || view.tree.selectedItem || view.tree.activeItem;
         if (treeItem) {
-          const file = isFolder(treeItem) ? treeItem : treeItem?.file;
+          const file = getItemFile(treeItem);
           if (isFolder(file)) return file;
         }
       }
@@ -401,21 +431,23 @@ export default class CanvasPlusPlusPlugin extends Plugin {
       if (isFolder(view.activeItem)) {
         return view.activeItem;
       }
-      if (isFolder(view.activeItem?.file)) {
-        return view.activeItem.file;
+      if (view.activeItem && typeof view.activeItem === "object" && "file" in view.activeItem) {
+        const activeFile = (view.activeItem as { file?: unknown }).file;
+        if (isFolder(activeFile)) return activeFile;
       }
 
       // 1g. view.fileItems (Map or Record)
       if (view.fileItems) {
-        const items =
+        const items: unknown[] =
           view.fileItems instanceof Map
             ? Array.from(view.fileItems.values())
             : typeof view.fileItems === "object"
             ? Object.values(view.fileItems)
             : [];
-        for (const item of items as any[]) {
-          if (item?.isFocused || item?.isSelected || item?.selected || item?.active) {
-            const file = isFolder(item) ? item : item?.file;
+        for (const item of items) {
+          const itemRec = item as FileExplorerItemLike | null;
+          if (itemRec?.isFocused || itemRec?.isSelected || itemRec?.selected || itemRec?.active) {
+            const file = getItemFile(itemRec);
             if (isFolder(file)) return file;
           }
         }
@@ -423,10 +455,10 @@ export default class CanvasPlusPlusPlugin extends Plugin {
 
       // 1h. DOM container inspection
       if (view.containerEl && typeof view.containerEl.querySelectorAll === "function") {
-        const activeEls = view.containerEl.querySelectorAll(
+        const activeEls = view.containerEl.querySelectorAll<HTMLElement>(
           ".nav-folder.is-active, .nav-folder.is-selected, .nav-folder-title.is-active, .nav-folder-title.is-selected, .tree-item.is-selected, .tree-item-self.is-selected, .tree-item-self.is-active"
         );
-        for (const el of Array.from(activeEls) as HTMLElement[]) {
+        for (const el of Array.from(activeEls)) {
           let dataPath = el.getAttribute("data-path");
           if (!dataPath) {
             const titleEl = el.querySelector(".nav-folder-title, .tree-item-self, [data-path]");
@@ -445,7 +477,7 @@ export default class CanvasPlusPlusPlugin extends Plugin {
     }
 
     // 2. Fallback: app.workspace properties (e.g. if set by mocks or plugins)
-    const ws = this.app.workspace as any;
+    const ws = this.app.workspace as unknown as { selectedDirectory?: unknown; selectedFolder?: unknown };
     if (isFolder(ws.selectedDirectory)) return ws.selectedDirectory;
     if (isFolder(ws.selectedFolder)) return ws.selectedFolder;
 
@@ -604,8 +636,8 @@ export default class CanvasPlusPlusPlugin extends Plugin {
       }
 
       if (this.app?.vault?.on) {
-        this.registerEvent(this.app.vault.on("create", () => setTimeout(updateTags, 50)));
-        this.registerEvent(this.app.vault.on("rename", () => setTimeout(updateTags, 50)));
+        this.registerEvent(this.app.vault.on("create", () => window.setTimeout(updateTags, 50)));
+        this.registerEvent(this.app.vault.on("rename", () => window.setTimeout(updateTags, 50)));
       }
       if (this.app?.workspace?.on) {
         this.registerEvent(this.app.workspace.on("layout-change", () => updateTags()));

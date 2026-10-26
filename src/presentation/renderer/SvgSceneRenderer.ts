@@ -3,7 +3,7 @@ import { DiagramNode } from "../../domain/entities/DiagramNode";
 import { DiagramEdge, EdgeStyle } from "../../domain/entities/DiagramEdge";
 import { Group } from "../../domain/entities/Group";
 import { Point, point } from "../../domain/value-objects/Point";
-import { Rect, Size, size, rect, rectFromBounds, intersects, contains, center } from "../../domain/value-objects/Rect";
+import { Rect, Size, rect, rectFromBounds, intersects, contains, center } from "../../domain/value-objects/Rect";
 import { Side } from "../../domain/types";
 import { ShapeRegistry, defaultShapeRegistry } from "./ShapeRegistry";
 import {
@@ -30,6 +30,10 @@ import {
   getEdgeFontStyle,
   getGroupFontStyle,
 } from "../theme/Typography";
+
+interface HandledMouseEvent extends MouseEvent {
+  _umlHandled?: boolean;
+}
 
 export interface SvgSceneRendererOptions {
   shapeRegistry?: ShapeRegistry;
@@ -769,24 +773,12 @@ export class SvgSceneRenderer {
     if (template.opts.fill === "none") {
       p.setAttribute("fill", "none");
       p.setAttribute("stroke", colorVal);
-      if (p.style) {
-        p.style.fill = "none";
-        p.style.stroke = colorVal;
-      }
     } else if (template.opts.fill === "var(--background-primary)") {
       p.setAttribute("fill", "var(--background-primary)");
       p.setAttribute("stroke", colorVal);
-      if (p.style) {
-        p.style.fill = "var(--background-primary)";
-        p.style.stroke = colorVal;
-      }
     } else {
       p.setAttribute("fill", colorVal);
       p.setAttribute("stroke", colorVal);
-      if (p.style) {
-        p.style.fill = colorVal;
-        p.style.stroke = colorVal;
-      }
     }
 
     this.defsEl.appendChild(m);
@@ -979,11 +971,14 @@ export class SvgSceneRenderer {
         groupEl.setAttribute("data-color", group.color);
         const resolvedColor = resolveCanvasColor(group.color);
         if (resolvedColor) {
-          if (typeof (groupEl as any).setCssProps === "function") {
-            (groupEl as any).setCssProps({ "--canvas-color": resolvedColor });
+          const styledEl = groupEl as unknown as HTMLElement;
+          if (typeof (groupEl as { setCssProps?: (props: Record<string, string>) => void }).setCssProps === "function") {
+            (groupEl as { setCssProps: (props: Record<string, string>) => void }).setCssProps({ "--canvas-color": resolvedColor });
           }
-          if (groupEl.style && typeof groupEl.style.setProperty === "function") {
-            groupEl.style.setProperty("--canvas-color", resolvedColor);
+          if (styledEl.style && typeof styledEl.style.setProperty === "function") {
+            styledEl.style.setProperty("--canvas-color", resolvedColor);
+          } else if (styledEl.style) {
+            styledEl.style["--canvas-color" as unknown as number] = resolvedColor;
           }
         }
         if (isCanvasColorPreset(group.color)) {
@@ -1486,8 +1481,8 @@ export class SvgSceneRenderer {
                 }
               }
             };
-            if (renderPromise && typeof (renderPromise as any).then === "function") {
-              void (renderPromise as Promise<void>).then(onComplete);
+            if (renderPromise instanceof Promise) {
+              void renderPromise.then(onComplete);
             } else {
               onComplete();
             }
@@ -1892,7 +1887,7 @@ export class SvgSceneRenderer {
   }
 
   private handleMouseDown(e: MouseEvent): void {
-    if ((e as any)._umlHandled) return;
+    if ((e as HandledMouseEvent)._umlHandled) return;
 
     const target = e.target as Element | null;
     if (
@@ -1905,7 +1900,7 @@ export class SvgSceneRenderer {
       return;
     }
 
-    (e as any)._umlHandled = true;
+    (e as HandledMouseEvent)._umlHandled = true;
 
     if (this.inlineEditorEl) {
       this.commitInlineEditor();
@@ -2105,11 +2100,11 @@ export class SvgSceneRenderer {
           initialSize: { ...node.size },
           initialPoints:
             node.kind === "generic.freehand" && node.customData?.points
-              ? JSON.parse(JSON.stringify(node.customData.points))
+              ? (JSON.parse(JSON.stringify(node.customData.points)) as Point[])
               : undefined,
           initialPathData:
             node.kind === "generic.freehand" && typeof node.customData?.pathData === "string"
-              ? (node.customData.pathData as string)
+              ? node.customData.pathData
               : undefined,
         };
         return;

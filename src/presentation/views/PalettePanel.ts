@@ -168,6 +168,7 @@ export class PalettePanel {
     // 1. Right side drawer container
     this.panelEl = this.container.createDiv({ cls: "umlcanvas-palette-panel is-collapsed" });
     this.panelEl.setCssStyles({ width: `${this.currentWidth}px` });
+    this.panelEl.addEventListener("mousedown", (e) => e.stopPropagation());
 
     // 1b. Left edge resize handle
     this.resizeHandleEl = this.panelEl.createDiv({
@@ -473,10 +474,7 @@ export class PalettePanel {
       tile.addEventListener("click", () => {
         this.editor.activeEdgeKind = style.kind;
         for (const edgeId of this.editor.selectedEdgeIds) {
-          const edge = this.editor.diagram.edges.find((e) => e.id === edgeId);
-          if (edge) {
-            edge.kind = style.kind;
-          }
+          this.editor.updateEdgeKind(edgeId, style.kind);
         }
         this.updateActiveSelection();
       });
@@ -498,11 +496,69 @@ export class PalettePanel {
           x2: "45",
           y2: "10",
           stroke: "var(--text-normal)",
-          "stroke-width": "1.5",
+          "stroke-width": String(style.strokeWidth ?? 1.5),
         },
       });
       if (style.strokeDasharray) {
         line.setAttribute("stroke-dasharray", style.strokeDasharray);
+      }
+
+      if (style.markerStartId === "uml-marker-diamond-hollow") {
+        previewSvg.createSvg("path", {
+          attr: {
+            d: "M 5 10 L 11 6 L 17 10 L 11 14 Z",
+            fill: "var(--background-primary)",
+            stroke: "var(--text-normal)",
+            "stroke-width": "1.5",
+          },
+        });
+      } else if (style.markerStartId === "uml-marker-diamond-filled") {
+        previewSvg.createSvg("path", {
+          attr: {
+            d: "M 5 10 L 11 6 L 17 10 L 11 14 Z",
+            fill: "var(--text-normal)",
+            stroke: "var(--text-normal)",
+            "stroke-width": "1.5",
+          },
+        });
+      }
+
+      if (style.markerEndId === "uml-marker-triangle-hollow") {
+        previewSvg.createSvg("path", {
+          attr: {
+            d: "M 45 10 L 37 6 L 37 14 Z",
+            fill: "var(--background-primary)",
+            stroke: "var(--text-normal)",
+            "stroke-width": "1.5",
+          },
+        });
+      } else if (style.markerEndId === "uml-marker-triangle-filled") {
+        previewSvg.createSvg("path", {
+          attr: {
+            d: "M 45 10 L 37 6 L 37 14 Z",
+            fill: "var(--text-normal)",
+            stroke: "var(--text-normal)",
+            "stroke-width": "1.5",
+          },
+        });
+      } else if (style.markerEndId === "uml-marker-open-arrow") {
+        previewSvg.createSvg("path", {
+          attr: {
+            d: "M 38 6 L 45 10 L 38 14",
+            fill: "none",
+            stroke: "var(--text-normal)",
+            "stroke-width": "1.5",
+          },
+        });
+      } else if (style.markerEndId === "uml-marker-arrow-filled") {
+        previewSvg.createSvg("path", {
+          attr: {
+            d: "M 45 10 L 37 6 L 37 14 Z",
+            fill: "var(--text-normal)",
+            stroke: "var(--text-normal)",
+            "stroke-width": "1.5",
+          },
+        });
       }
 
       tile.createDiv({

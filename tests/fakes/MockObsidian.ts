@@ -16,7 +16,21 @@ export class Plugin {
   async loadData() { return {}; }
   async saveData(_data: any) {}
   registerView(_type: string, _viewCreator: any) {}
-  registerExtensions(_extensions: string[], _viewType: string) {}
+  registerExtensions(extensions: string[], viewType: string) {
+    if (!this.app) this.app = {};
+    if (!this.app.viewRegistry) {
+      this.app.viewRegistry = { typeByExtension: {} };
+    }
+    for (const ext of extensions) {
+      const lower = ext.toLowerCase();
+      if (this.app.viewRegistry.typeByExtension[lower]) {
+        throw new Error(
+          `Extension ${ext} has already been registered to ${this.app.viewRegistry.typeByExtension[lower]}`
+        );
+      }
+      this.app.viewRegistry.typeByExtension[lower] = viewType;
+    }
+  }
   addSettingTab(_tab: any) {}
   addRibbonIcon(icon: string, title: string, callback: any): HTMLElement {
     const el = (typeof document !== "undefined"
@@ -82,18 +96,97 @@ export class FuzzySuggestModal<T> {
   close() {}
 }
 
+export function createMockElement(tagName = "div"): any {
+  const el: any = {
+    tagName,
+    className: "",
+    children: [],
+    style: {},
+    classList: {
+      classes: new Set<string>(),
+      add: (...cls: string[]) => {
+        cls.forEach((c) => c && c.split(" ").forEach((k) => k && el.classList.classes.add(k)));
+        el.className = Array.from(el.classList.classes).join(" ");
+      },
+      remove: (...cls: string[]) => {
+        cls.forEach((c) => c && c.split(" ").forEach((k) => k && el.classList.classes.delete(k)));
+        el.className = Array.from(el.classList.classes).join(" ");
+      },
+      contains: (c: string) => el.classList.classes.has(c),
+    },
+    empty: () => {
+      el.children = [];
+      el.innerHTML = "";
+    },
+    createDiv: (opts?: any) => {
+      const child = createMockElement("div");
+      if (opts?.cls) child.className = opts.cls;
+      el.children.push(child);
+      return child;
+    },
+    createEl: (tag: string, opts?: any) => {
+      const child = createMockElement(tag);
+      if (opts?.cls) child.className = opts.cls;
+      el.children.push(child);
+      return child;
+    },
+    appendChild: (child: any) => {
+      el.children.push(child);
+      return child;
+    },
+    remove: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    setAttribute: () => {},
+    getAttribute: () => null,
+    querySelectorAll: () => [],
+    querySelector: () => null,
+  };
+  return el;
+}
+
 export class TextFileView {
   app: any;
   leaf: any;
-  contentEl: HTMLElement = typeof document !== "undefined" ? document.createElement("div") : ({} as any);
-  constructor(leaf: any) { this.leaf = leaf; }
+  file: TFile | null = null;
+  data: string = "";
+  contentEl: HTMLElement = typeof document !== "undefined" ? document.createElement("div") : createMockElement("div");
+  constructor(leaf: any) {
+    this.leaf = leaf;
+    this.app = leaf?.app;
+  }
+  canAcceptExtension(_extension: string): boolean {
+    return false;
+  }
+  async onLoadFile(file: TFile): Promise<void> {
+    this.file = file;
+    if (this.app?.vault?.read) {
+      try {
+        this.data = await this.app.vault.read(file);
+      } catch {}
+    }
+    if (typeof (this as any).setViewData === "function") {
+      (this as any).setViewData(this.data, true);
+    }
+  }
+  async onClose(): Promise<void> {}
 }
 
-export class WorkspaceLeaf {}
+export class WorkspaceLeaf {
+  view: any;
+  async openFile(file: TFile): Promise<void> {
+    if (this.view && typeof this.view.canAcceptExtension === "function") {
+      if (!this.view.canAcceptExtension(file.extension)) {
+        throw new Error(`Failed to open "${file.path || ""}"`);
+      }
+    }
+  }
+}
 export class MenuItem {
   title: string = "";
   icon: string = "";
   onClickHandler?: () => any;
+  submenu?: Menu;
   setTitle(title: string) {
     this.title = title;
     return this;
@@ -105,6 +198,11 @@ export class MenuItem {
   onClick(cb: () => any) {
     this.onClickHandler = cb;
     return this;
+  }
+  setSubmenu(): Menu {
+    const sub = new Menu();
+    this.submenu = sub;
+    return sub;
   }
 }
 
@@ -183,6 +281,12 @@ export class App {
   fileManager: any = {
     getNewFileParent: () => null,
   };
+  viewRegistry: any = {
+    typeByExtension: {
+      canvas: "canvas",
+      md: "markdown",
+    },
+  };
 }
 
 export function setIcon(_parent: HTMLElement, _iconId: string): void {}
@@ -190,6 +294,19 @@ export function setIcon(_parent: HTMLElement, _iconId: string): void {}
 export type EventRef = any;
 
 if (typeof HTMLElement !== "undefined") {
+  if (!(HTMLElement.prototype as any).empty) {
+    (HTMLElement.prototype as any).empty = function () {
+      this.innerHTML = "";
+    };
+  }
+  if (!(HTMLElement.prototype as any).createDiv) {
+    (HTMLElement.prototype as any).createDiv = function (opts?: any) {
+      const div = document.createElement("div");
+      if (opts?.cls) div.className = opts.cls;
+      this.appendChild(div);
+      return div;
+    };
+  }
   if (!HTMLElement.prototype.setCssStyles) {
     (HTMLElement.prototype as any).setCssStyles = function (styles: any) {
       Object.assign(this.style, styles);

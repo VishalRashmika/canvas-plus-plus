@@ -37,6 +37,7 @@
   box-shadow: var(--shadow-s, 0 4px 12px rgba(0, 0, 0, 0.15));
   max-width: calc(100% - 24px);
   flex-wrap: wrap;
+  overflow: visible;
 }
 
 .umlcanvas-floating-bottom-toolbar {
@@ -55,7 +56,8 @@
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2), 0 1px 3px rgba(0, 0, 0, 0.1);
   backdrop-filter: blur(8px);
   max-width: calc(100% - 24px);
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
+  overflow: visible;
 }
 
 .umlcanvas-context-group {
@@ -95,50 +97,87 @@
   background-color: var(--background-primary);
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-s, 6px);
+  flex-wrap: wrap;
+  max-width: 100%;
+  overflow: visible;
 }
 
-.umlcanvas-toolbar-btn {
+.umlcanvas-toolbar-btn,
+.umlcanvas-toolbar-btn.clickable-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 4px;
   padding: 4px 8px;
   min-width: 28px;
-  height: 28px;
+  height: 28px !important;
   font-size: 12px;
   font-weight: 500;
   color: var(--text-normal);
-  background-color: transparent;
-  border: none;
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
   border-radius: var(--radius-s, 4px);
   cursor: pointer;
   white-space: nowrap;
   user-select: none;
+  overflow: visible !important;
   transition: background-color 0.15s ease, color 0.15s ease, transform 0.08s ease;
 }
 
-.umlcanvas-toolbar-btn.is-icon-only {
-  padding: 4px;
+.umlcanvas-toolbar-btn.is-icon-only,
+.umlcanvas-toolbar-btn.clickable-icon.is-icon-only {
+  padding: 4px !important;
   width: 28px;
   min-width: 28px;
 }
 
-.umlcanvas-toolbar-btn .umlcanvas-btn-icon {
+.umlcanvas-toolbar-btn .umlcanvas-btn-icon,
+.umlcanvas-toolbar-btn.clickable-icon .umlcanvas-btn-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 15px;
   height: 15px;
   flex-shrink: 0;
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  border: none !important;
+  outline: none !important;
+  -webkit-mask: none !important;
+  mask: none !important;
+  overflow: visible !important;
 }
 
 .umlcanvas-toolbar-btn .umlcanvas-btn-icon svg,
 .umlcanvas-toolbar-btn svg,
-.umlcanvas-toolbar-btn .svg-icon {
+.umlcanvas-toolbar-btn .svg-icon,
+.umlcanvas-toolbar-btn.clickable-icon svg,
+.umlcanvas-toolbar-btn.clickable-icon .svg-icon {
   width: 15px;
   height: 15px;
   stroke-width: 2px;
-  stroke: currentColor;
+  stroke: currentColor !important;
+  fill: none !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  -webkit-mask: none !important;
+  mask: none !important;
+  opacity: 1 !important;
+  overflow: visible !important;
+}
+
+.umlcanvas-toolbar-btn .umlcanvas-btn-icon svg *,
+.umlcanvas-toolbar-btn svg *,
+.umlcanvas-toolbar-btn .svg-icon *,
+.umlcanvas-toolbar-btn.clickable-icon svg *,
+.umlcanvas-toolbar-btn.clickable-icon .svg-icon * {
+  stroke: currentColor !important;
+  fill: none !important;
 }
 
 .umlcanvas-toolbar-btn:hover:not(:disabled) {
@@ -222,12 +261,17 @@
 }
 
 .umlcanvas-svg-container.umlcanvas-panning,
-.umlcanvas-svg-container.umlcanvas-panning * {
-  cursor: grabbing;
+.umlcanvas-svg-container.umlcanvas-panning *,
+.umlcanvas-svg-container.umlcanvas-grab-mode.umlcanvas-panning,
+.umlcanvas-svg-container.umlcanvas-grab-mode.umlcanvas-panning * {
+  cursor: grabbing !important;
 }
 
-.umlcanvas-svg-container.umlcanvas-space-pressed {
-  cursor: grab;
+.umlcanvas-svg-container.umlcanvas-space-pressed,
+.umlcanvas-svg-container.umlcanvas-space-pressed *,
+.umlcanvas-svg-container.umlcanvas-grab-mode,
+.umlcanvas-svg-container.umlcanvas-grab-mode * {
+  cursor: grab !important;
 }
 
 .umlcanvas-view-container.umlcanvas-freehand-mode,
@@ -298,10 +342,12 @@ body .umlcanvas-moving * {
 .umlcanvas-node-title {
   fill: var(--text-normal);
   font-family: var(--font-text, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
-  font-size: 13px;
   font-weight: 600;
   pointer-events: none;
   user-select: none;
+}
+.umlcanvas-node-title:not([font-size]) {
+  font-size: 13px;
 }
 
 .umlcanvas-class-title {
@@ -483,6 +529,21 @@ body .umlcanvas-moving * {
   font-weight: 500;
   user-select: none;
   pointer-events: all;
+}
+
+.umlcanvas-group-color-dot {
+  cursor: pointer;
+  stroke: var(--background-modifier-border);
+  stroke-width: 1px;
+  transition: transform 0.15s ease, stroke-width 0.15s ease, filter 0.15s ease;
+  pointer-events: all;
+}
+
+.umlcanvas-group-color-dot:hover {
+  transform: scale(1.25);
+  stroke: var(--text-normal);
+  stroke-width: 1.5px;
+  filter: brightness(1.2) drop-shadow(0 0 3px rgba(0, 0, 0, 0.3));
 }
 
 .umlcanvas-group-lock-icon {
@@ -795,8 +856,10 @@ body .umlcanvas-moving * {
   line-height: 1.35;
   padding: 2px 4px;
   margin: 0;
+  min-height: calc(1.35em + 4px);
   caret-color: var(--interactive-accent);
   word-break: break-word;
+  overflow-wrap: break-word;
   white-space: pre-wrap;
   transition: border-color 0.1s ease, background-color 0.1s ease;
 }
@@ -890,6 +953,29 @@ body .umlcanvas-moving * {
   stroke: var(--interactive-accent);
 }
 
+.umlcanvas-marker-circle-hollow {
+  fill: var(--background-primary);
+  stroke: var(--text-muted);
+  stroke-width: 1.5;
+}
+
+.umlcanvas-edge:hover .umlcanvas-marker-circle-hollow,
+.umlcanvas-edge-selected ~ * .umlcanvas-marker-circle-hollow {
+  stroke: var(--interactive-accent);
+}
+
+.umlcanvas-marker-circle-filled {
+  fill: var(--text-muted);
+  stroke: var(--text-muted);
+  stroke-width: 1.5;
+}
+
+.umlcanvas-edge:hover .umlcanvas-marker-circle-filled,
+.umlcanvas-edge-selected ~ * .umlcanvas-marker-circle-filled {
+  fill: var(--interactive-accent);
+  stroke: var(--interactive-accent);
+}
+
 /* --- Phase 2 Shapes --- */
 
 .umlcanvas-object-title {
@@ -961,9 +1047,11 @@ body .umlcanvas-moving * {
 .umlcanvas-note-text {
   fill: var(--text-normal);
   font-family: var(--font-text, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
-  font-size: 11px;
   pointer-events: none;
   user-select: none;
+}
+.umlcanvas-note-text:not([font-size]) {
+  font-size: 11px;
 }
 
 /* --- Sticky Note & Mindmap Text Pads --- */
@@ -987,10 +1075,12 @@ body .umlcanvas-moving * {
 .umlcanvas-sticky-text {
   fill: var(--sticky-text, #2c2a24);
   font-family: var(--font-text, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
-  font-size: 13px;
   line-height: 18px;
   pointer-events: none;
   user-select: none;
+}
+.umlcanvas-sticky-text:not([font-size]) {
+  font-size: 13px;
 }
 
 .umlcanvas-sticky-placeholder {
@@ -2360,12 +2450,23 @@ body .umlcanvas-moving * {
 }
 
 /* Freehand Rendered Stroke & Escape Hatch (F-073) */
+.umlcanvas-freehand-hitbox {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 22px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: stroke;
+  cursor: move;
+}
+
 .umlcanvas-freehand-path {
   fill: none;
   stroke: var(--text-normal);
   stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
+  cursor: move;
 }
 
 .umlcanvas-freehand-path.umlcanvas-node-selected {
@@ -2421,43 +2522,43 @@ body .umlcanvas-moving * {
 
 /* High-contrast theme-adaptive color palettes matching native Obsidian Canvas */
 :root, .theme-light, .umlcanvas-theme-light {
-  --canvas-color-1: #c92a3e; /* Pastel Rose / Crisp Red */
-  --canvas-color-2: #c45e00; /* Pastel Amber / Crisp Orange */
-  --canvas-color-3: #a17000; /* Pastel Gold / Amber-Gold Yellow (crisp & high-contrast on off-white/light backgrounds) */
-  --canvas-color-4: #12883f; /* Pastel Sage / Crisp Green */
-  --canvas-color-5: #0a8288; /* Pastel Ocean / Deep Teal-Cyan (crisp & high-contrast on off-white/light backgrounds) */
-  --canvas-color-6: #6340c7; /* Pastel Lavender / Royal Violet */
+  --canvas-color-1: #ff758f; /* Light Rose / Coral */
+  --canvas-color-2: #ffa94d; /* Light Peach / Orange */
+  --canvas-color-3: #ffd43b; /* Light Butter Yellow */
+  --canvas-color-4: #69db7c; /* Light Mint Green */
+  --canvas-color-5: #38d9a9; /* Light Ocean Teal / Cyan */
+  --canvas-color-6: #b197fc; /* Light Lavender Purple */
 }
 
 .theme-dark, .umlcanvas-theme-dark {
-  --canvas-color-1: #fb464c; /* Luminous Red */
-  --canvas-color-2: #e9973f; /* Luminous Orange */
-  --canvas-color-3: #e0de71; /* Luminous Yellow (high-contrast on dark backgrounds) */
-  --canvas-color-4: #44cf6e; /* Luminous Green */
-  --canvas-color-5: #53dfdd; /* Luminous Cyan */
-  --canvas-color-6: #a882ff; /* Luminous Purple */
+  --canvas-color-1: #ff859b; /* Light Luminous Coral */
+  --canvas-color-2: #ffb366; /* Light Luminous Peach */
+  --canvas-color-3: #ffe066; /* Light Luminous Yellow */
+  --canvas-color-4: #7ee787; /* Light Luminous Mint */
+  --canvas-color-5: #67e8f9; /* Light Luminous Cyan */
+  --canvas-color-6: #c4a5ff; /* Light Luminous Lavender */
 }
 
 /* Preset Mappings */
-.is-color-1, [data-color="1"] { --canvas-color: var(--canvas-color-1, #c92a3e); }
-.is-color-2, [data-color="2"] { --canvas-color: var(--canvas-color-2, #c45e00); }
-.is-color-3, [data-color="3"] { --canvas-color: var(--canvas-color-3, #a17000); }
-.is-color-4, [data-color="4"] { --canvas-color: var(--canvas-color-4, #12883f); }
-.is-color-5, [data-color="5"] { --canvas-color: var(--canvas-color-5, #0a8288); }
-.is-color-6, [data-color="6"] { --canvas-color: var(--canvas-color-6, #6340c7); }
+.is-color-1, [data-color="1"] { --canvas-color: var(--canvas-color-1, #ff758f); }
+.is-color-2, [data-color="2"] { --canvas-color: var(--canvas-color-2, #ffa94d); }
+.is-color-3, [data-color="3"] { --canvas-color: var(--canvas-color-3, #ffd43b); }
+.is-color-4, [data-color="4"] { --canvas-color: var(--canvas-color-4, #69db7c); }
+.is-color-5, [data-color="5"] { --canvas-color: var(--canvas-color-5, #38d9a9); }
+.is-color-6, [data-color="6"] { --canvas-color: var(--canvas-color-6, #b197fc); }
 
 .theme-dark .is-color-1, .theme-dark [data-color="1"],
-.umlcanvas-theme-dark .is-color-1, .umlcanvas-theme-dark [data-color="1"] { --canvas-color: var(--canvas-color-1, #fb464c); }
+.umlcanvas-theme-dark .is-color-1, .umlcanvas-theme-dark [data-color="1"] { --canvas-color: var(--canvas-color-1, #ff859b); }
 .theme-dark .is-color-2, .theme-dark [data-color="2"],
-.umlcanvas-theme-dark .is-color-2, .umlcanvas-theme-dark [data-color="2"] { --canvas-color: var(--canvas-color-2, #e9973f); }
+.umlcanvas-theme-dark .is-color-2, .umlcanvas-theme-dark [data-color="2"] { --canvas-color: var(--canvas-color-2, #ffb366); }
 .theme-dark .is-color-3, .theme-dark [data-color="3"],
-.umlcanvas-theme-dark .is-color-3, .umlcanvas-theme-dark [data-color="3"] { --canvas-color: var(--canvas-color-3, #e0de71); }
+.umlcanvas-theme-dark .is-color-3, .umlcanvas-theme-dark [data-color="3"] { --canvas-color: var(--canvas-color-3, #ffe066); }
 .theme-dark .is-color-4, .theme-dark [data-color="4"],
-.umlcanvas-theme-dark .is-color-4, .umlcanvas-theme-dark [data-color="4"] { --canvas-color: var(--canvas-color-4, #44cf6e); }
+.umlcanvas-theme-dark .is-color-4, .umlcanvas-theme-dark [data-color="4"] { --canvas-color: var(--canvas-color-4, #7ee787); }
 .theme-dark .is-color-5, .theme-dark [data-color="5"],
-.umlcanvas-theme-dark .is-color-5, .umlcanvas-theme-dark [data-color="5"] { --canvas-color: var(--canvas-color-5, #53dfdd); }
+.umlcanvas-theme-dark .is-color-5, .umlcanvas-theme-dark [data-color="5"] { --canvas-color: var(--canvas-color-5, #67e8f9); }
 .theme-dark .is-color-6, .theme-dark [data-color="6"],
-.umlcanvas-theme-dark .is-color-6, .umlcanvas-theme-dark [data-color="6"] { --canvas-color: var(--canvas-color-6, #a882ff); }
+.umlcanvas-theme-dark .is-color-6, .umlcanvas-theme-dark [data-color="6"] { --canvas-color: var(--canvas-color-6, #c4a5ff); }
 
 /* Node Color Application */
 .umlcanvas-node[data-color] .umlcanvas-node-body,
@@ -2468,7 +2569,9 @@ body .umlcanvas-moving * {
 .umlcanvas-node[data-color] .umlcanvas-diamond-body,
 .umlcanvas-node[data-color] .umlcanvas-activity-action-body,
 .umlcanvas-node[data-color] .umlcanvas-state-body,
-.umlcanvas-node[data-color] .umlcanvas-state-composite-body {
+.umlcanvas-node[data-color] .umlcanvas-state-composite-body,
+.umlcanvas-node[data-color] .umlcanvas-timing-segment-body,
+.umlcanvas-node[data-color] .umlcanvas-package-tab {
   stroke: var(--canvas-color);
   fill: color-mix(in srgb, var(--canvas-color) 10%, var(--background-primary));
 }
@@ -2542,25 +2645,73 @@ body .umlcanvas-moving * {
   fill: color-mix(in srgb, var(--canvas-color) 7%, transparent);
 }
 
+.umlcanvas-group[data-color]:hover .umlcanvas-group-box {
+  fill: color-mix(in srgb, var(--canvas-color) 11%, transparent);
+  stroke: var(--canvas-color);
+  stroke-width: 2px;
+}
+
+.umlcanvas-group[data-color].is-selected .umlcanvas-group-box {
+  stroke: var(--canvas-color);
+  stroke-width: 2.5px;
+  stroke-dasharray: none;
+  fill: color-mix(in srgb, var(--canvas-color) 14%, transparent);
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--canvas-color) 45%, transparent));
+}
+
 .umlcanvas-group[data-color] .umlcanvas-group-header-bg {
   fill: color-mix(in srgb, var(--canvas-color) 16%, transparent);
+}
+
+.umlcanvas-group[data-color]:hover .umlcanvas-group-header-bg {
+  fill: color-mix(in srgb, var(--canvas-color) 24%, transparent);
+}
+
+.umlcanvas-group[data-color].is-selected .umlcanvas-group-header-bg {
+  fill: color-mix(in srgb, var(--canvas-color) 32%, transparent);
 }
 
 .umlcanvas-group[data-color] .umlcanvas-group-title {
   fill: var(--canvas-color);
 }
 
+.umlcanvas-group[data-color] .umlcanvas-group-collapse-btn {
+  fill: var(--canvas-color);
+}
+
+.umlcanvas-group[data-color] .umlcanvas-group-badge {
+  fill: color-mix(in srgb, var(--canvas-color) 75%, transparent);
+}
+
 .umlcanvas-group[data-color] .umlcanvas-group-collapsed-card {
   stroke: var(--canvas-color);
+  fill: color-mix(in srgb, var(--canvas-color) 8%, var(--background-secondary));
+}
+
+.umlcanvas-group[data-color].is-selected .umlcanvas-group-collapsed-card {
+  stroke: var(--canvas-color);
+  stroke-width: 2.5px;
+  fill: color-mix(in srgb, var(--canvas-color) 16%, var(--background-secondary));
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--canvas-color) 45%, transparent));
 }
 
 .umlcanvas-group[data-color] .umlcanvas-group-resize-handle {
   stroke: var(--canvas-color);
+  fill: var(--background-primary);
 }
 
-.umlcanvas-group[data-color].is-selected .umlcanvas-group-box {
-  stroke: var(--interactive-accent);
-  stroke-width: 2.5px;
+.umlcanvas-group[data-color] .umlcanvas-group-resize-handle:hover {
+  fill: var(--canvas-color);
+}
+
+.umlcanvas-group[data-color] .umlcanvas-group-color-dot {
+  fill: var(--canvas-color);
+  stroke: color-mix(in srgb, var(--canvas-color) 40%, var(--background-modifier-border));
+}
+
+.umlcanvas-group[data-color] .umlcanvas-group-color-dot:hover {
+  stroke: var(--canvas-color);
+  filter: brightness(1.25) drop-shadow(0 0 4px color-mix(in srgb, var(--canvas-color) 60%, transparent));
 }
 
 /* --- Color Palette Popover --- */
@@ -2620,19 +2771,19 @@ body .umlcanvas-moving * {
   font-size: 13px;
 }
 
-.umlcanvas-color-swatch.is-preset-1 { background-color: var(--canvas-color-1, #c92a3e); }
-.umlcanvas-color-swatch.is-preset-2 { background-color: var(--canvas-color-2, #c45e00); }
-.umlcanvas-color-swatch.is-preset-3 { background-color: var(--canvas-color-3, #a17000); color: #2e3338; text-shadow: none; }
-.umlcanvas-color-swatch.is-preset-4 { background-color: var(--canvas-color-4, #12883f); }
-.umlcanvas-color-swatch.is-preset-5 { background-color: var(--canvas-color-5, #0a8288); color: #2e3338; text-shadow: none; }
-.umlcanvas-color-swatch.is-preset-6 { background-color: var(--canvas-color-6, #6340c7); }
+.umlcanvas-color-swatch.is-preset-1 { background-color: var(--canvas-color-1, #ff758f); color: #1e1e1e; text-shadow: none; }
+.umlcanvas-color-swatch.is-preset-2 { background-color: var(--canvas-color-2, #ffa94d); color: #1e1e1e; text-shadow: none; }
+.umlcanvas-color-swatch.is-preset-3 { background-color: var(--canvas-color-3, #ffd43b); color: #1e1e1e; text-shadow: none; }
+.umlcanvas-color-swatch.is-preset-4 { background-color: var(--canvas-color-4, #69db7c); color: #1e1e1e; text-shadow: none; }
+.umlcanvas-color-swatch.is-preset-5 { background-color: var(--canvas-color-5, #38d9a9); color: #1e1e1e; text-shadow: none; }
+.umlcanvas-color-swatch.is-preset-6 { background-color: var(--canvas-color-6, #b197fc); color: #1e1e1e; text-shadow: none; }
 
-.theme-dark .umlcanvas-color-swatch.is-preset-1, .umlcanvas-theme-dark .umlcanvas-color-swatch.is-preset-1 { background-color: var(--canvas-color-1, #fb464c); }
-.theme-dark .umlcanvas-color-swatch.is-preset-2, .umlcanvas-theme-dark .umlcanvas-color-swatch.is-preset-2 { background-color: var(--canvas-color-2, #e9973f); }
-.theme-dark .umlcanvas-color-swatch.is-preset-3, .umlcanvas-theme-dark .umlcanvas-color-swatch.is-preset-3 { background-color: var(--canvas-color-3, #e0de71); }
-.theme-dark .umlcanvas-color-swatch.is-preset-4, .umlcanvas-theme-dark .umlcanvas-color-swatch.is-preset-4 { background-color: var(--canvas-color-4, #44cf6e); }
-.theme-dark .umlcanvas-color-swatch.is-preset-5, .umlcanvas-theme-dark .umlcanvas-color-swatch.is-preset-5 { background-color: var(--canvas-color-5, #53dfdd); }
-.theme-dark .umlcanvas-color-swatch.is-preset-6, .umlcanvas-theme-dark .umlcanvas-color-swatch.is-preset-6 { background-color: var(--canvas-color-6, #a882ff); }
+.theme-dark .umlcanvas-color-swatch.is-preset-1, .umlcanvas-theme-dark .umlcanvas-color-swatch.is-preset-1 { background-color: var(--canvas-color-1, #ff859b); color: #1e1e1e; text-shadow: none; }
+.theme-dark .umlcanvas-color-swatch.is-preset-2, .umlcanvas-theme-dark .umlcanvas-color-swatch.is-preset-2 { background-color: var(--canvas-color-2, #ffb366); color: #1e1e1e; text-shadow: none; }
+.theme-dark .umlcanvas-color-swatch.is-preset-3, .umlcanvas-theme-dark .umlcanvas-color-swatch.is-preset-3 { background-color: var(--canvas-color-3, #ffe066); color: #1e1e1e; text-shadow: none; }
+.theme-dark .umlcanvas-color-swatch.is-preset-4, .umlcanvas-theme-dark .umlcanvas-color-swatch.is-preset-4 { background-color: var(--canvas-color-4, #7ee787); color: #1e1e1e; text-shadow: none; }
+.theme-dark .umlcanvas-color-swatch.is-preset-5, .umlcanvas-theme-dark .umlcanvas-color-swatch.is-preset-5 { background-color: var(--canvas-color-5, #67e8f9); color: #1e1e1e; text-shadow: none; }
+.theme-dark .umlcanvas-color-swatch.is-preset-6, .umlcanvas-theme-dark .umlcanvas-color-swatch.is-preset-6 { background-color: var(--canvas-color-6, #c4a5ff); color: #1e1e1e; text-shadow: none; }
 
 /* Active Selection Color Indicator in Toolbar */
 .umlcanvas-color-indicator {
@@ -2640,7 +2791,7 @@ body .umlcanvas-moving * {
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  margin-left: 4px;
+  margin-left: 2px;
   border: 1px solid var(--background-modifier-border, rgba(255, 255, 255, 0.4));
   box-shadow: 0 0 2px rgba(0, 0, 0, 0.3);
   flex-shrink: 0;
@@ -2649,6 +2800,38 @@ body .umlcanvas-moving * {
 
 .umlcanvas-color-indicator.is-visible {
   display: inline-block;
+}
+
+/* Color Selection Menu Button in Toolbar */
+.umlcanvas-toolbar-btn.umlcanvas-color-btn,
+.umlcanvas-toolbar-btn.clickable-icon.umlcanvas-color-btn,
+.umlcanvas-toolbar-btn.umlcanvas-color-btn.is-icon-only,
+.umlcanvas-toolbar-btn.clickable-icon.umlcanvas-color-btn.is-icon-only {
+  width: auto !important;
+  min-width: 28px;
+  height: 28px !important;
+  padding: 4px 6px !important;
+  overflow: visible !important;
+  box-sizing: border-box;
+}
+
+.umlcanvas-color-btn .umlcanvas-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  overflow: visible !important;
+}
+
+.umlcanvas-color-btn svg,
+.umlcanvas-color-btn .svg-icon,
+.umlcanvas-color-btn .umlcanvas-btn-icon svg {
+  width: 15px;
+  height: 15px;
+  overflow: visible !important;
+  flex-shrink: 0;
 }
 
 .umlcanvas-color-swatch.is-custom {
@@ -2684,13 +2867,15 @@ body .umlcanvas-moving * {
   height: 13px;
   stroke: #ffffff;
   filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.7));
+  overflow: visible !important;
 }
 
 .umlcanvas-color-swatch-none-icon svg,
 .umlcanvas-color-swatch-none-icon .svg-icon {
-  width: 14px;
-  height: 14px;
+  width: 13px;
+  height: 13px;
   stroke: var(--text-muted);
+  overflow: visible !important;
 }
 
 /* --- Align Popover Menu --- */
@@ -2750,6 +2935,13 @@ body .umlcanvas-moving * {
   height: 14px;
   stroke-width: 2px;
   stroke: currentColor;
+  fill: none;
+}
+
+.umlcanvas-align-icon svg *,
+.umlcanvas-align-icon .svg-icon * {
+  stroke: currentColor;
+  fill: none;
 }
 
 .umlcanvas-align-item:hover:not(:disabled) .umlcanvas-align-icon {
@@ -2764,6 +2956,347 @@ body .umlcanvas-moving * {
   height: 1px;
   background-color: var(--background-modifier-border);
   margin: 4px 0;
+}
+
+/* --- Typography Utilities & Font Adjustments --- */
+
+.umlcanvas-bold {
+  font-weight: 700 !important;
+}
+
+.umlcanvas-not-bold {
+  font-weight: 400 !important;
+}
+
+.umlcanvas-italic {
+  font-style: italic !important;
+}
+
+.umlcanvas-not-italic {
+  font-style: normal !important;
+}
+
+/* Toolbar Typography Buttons Active States */
+.umlcanvas-bold-btn.is-active,
+.umlcanvas-italic-btn.is-active,
+.umlcanvas-font-size-btn.is-active {
+  background-color: var(--interactive-accent, #7b68ee) !important;
+  color: #ffffff !important;
+}
+
+.umlcanvas-bold-btn.is-active svg,
+.umlcanvas-italic-btn.is-active svg,
+.umlcanvas-font-size-btn.is-active svg {
+  stroke: #ffffff !important;
+}
+
+/* Toolbar Stepper Combo [ − ] [ 13px ] [ + ] */
+.umlcanvas-font-stepper-combo {
+  display: inline-flex;
+  align-items: center;
+  background-color: var(--background-modifier-form-field, #ffffff);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 5px);
+  padding: 1px;
+  gap: 1px;
+}
+
+.umlcanvas-font-stepper-combo .umlcanvas-font-step-btn {
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: all 0.1s ease;
+}
+
+.umlcanvas-font-stepper-combo .umlcanvas-font-step-btn:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.umlcanvas-font-stepper-combo .umlcanvas-font-size-btn {
+  height: 24px;
+  padding: 0 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-normal);
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 3px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+}
+
+.umlcanvas-font-stepper-combo .umlcanvas-font-size-btn:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+.umlcanvas-context-font-size-btn {
+  gap: 3px;
+}
+
+.umlcanvas-context-font-size-btn .umlcanvas-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.umlcanvas-context-font-size-btn .umlcanvas-btn-icon svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* --- Font Size Popover Menu --- */
+.umlcanvas-font-size-popover {
+  position: absolute;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m, 8px);
+  box-shadow: var(--shadow-m, 0 4px 14px rgba(0, 0, 0, 0.22));
+  min-width: 220px;
+  max-width: calc(100vw - 24px);
+  gap: 6px;
+  box-sizing: border-box;
+}
+
+.umlcanvas-font-stepper-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 2px 4px;
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 4px);
+}
+
+.umlcanvas-font-step-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 26px;
+  border: none;
+  background: transparent;
+  color: var(--text-normal);
+  border-radius: var(--radius-s, 4px);
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 13px;
+  transition: background-color 0.1s ease;
+}
+
+.umlcanvas-font-step-btn:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-accent);
+}
+
+.umlcanvas-font-size-display {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-normal);
+  user-select: none;
+}
+
+.umlcanvas-font-style-row {
+  display: flex;
+  gap: 4px;
+}
+
+.umlcanvas-font-pill-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-normal);
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 4px);
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.umlcanvas-font-pill-btn:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-accent);
+}
+
+.umlcanvas-font-pill-btn.is-active {
+  background-color: var(--interactive-accent, #7b68ee) !important;
+  border-color: var(--interactive-accent, #7b68ee) !important;
+  color: #ffffff !important;
+}
+
+.umlcanvas-font-section {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.umlcanvas-font-section-title {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  padding: 2px 2px;
+}
+
+.umlcanvas-font-family-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+
+.umlcanvas-font-family-item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 6px;
+  font-size: 11px;
+  color: var(--text-normal);
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 4px);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: all 0.12s ease;
+}
+
+.umlcanvas-font-family-item:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-accent);
+}
+
+.umlcanvas-font-family-item.is-active {
+  background-color: rgba(var(--interactive-accent-rgb, 120, 100, 255), 0.15) !important;
+  border-color: var(--interactive-accent, #7b68ee) !important;
+  color: var(--interactive-accent, #7b68ee) !important;
+  font-weight: 600;
+}
+
+.umlcanvas-font-presets-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.umlcanvas-font-preset-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-normal);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-s, 4px);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.umlcanvas-font-preset-btn:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-accent);
+}
+
+.umlcanvas-font-preset-btn.is-active {
+  background-color: rgba(var(--interactive-accent-rgb, 120, 100, 255), 0.15) !important;
+  color: var(--interactive-accent, #7b68ee) !important;
+  font-weight: 600;
+}
+
+.umlcanvas-font-preset-name {
+  flex: 1;
+}
+
+.umlcanvas-font-preset-size {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.umlcanvas-font-preset-btn.is-active .umlcanvas-font-preset-size {
+  color: var(--interactive-accent, #7b68ee);
+}
+
+.umlcanvas-popover-divider {
+  height: 1px;
+  background-color: var(--background-modifier-border);
+  margin: 2px 0;
+}
+
+.umlcanvas-font-actions-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-top: 1px solid var(--background-modifier-border);
+  padding-top: 6px;
+}
+
+.umlcanvas-font-apply-all-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--interactive-accent, #7b68ee);
+  background: rgba(var(--interactive-accent-rgb, 120, 100, 255), 0.08);
+  border: 1px dashed var(--interactive-accent, #7b68ee);
+  border-radius: var(--radius-s, 4px);
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.umlcanvas-font-apply-all-btn:hover {
+  background: rgba(var(--interactive-accent-rgb, 120, 100, 255), 0.18);
+}
+
+.umlcanvas-font-reset-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-s, 4px);
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.umlcanvas-font-reset-btn:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-normal);
 }
 
 /* --- Dropdowns & Submenus (File Menu, Connector Menu, etc.) --- */
@@ -2836,6 +3369,13 @@ body .umlcanvas-moving * {
   height: 14px;
   stroke-width: 2px;
   stroke: currentColor;
+  fill: none;
+}
+
+.umlcanvas-menu-item-icon svg *,
+.umlcanvas-menu-item-icon .svg-icon * {
+  stroke: currentColor;
+  fill: none;
 }
 
 .umlcanvas-menu-item:hover:not(:disabled) .umlcanvas-menu-item-icon {
@@ -2891,6 +3431,13 @@ body .umlcanvas-moving * {
   height: 12px;
   stroke-width: 2px;
   stroke: currentColor;
+  fill: none;
+}
+
+.umlcanvas-btn-chevron svg *,
+.umlcanvas-btn-chevron .svg-icon * {
+  stroke: currentColor;
+  fill: none;
 }
 
 /* ==========================================================================
@@ -3474,12 +4021,18 @@ body.umlcanvas-is-resizing-palette * {
   --background-secondary: var(--canvas-bg-toolbar);
   --background-modifier-border: var(--canvas-stroke-border);
   --background-modifier-hover: var(--canvas-bg-toolbar-hover);
+  --background-modifier-form-field: #ffffff;
   --text-normal: var(--canvas-text-title);
   --text-muted: var(--canvas-text-muted);
   --text-faint: var(--canvas-text-faint);
   --text-accent: var(--canvas-accent);
   --interactive-accent: var(--canvas-accent);
   --interactive-accent-rgb: var(--canvas-accent-rgb);
+  --interactive-normal: transparent;
+  --button-background: transparent;
+  --icon-color: var(--canvas-text-body, #242832);
+  --icon-color-hover: var(--canvas-text-title, #1a1d24);
+  --icon-color-active: #ffffff;
 
   background-color: var(--canvas-bg) !important;
   color: var(--canvas-text-title);
@@ -3814,58 +4367,194 @@ body.umlcanvas-is-resizing-palette * {
 }
 
 /* Toolbars - Warm Pastel Surface */
+.umlcanvas-theme-light .umlcanvas-toolbar,
 .umlcanvas-theme-light .umlcanvas-main-toolbar,
 .umlcanvas-theme-light .umlcanvas-floating-bottom-toolbar,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar,
 .theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-main-toolbar,
-.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-floating-bottom-toolbar {
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-floating-bottom-toolbar,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-main-toolbar,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-floating-bottom-toolbar {
   background-color: var(--canvas-bg-toolbar, #f4f1ea);
-  border: 1px solid var(--canvas-stroke-border, #d8d1c4);
-  box-shadow: 0 4px 16px rgba(50, 40, 30, 0.08), 0 1px 3px rgba(50, 40, 30, 0.04);
+  background-color: var(--canvas-bg-toolbar, #f4f1ea) !important;
+  border: 1px solid var(--canvas-stroke-border, #d8d1c4) !important;
+  box-shadow: 0 4px 16px rgba(50, 40, 30, 0.08), 0 1px 3px rgba(50, 40, 30, 0.04) !important;
 }
 
 .umlcanvas-theme-light .umlcanvas-toolbar-group,
-.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-group {
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-group,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-group {
   background-color: #ffffff;
-  border: 1px solid var(--canvas-stroke-border, #d8d1c4);
+  background-color: #ffffff !important;
+  border: 1px solid var(--canvas-stroke-border, #d8d1c4) !important;
 }
 
 .umlcanvas-theme-light .umlcanvas-toolbar-btn,
-.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn {
+.umlcanvas-theme-light .umlcanvas-toolbar-btn.clickable-icon,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn.clickable-icon,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn.clickable-icon,
+.theme-light .umlcanvas-toolbar-btn,
+.theme-light .umlcanvas-toolbar-btn.clickable-icon {
   color: var(--canvas-text-body, #242832);
+  color: var(--canvas-text-body, #242832) !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
 }
 
 .umlcanvas-theme-light .umlcanvas-toolbar-btn:hover:not(:disabled),
-.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn:hover:not(:disabled) {
-  background-color: var(--canvas-bg-toolbar-hover, #e8e3d8);
-  color: var(--canvas-text-title, #1a1d24);
+.umlcanvas-theme-light .umlcanvas-toolbar-btn.clickable-icon:hover:not(:disabled),
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn:hover:not(:disabled),
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn.clickable-icon:hover:not(:disabled),
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn:hover:not(:disabled),
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn.clickable-icon:hover:not(:disabled),
+.theme-light .umlcanvas-toolbar-btn:hover:not(:disabled),
+.theme-light .umlcanvas-toolbar-btn.clickable-icon:hover:not(:disabled) {
+  background-color: var(--canvas-bg-toolbar-hover, #e8e3d8) !important;
+  color: var(--canvas-text-title, #1a1d24) !important;
+  box-shadow: none !important;
 }
 
 .umlcanvas-theme-light .umlcanvas-toolbar-btn.is-active,
-.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn.is-active {
+.umlcanvas-theme-light .umlcanvas-toolbar-btn.clickable-icon.is-active,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn.is-active,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn.clickable-icon.is-active,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn.is-active,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn.clickable-icon.is-active,
+.theme-light .umlcanvas-toolbar-btn.is-active,
+.theme-light .umlcanvas-toolbar-btn.clickable-icon.is-active {
   background-color: var(--canvas-accent, #5b4fe8);
-  color: #ffffff;
+  background-color: var(--canvas-accent, #5b4fe8) !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
+}
+
+.umlcanvas-theme-light .umlcanvas-toolbar-btn.is-active:hover,
+.umlcanvas-theme-light .umlcanvas-toolbar-btn.clickable-icon.is-active:hover,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn.is-active:hover,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn.clickable-icon.is-active:hover,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn.is-active:hover,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn.clickable-icon.is-active:hover,
+.theme-light .umlcanvas-toolbar-btn.is-active:hover,
+.theme-light .umlcanvas-toolbar-btn.clickable-icon.is-active:hover {
+  background-color: var(--canvas-accent-hover, #4d40db) !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
+}
+
+.umlcanvas-theme-light .umlcanvas-toolbar-btn .umlcanvas-btn-icon,
+.umlcanvas-theme-light .umlcanvas-toolbar-btn.clickable-icon .umlcanvas-btn-icon,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn .umlcanvas-btn-icon,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn.clickable-icon .umlcanvas-btn-icon,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn .umlcanvas-btn-icon,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn.clickable-icon .umlcanvas-btn-icon,
+.theme-light .umlcanvas-toolbar-btn .umlcanvas-btn-icon,
+.theme-light .umlcanvas-toolbar-btn.clickable-icon .umlcanvas-btn-icon {
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  border: none !important;
+  outline: none !important;
+  -webkit-mask: none !important;
+  mask: none !important;
+}
+
+.umlcanvas-theme-light .umlcanvas-toolbar-btn .umlcanvas-btn-icon svg,
+.umlcanvas-theme-light .umlcanvas-toolbar-btn.clickable-icon .umlcanvas-btn-icon svg,
+.umlcanvas-theme-light .umlcanvas-toolbar-btn svg,
+.umlcanvas-theme-light .umlcanvas-toolbar-btn.clickable-icon svg,
+.umlcanvas-theme-light .umlcanvas-toolbar-btn .svg-icon,
+.umlcanvas-theme-light .umlcanvas-toolbar-btn.clickable-icon .svg-icon,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn .umlcanvas-btn-icon svg,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn.clickable-icon .umlcanvas-btn-icon svg,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn svg,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn.clickable-icon svg,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn .svg-icon,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn.clickable-icon .svg-icon,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn .umlcanvas-btn-icon svg,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn.clickable-icon .umlcanvas-btn-icon svg,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn svg,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn.clickable-icon svg,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn .svg-icon,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn.clickable-icon .svg-icon,
+.umlcanvas-theme-light .umlcanvas-toolbar svg,
+.umlcanvas-theme-light .umlcanvas-toolbar .svg-icon,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar svg,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar .svg-icon,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar svg,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar .svg-icon,
+.theme-light .umlcanvas-toolbar-btn svg,
+.theme-light .umlcanvas-toolbar-btn.clickable-icon svg {
+  stroke: currentColor !important;
+  fill: none !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  -webkit-mask: none !important;
+  mask: none !important;
+  opacity: 1 !important;
+  overflow: visible !important;
+}
+
+.umlcanvas-theme-light .umlcanvas-toolbar-btn .umlcanvas-btn-icon svg *,
+.umlcanvas-theme-light .umlcanvas-toolbar-btn.clickable-icon .umlcanvas-btn-icon svg *,
+.umlcanvas-theme-light .umlcanvas-toolbar-btn svg *,
+.umlcanvas-theme-light .umlcanvas-toolbar-btn.clickable-icon svg *,
+.umlcanvas-theme-light .umlcanvas-toolbar-btn .svg-icon *,
+.umlcanvas-theme-light .umlcanvas-toolbar-btn.clickable-icon .svg-icon *,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn .umlcanvas-btn-icon svg *,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn.clickable-icon .umlcanvas-btn-icon svg *,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn svg *,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn.clickable-icon svg *,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn .svg-icon *,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn.clickable-icon .svg-icon *,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn .umlcanvas-btn-icon svg *,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn.clickable-icon .umlcanvas-btn-icon svg *,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn svg *,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn.clickable-icon svg *,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn .svg-icon *,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn.clickable-icon .svg-icon *,
+.umlcanvas-theme-light .umlcanvas-toolbar svg *,
+.umlcanvas-theme-light .umlcanvas-toolbar .svg-icon *,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar svg *,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar .svg-icon *,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar svg *,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar .svg-icon *,
+.theme-light .umlcanvas-toolbar-btn svg *,
+.theme-light .umlcanvas-toolbar-btn.clickable-icon svg * {
+  stroke: currentColor !important;
+  fill: none !important;
 }
 
 .umlcanvas-theme-light .umlcanvas-toolbar-divider,
-.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-divider {
-  background-color: #dcd6ca;
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-divider,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-divider {
+  background-color: #dcd6ca !important;
 }
 
 .umlcanvas-theme-light .umlcanvas-selection-badge,
-.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-selection-badge {
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-selection-badge,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-selection-badge {
   background-color: #ede9fe;
   color: #5b4fe8;
 }
 
 .umlcanvas-theme-light .umlcanvas-context-group,
-.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-context-group {
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-context-group,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-context-group {
   border-color: #5b4fe8;
   background-color: #ffffff;
   box-shadow: 0 0 0 1px rgba(91, 79, 232, 0.25);
 }
 
 .umlcanvas-theme-light .umlcanvas-zoom-label,
-.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-zoom-label {
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-zoom-label,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-zoom-label {
   color: var(--canvas-text-muted, #4e5564);
 }
 
@@ -3909,36 +4598,232 @@ body.umlcanvas-is-resizing-palette * {
 
 /* Dropdown Menus & Popovers */
 .umlcanvas-theme-light .umlcanvas-menu-dropdown,
+.umlcanvas-theme-light .umlcanvas-connector-popover,
 .umlcanvas-theme-light .umlcanvas-color-palette-popover,
 .umlcanvas-theme-light .umlcanvas-align-popover,
+.umlcanvas-theme-light .umlcanvas-font-size-popover,
 .theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-menu-dropdown,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-connector-popover,
 .theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-color-palette-popover,
-.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-align-popover {
-  background-color: var(--canvas-bg-popover, #f8f6f1);
-  border: 1px solid var(--canvas-stroke-border, #d8d1c4);
-  box-shadow: 0 8px 24px rgba(50, 40, 30, 0.12), 0 2px 6px rgba(50, 40, 30, 0.05);
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-align-popover,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-size-popover,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-menu-dropdown,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-connector-popover,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-color-palette-popover,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-align-popover,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-size-popover {
+  background-color: var(--canvas-bg-popover, #f8f6f1) !important;
+  border: 1px solid var(--canvas-stroke-border, #d8d1c4) !important;
+  box-shadow: 0 8px 24px rgba(50, 40, 30, 0.12), 0 2px 6px rgba(50, 40, 30, 0.05) !important;
 }
 
 .umlcanvas-theme-light .umlcanvas-menu-item,
-.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-menu-item {
-  color: var(--canvas-text-body, #242832);
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-menu-item,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-menu-item,
+.umlcanvas-theme-light .umlcanvas-align-item,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-align-item,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-align-item,
+.umlcanvas-theme-light .umlcanvas-font-preset-btn,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-preset-btn,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-preset-btn,
+.umlcanvas-theme-light .umlcanvas-font-step-btn,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-step-btn,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-step-btn,
+.umlcanvas-theme-light .umlcanvas-font-pill-btn,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-pill-btn,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-pill-btn,
+.umlcanvas-theme-light .umlcanvas-font-family-item,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-family-item,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-family-item {
+  color: var(--canvas-text-body, #242832) !important;
+  background-color: transparent !important;
+  border: 1px solid var(--canvas-stroke-border, #d8d1c4) !important;
+  box-shadow: none !important;
+}
+
+.umlcanvas-theme-light .umlcanvas-font-stepper-row,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-stepper-row,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-stepper-row {
+  background-color: #ffffff !important;
+  border: 1px solid var(--canvas-stroke-border, #d8d1c4) !important;
+}
+
+.umlcanvas-theme-light .umlcanvas-font-size-display,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-size-display,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-size-display {
+  color: var(--canvas-text-body, #242832) !important;
+}
+
+/* Toolbar Font Size Adjustment Combo & Button in Light Theme */
+.umlcanvas-theme-light .umlcanvas-font-stepper-combo,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-stepper-combo,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-stepper-combo {
+  background-color: #ffffff;
+  background-color: #ffffff !important;
+  border: 1px solid var(--canvas-stroke-border, #d8d1c4) !important;
+}
+
+.umlcanvas-theme-light .umlcanvas-font-size-btn,
+.umlcanvas-theme-light .umlcanvas-font-size-btn.clickable-icon,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-size-btn,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-size-btn.clickable-icon,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-size-btn,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-size-btn.clickable-icon,
+.umlcanvas-theme-light .umlcanvas-font-stepper-combo .umlcanvas-font-size-btn,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-stepper-combo .umlcanvas-font-size-btn,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-stepper-combo .umlcanvas-font-size-btn {
+  background-color: #ffffff;
+  background-color: #ffffff !important;
+  color: var(--canvas-text-body, #242832) !important;
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+.umlcanvas-theme-light .umlcanvas-font-size-btn:hover:not(:disabled):not(.is-active),
+.umlcanvas-theme-light .umlcanvas-font-size-btn.clickable-icon:hover:not(:disabled):not(.is-active),
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-size-btn:hover:not(:disabled):not(.is-active),
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-size-btn.clickable-icon:hover:not(:disabled):not(.is-active),
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-size-btn:hover:not(:disabled):not(.is-active),
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-size-btn.clickable-icon:hover:not(:disabled):not(.is-active),
+.umlcanvas-theme-light .umlcanvas-font-stepper-combo .umlcanvas-font-size-btn:hover:not(:disabled):not(.is-active),
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-stepper-combo .umlcanvas-font-size-btn:hover:not(:disabled):not(.is-active),
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-stepper-combo .umlcanvas-font-size-btn:hover:not(:disabled):not(.is-active) {
+  background-color: var(--canvas-bg-toolbar-hover, #e8e3d8) !important;
+  color: var(--canvas-text-title, #1a1d24) !important;
+  box-shadow: none !important;
+}
+
+.umlcanvas-theme-light .umlcanvas-font-stepper-combo .umlcanvas-font-step-btn,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-stepper-combo .umlcanvas-font-step-btn,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-stepper-combo .umlcanvas-font-step-btn {
+  background: transparent !important;
+  background-color: transparent !important;
+  color: var(--canvas-text-body, #242832) !important;
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+.umlcanvas-theme-light .umlcanvas-font-stepper-combo .umlcanvas-font-step-btn:hover:not(:disabled),
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-stepper-combo .umlcanvas-font-step-btn:hover:not(:disabled),
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-stepper-combo .umlcanvas-font-step-btn:hover:not(:disabled) {
+  background-color: var(--canvas-bg-toolbar-hover, #e8e3d8) !important;
+  color: var(--canvas-text-title, #1a1d24) !important;
+  box-shadow: none !important;
 }
 
 .umlcanvas-theme-light .umlcanvas-menu-item:hover:not(:disabled),
-.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-menu-item:hover:not(:disabled) {
-  background-color: var(--canvas-bg-toolbar-hover, #e8e3d8);
-  color: var(--canvas-text-title, #1a1d24);
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-menu-item:hover:not(:disabled),
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-menu-item:hover:not(:disabled),
+.umlcanvas-theme-light .umlcanvas-align-item:hover:not(:disabled),
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-align-item:hover:not(:disabled),
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-align-item:hover:not(:disabled),
+.umlcanvas-theme-light .umlcanvas-font-preset-btn:hover:not(:disabled),
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-preset-btn:hover:not(:disabled),
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-preset-btn:hover:not(:disabled),
+.umlcanvas-theme-light .umlcanvas-font-step-btn:hover:not(:disabled),
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-step-btn:hover:not(:disabled),
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-step-btn:hover:not(:disabled),
+.umlcanvas-theme-light .umlcanvas-font-pill-btn:hover:not(:disabled),
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-pill-btn:hover:not(:disabled),
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-pill-btn:hover:not(:disabled),
+.umlcanvas-theme-light .umlcanvas-font-family-item:hover:not(:disabled),
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-family-item:hover:not(:disabled),
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-family-item:hover:not(:disabled) {
+  background-color: var(--canvas-bg-toolbar-hover, #e8e3d8) !important;
+  color: var(--canvas-text-title, #1a1d24) !important;
 }
 
 .umlcanvas-theme-light .umlcanvas-menu-item.is-active,
-.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-menu-item.is-active {
-  background-color: var(--canvas-accent, #5b4fe8);
-  color: #ffffff;
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-menu-item.is-active,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-menu-item.is-active,
+.umlcanvas-theme-light .umlcanvas-font-preset-btn.is-active,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-preset-btn.is-active,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-preset-btn.is-active,
+.umlcanvas-theme-light .umlcanvas-font-pill-btn.is-active,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-pill-btn.is-active,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-pill-btn.is-active,
+.umlcanvas-theme-light .umlcanvas-font-family-item.is-active,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-family-item.is-active,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-family-item.is-active {
+  background-color: var(--canvas-accent, #5b4fe8) !important;
+  border-color: var(--canvas-accent, #5b4fe8) !important;
+  color: #ffffff !important;
 }
 
 .umlcanvas-theme-light .umlcanvas-menu-divider,
-.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-menu-divider {
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-menu-divider,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-menu-divider,
+.umlcanvas-theme-light .umlcanvas-align-separator,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-align-separator,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-align-separator {
   background-color: #dcd6ca;
+}
+
+.umlcanvas-theme-light .umlcanvas-menu-item-icon,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-menu-item-icon,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-menu-item-icon,
+.umlcanvas-theme-light .umlcanvas-align-icon,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-align-icon,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-align-icon,
+.umlcanvas-theme-light .umlcanvas-btn-chevron,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-btn-chevron,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-btn-chevron {
+  color: var(--canvas-text-muted, #4e5564);
+}
+
+.umlcanvas-theme-light .umlcanvas-menu-item:hover:not(:disabled) .umlcanvas-menu-item-icon,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-menu-item:hover:not(:disabled) .umlcanvas-menu-item-icon,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-menu-item:hover:not(:disabled) .umlcanvas-menu-item-icon,
+.umlcanvas-theme-light .umlcanvas-align-item:hover:not(:disabled) .umlcanvas-align-icon,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-align-item:hover:not(:disabled) .umlcanvas-align-icon,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-align-item:hover:not(:disabled) .umlcanvas-align-icon {
+  color: var(--canvas-accent, #5b4fe8);
+}
+
+.umlcanvas-theme-light .umlcanvas-menu-item-icon svg,
+.umlcanvas-theme-light .umlcanvas-menu-item-icon .svg-icon,
+.umlcanvas-theme-light .umlcanvas-align-icon svg,
+.umlcanvas-theme-light .umlcanvas-align-icon .svg-icon,
+.umlcanvas-theme-light .umlcanvas-btn-chevron svg,
+.umlcanvas-theme-light .umlcanvas-btn-chevron .svg-icon,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-menu-item-icon svg,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-menu-item-icon .svg-icon,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-align-icon svg,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-align-icon .svg-icon,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-btn-chevron svg,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-btn-chevron .svg-icon,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-menu-item-icon svg,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-menu-item-icon .svg-icon,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-align-icon svg,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-align-icon .svg-icon,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-btn-chevron svg,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-btn-chevron .svg-icon {
+  stroke: currentColor !important;
+  fill: none !important;
+}
+
+.umlcanvas-theme-light .umlcanvas-menu-item-icon svg *,
+.umlcanvas-theme-light .umlcanvas-menu-item-icon .svg-icon *,
+.umlcanvas-theme-light .umlcanvas-align-icon svg *,
+.umlcanvas-theme-light .umlcanvas-align-icon .svg-icon *,
+.umlcanvas-theme-light .umlcanvas-btn-chevron svg *,
+.umlcanvas-theme-light .umlcanvas-btn-chevron .svg-icon *,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-menu-item-icon svg *,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-menu-item-icon .svg-icon *,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-align-icon svg *,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-align-icon .svg-icon *,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-btn-chevron svg *,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-btn-chevron .svg-icon *,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-menu-item-icon svg *,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-menu-item-icon .svg-icon *,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-align-icon svg *,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-align-icon .svg-icon *,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-btn-chevron svg *,
+.theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-btn-chevron .svg-icon * {
+  stroke: currentColor !important;
+  fill: none !important;
 }
 
 /* Minimap */
@@ -3987,12 +4872,94 @@ body.umlcanvas-is-resizing-palette * {
   filter: drop-shadow(0 0.5px 1px rgba(0, 0, 0, 0.15));
 }
 
-.umlcanvas-theme-light .umlcanvas-color-swatch.is-preset-1 { background-color: var(--canvas-color-1, #c92a3e); }
-.umlcanvas-theme-light .umlcanvas-color-swatch.is-preset-2 { background-color: var(--canvas-color-2, #c45e00); }
-.umlcanvas-theme-light .umlcanvas-color-swatch.is-preset-3 { background-color: var(--canvas-color-3, #a17000); }
-.umlcanvas-theme-light .umlcanvas-color-swatch.is-preset-4 { background-color: var(--canvas-color-4, #12883f); }
-.umlcanvas-theme-light .umlcanvas-color-swatch.is-preset-5 { background-color: var(--canvas-color-5, #0a8288); }
-.umlcanvas-theme-light .umlcanvas-color-swatch.is-preset-6 { background-color: var(--canvas-color-6, #6340c7); }
+/* Color Presets Application in Pastel Light Theme for Groups */
+.umlcanvas-theme-light .umlcanvas-group[data-color] .umlcanvas-group-box,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-group[data-color] .umlcanvas-group-box {
+  stroke: var(--canvas-color);
+  fill: color-mix(in srgb, var(--canvas-color) 6%, #ffffff);
+}
+
+.umlcanvas-theme-light .umlcanvas-group[data-color]:hover .umlcanvas-group-box,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-group[data-color]:hover .umlcanvas-group-box {
+  fill: color-mix(in srgb, var(--canvas-color) 10%, #ffffff);
+}
+
+.umlcanvas-theme-light .umlcanvas-group[data-color].is-selected .umlcanvas-group-box,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-group[data-color].is-selected .umlcanvas-group-box {
+  stroke: var(--canvas-color);
+  stroke-width: 2.5px;
+  stroke-dasharray: none;
+  fill: color-mix(in srgb, var(--canvas-color) 13%, #ffffff);
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--canvas-color) 35%, transparent));
+}
+
+.umlcanvas-theme-light .umlcanvas-group[data-color] .umlcanvas-group-header-bg,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-group[data-color] .umlcanvas-group-header-bg {
+  fill: color-mix(in srgb, var(--canvas-color) 15%, #ffffff);
+}
+
+.umlcanvas-theme-light .umlcanvas-group[data-color]:hover .umlcanvas-group-header-bg,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-group[data-color]:hover .umlcanvas-group-header-bg {
+  fill: color-mix(in srgb, var(--canvas-color) 22%, #ffffff);
+}
+
+.umlcanvas-theme-light .umlcanvas-group[data-color].is-selected .umlcanvas-group-header-bg,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-group[data-color].is-selected .umlcanvas-group-header-bg {
+  fill: color-mix(in srgb, var(--canvas-color) 30%, #ffffff);
+}
+
+.umlcanvas-theme-light .umlcanvas-group[data-color] .umlcanvas-group-title,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-group[data-color] .umlcanvas-group-title {
+  fill: var(--canvas-color);
+}
+
+.umlcanvas-theme-light .umlcanvas-group[data-color] .umlcanvas-group-collapse-btn,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-group[data-color] .umlcanvas-group-collapse-btn {
+  fill: var(--canvas-color);
+}
+
+.umlcanvas-theme-light .umlcanvas-group[data-color] .umlcanvas-group-badge,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-group[data-color] .umlcanvas-group-badge {
+  fill: color-mix(in srgb, var(--canvas-color) 70%, #555555);
+}
+
+.umlcanvas-theme-light .umlcanvas-group[data-color] .umlcanvas-group-collapsed-card,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-group[data-color] .umlcanvas-group-collapsed-card {
+  stroke: var(--canvas-color);
+  fill: #ffffff;
+}
+
+.umlcanvas-theme-light .umlcanvas-group[data-color].is-selected .umlcanvas-group-collapsed-card,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-group[data-color].is-selected .umlcanvas-group-collapsed-card {
+  stroke: var(--canvas-color);
+  stroke-width: 2.5px;
+  fill: color-mix(in srgb, var(--canvas-color) 12%, #ffffff);
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--canvas-color) 35%, transparent));
+}
+
+.umlcanvas-theme-light .umlcanvas-group[data-color] .umlcanvas-group-resize-handle,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-group[data-color] .umlcanvas-group-resize-handle {
+  stroke: var(--canvas-color);
+  fill: #ffffff;
+}
+
+.umlcanvas-theme-light .umlcanvas-group[data-color] .umlcanvas-group-resize-handle:hover,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-group[data-color] .umlcanvas-group-resize-handle:hover {
+  fill: var(--canvas-color);
+}
+
+.umlcanvas-theme-light .umlcanvas-group[data-color] .umlcanvas-group-color-dot,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-group[data-color] .umlcanvas-group-color-dot {
+  fill: var(--canvas-color);
+  stroke: color-mix(in srgb, var(--canvas-color) 35%, #000000);
+}
+
+.umlcanvas-theme-light .umlcanvas-color-swatch.is-preset-1 { background-color: var(--canvas-color-1, #ff758f); }
+.umlcanvas-theme-light .umlcanvas-color-swatch.is-preset-2 { background-color: var(--canvas-color-2, #ffa94d); }
+.umlcanvas-theme-light .umlcanvas-color-swatch.is-preset-3 { background-color: var(--canvas-color-3, #ffd43b); }
+.umlcanvas-theme-light .umlcanvas-color-swatch.is-preset-4 { background-color: var(--canvas-color-4, #69db7c); }
+.umlcanvas-theme-light .umlcanvas-color-swatch.is-preset-5 { background-color: var(--canvas-color-5, #38d9a9); }
+.umlcanvas-theme-light .umlcanvas-color-swatch.is-preset-6 { background-color: var(--canvas-color-6, #b197fc); }
 
 /* Explicit Dark Theme Support Override */
 .umlcanvas-theme-dark {
@@ -4005,12 +4972,518 @@ body.umlcanvas-is-resizing-palette * {
   --text-faint: #666666;
   --interactive-accent: #7b68ee;
   --interactive-accent-rgb: 123, 104, 238;
-  --canvas-color-1: #fb464c;
-  --canvas-color-2: #e9973f;
-  --canvas-color-3: #e0de71;
-  --canvas-color-4: #44cf6e;
-  --canvas-color-5: #53dfdd;
-  --canvas-color-6: #a882ff;
+  --interactive-normal: transparent;
+  --button-background: transparent;
+  --background-modifier-form-field: #1e1e1e;
+  --icon-color: #dcddde;
+  --icon-color-hover: #7b68ee;
+  --icon-color-active: #ffffff;
+  --canvas-color-1: #ff859b;
+  --canvas-color-2: #ffb366;
+  --canvas-color-3: #ffe066;
+  --canvas-color-4: #7ee787;
+  --canvas-color-5: #67e8f9;
+  --canvas-color-6: #c4a5ff;
   background-color: #1e1e1e !important;
   color: #dcddde !important;
+}
+
+.umlcanvas-theme-dark .umlcanvas-toolbar,
+.umlcanvas-theme-dark .umlcanvas-main-toolbar,
+.umlcanvas-theme-dark .umlcanvas-floating-bottom-toolbar,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-main-toolbar,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-floating-bottom-toolbar,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-main-toolbar,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-floating-bottom-toolbar {
+  background-color: #26262b;
+  background-color: #26262b !important;
+  border: 1px solid #38383e !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3) !important;
+}
+
+.umlcanvas-theme-dark .umlcanvas-toolbar-group,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-group,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-group {
+  background-color: #1e1e1e;
+  background-color: #1e1e1e !important;
+  border: 1px solid #38383e !important;
+}
+
+.umlcanvas-theme-dark .umlcanvas-toolbar-btn,
+.umlcanvas-theme-dark .umlcanvas-toolbar-btn.clickable-icon,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn.clickable-icon,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn.clickable-icon,
+.theme-dark .umlcanvas-toolbar-btn,
+.theme-dark .umlcanvas-toolbar-btn.clickable-icon {
+  color: #dcddde;
+  color: #dcddde !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+.umlcanvas-theme-dark .umlcanvas-toolbar-btn:hover:not(:disabled),
+.umlcanvas-theme-dark .umlcanvas-toolbar-btn.clickable-icon:hover:not(:disabled),
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn:hover:not(:disabled),
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn.clickable-icon:hover:not(:disabled),
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn:hover:not(:disabled),
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn.clickable-icon:hover:not(:disabled),
+.theme-dark .umlcanvas-toolbar-btn:hover:not(:disabled),
+.theme-dark .umlcanvas-toolbar-btn.clickable-icon:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  color: #7b68ee !important;
+  box-shadow: none !important;
+}
+
+.umlcanvas-theme-dark .umlcanvas-toolbar-btn.is-active,
+.umlcanvas-theme-dark .umlcanvas-toolbar-btn.clickable-icon.is-active,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn.is-active,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn.clickable-icon.is-active,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn.is-active,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn.clickable-icon.is-active,
+.theme-dark .umlcanvas-toolbar-btn.is-active,
+.theme-dark .umlcanvas-toolbar-btn.clickable-icon.is-active {
+  background-color: #7b68ee;
+  background-color: #7b68ee !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
+}
+
+.umlcanvas-theme-dark .umlcanvas-toolbar-btn.is-active:hover,
+.umlcanvas-theme-dark .umlcanvas-toolbar-btn.clickable-icon.is-active:hover,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn.is-active:hover,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn.clickable-icon.is-active:hover,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn.is-active:hover,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn.clickable-icon.is-active:hover,
+.theme-dark .umlcanvas-toolbar-btn.is-active:hover,
+.theme-dark .umlcanvas-toolbar-btn.clickable-icon.is-active:hover {
+  background-color: #6952e5 !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
+}
+
+.umlcanvas-theme-dark .umlcanvas-toolbar-btn .umlcanvas-btn-icon,
+.umlcanvas-theme-dark .umlcanvas-toolbar-btn.clickable-icon .umlcanvas-btn-icon,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn .umlcanvas-btn-icon,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn.clickable-icon .umlcanvas-btn-icon,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn .umlcanvas-btn-icon,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn.clickable-icon .umlcanvas-btn-icon,
+.theme-dark .umlcanvas-toolbar-btn .umlcanvas-btn-icon,
+.theme-dark .umlcanvas-toolbar-btn.clickable-icon .umlcanvas-btn-icon {
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  border: none !important;
+  outline: none !important;
+  -webkit-mask: none !important;
+  mask: none !important;
+}
+
+.umlcanvas-theme-dark .umlcanvas-toolbar-btn .umlcanvas-btn-icon svg,
+.umlcanvas-theme-dark .umlcanvas-toolbar-btn.clickable-icon .umlcanvas-btn-icon svg,
+.umlcanvas-theme-dark .umlcanvas-toolbar-btn svg,
+.umlcanvas-theme-dark .umlcanvas-toolbar-btn.clickable-icon svg,
+.umlcanvas-theme-dark .umlcanvas-toolbar-btn .svg-icon,
+.umlcanvas-theme-dark .umlcanvas-toolbar-btn.clickable-icon .svg-icon,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn .umlcanvas-btn-icon svg,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn.clickable-icon .umlcanvas-btn-icon svg,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn svg,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn.clickable-icon svg,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn .svg-icon,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn.clickable-icon .svg-icon,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn .umlcanvas-btn-icon svg,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn.clickable-icon .umlcanvas-btn-icon svg,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn svg,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn.clickable-icon svg,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn .svg-icon,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn.clickable-icon .svg-icon,
+.umlcanvas-theme-dark .umlcanvas-toolbar svg,
+.umlcanvas-theme-dark .umlcanvas-toolbar .svg-icon,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar svg,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar .svg-icon,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar svg,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar .svg-icon,
+.theme-dark .umlcanvas-toolbar-btn svg,
+.theme-dark .umlcanvas-toolbar-btn.clickable-icon svg {
+  stroke: currentColor !important;
+  fill: none !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  -webkit-mask: none !important;
+  mask: none !important;
+  opacity: 1 !important;
+  overflow: visible !important;
+}
+
+.umlcanvas-theme-dark .umlcanvas-toolbar-btn .umlcanvas-btn-icon svg *,
+.umlcanvas-theme-dark .umlcanvas-toolbar-btn.clickable-icon .umlcanvas-btn-icon svg *,
+.umlcanvas-theme-dark .umlcanvas-toolbar-btn svg *,
+.umlcanvas-theme-dark .umlcanvas-toolbar-btn.clickable-icon svg *,
+.umlcanvas-theme-dark .umlcanvas-toolbar-btn .svg-icon *,
+.umlcanvas-theme-dark .umlcanvas-toolbar-btn.clickable-icon .svg-icon *,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn .umlcanvas-btn-icon svg *,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn.clickable-icon .umlcanvas-btn-icon svg *,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn svg *,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn.clickable-icon svg *,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn .svg-icon *,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn.clickable-icon .svg-icon *,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn .umlcanvas-btn-icon svg *,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn.clickable-icon .umlcanvas-btn-icon svg *,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn svg *,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn.clickable-icon svg *,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn .svg-icon *,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn.clickable-icon .svg-icon *,
+.umlcanvas-theme-dark .umlcanvas-toolbar svg *,
+.umlcanvas-theme-dark .umlcanvas-toolbar .svg-icon *,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar svg *,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar .svg-icon *,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar svg *,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar .svg-icon *,
+.theme-dark .umlcanvas-toolbar-btn svg *,
+.theme-dark .umlcanvas-toolbar-btn.clickable-icon svg * {
+  stroke: currentColor !important;
+  fill: none !important;
+}
+
+.umlcanvas-theme-dark .umlcanvas-toolbar-divider,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-divider,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-divider {
+  background-color: #38383e !important;
+}
+
+.umlcanvas-theme-dark .umlcanvas-selection-badge,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-selection-badge,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-selection-badge {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  color: #7b68ee !important;
+}
+
+.umlcanvas-theme-dark .umlcanvas-context-group,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-context-group,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-context-group {
+  border-color: #7b68ee !important;
+  background-color: #1e1e1e !important;
+  box-shadow: 0 0 0 1px rgba(123, 104, 238, 0.25) !important;
+}
+
+.umlcanvas-theme-dark .umlcanvas-zoom-label,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-zoom-label,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-zoom-label {
+  color: #999999 !important;
+}
+
+.umlcanvas-theme-dark .umlcanvas-breadcrumbs,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-breadcrumbs,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-breadcrumbs {
+  background-color: #26262b !important;
+  border-bottom: 1px solid #38383e !important;
+  color: #dcddde !important;
+}
+
+.umlcanvas-theme-dark .umlcanvas-menu-dropdown,
+.umlcanvas-theme-dark .umlcanvas-connector-popover,
+.umlcanvas-theme-dark .umlcanvas-color-palette-popover,
+.umlcanvas-theme-dark .umlcanvas-align-popover,
+.umlcanvas-theme-dark .umlcanvas-font-size-popover,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-menu-dropdown,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-connector-popover,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-color-palette-popover,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-align-popover,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-size-popover,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-menu-dropdown,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-connector-popover,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-color-palette-popover,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-align-popover,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-size-popover {
+  background-color: #26262b !important;
+  border: 1px solid #38383e !important;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35) !important;
+}
+
+.umlcanvas-theme-dark .umlcanvas-menu-item,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-menu-item,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-menu-item,
+.umlcanvas-theme-dark .umlcanvas-align-item,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-align-item,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-align-item,
+.umlcanvas-theme-dark .umlcanvas-font-preset-btn,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-preset-btn,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-preset-btn,
+.umlcanvas-theme-dark .umlcanvas-font-step-btn,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-step-btn,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-step-btn {
+  color: #dcddde !important;
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.umlcanvas-theme-dark .umlcanvas-font-stepper-row,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-stepper-row,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-stepper-row {
+  background-color: #1e1e1e !important;
+  border: 1px solid #38383e !important;
+}
+
+.umlcanvas-theme-dark .umlcanvas-font-size-display,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-size-display,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-size-display {
+  color: #dcddde !important;
+}
+
+/* Toolbar Font Size Adjustment Combo & Button in Dark Theme */
+.umlcanvas-theme-dark .umlcanvas-font-stepper-combo,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-stepper-combo,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-stepper-combo {
+  background-color: #1e1e1e !important;
+  border: 1px solid #38383e !important;
+}
+
+.umlcanvas-theme-dark .umlcanvas-font-stepper-combo .umlcanvas-font-size-btn:not(.is-active),
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-stepper-combo .umlcanvas-font-size-btn:not(.is-active),
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-stepper-combo .umlcanvas-font-size-btn:not(.is-active) {
+  color: #dcddde !important;
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.umlcanvas-theme-dark .umlcanvas-font-stepper-combo .umlcanvas-font-step-btn,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-stepper-combo .umlcanvas-font-step-btn,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-stepper-combo .umlcanvas-font-step-btn {
+  color: #8b8d91 !important;
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.umlcanvas-theme-dark .umlcanvas-font-stepper-combo .umlcanvas-font-step-btn:hover:not(:disabled),
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-stepper-combo .umlcanvas-font-step-btn:hover:not(:disabled),
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-stepper-combo .umlcanvas-font-step-btn:hover:not(:disabled),
+.umlcanvas-theme-dark .umlcanvas-font-stepper-combo .umlcanvas-font-size-btn:hover:not(:disabled):not(.is-active),
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-stepper-combo .umlcanvas-font-size-btn:hover:not(:disabled):not(.is-active),
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-stepper-combo .umlcanvas-font-size-btn:hover:not(:disabled):not(.is-active) {
+  background-color: #333338 !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
+}
+
+.umlcanvas-theme-dark .umlcanvas-menu-item:hover:not(:disabled),
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-menu-item:hover:not(:disabled),
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-menu-item:hover:not(:disabled),
+.umlcanvas-theme-dark .umlcanvas-align-item:hover:not(:disabled),
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-align-item:hover:not(:disabled),
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-align-item:hover:not(:disabled),
+.umlcanvas-theme-dark .umlcanvas-font-preset-btn:hover:not(:disabled),
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-preset-btn:hover:not(:disabled),
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-preset-btn:hover:not(:disabled),
+.umlcanvas-theme-dark .umlcanvas-font-step-btn:hover:not(:disabled),
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-step-btn:hover:not(:disabled),
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-step-btn:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  color: #7b68ee !important;
+}
+
+.umlcanvas-theme-dark .umlcanvas-menu-item.is-active,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-menu-item.is-active,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-menu-item.is-active,
+.umlcanvas-theme-dark .umlcanvas-font-preset-btn.is-active,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-preset-btn.is-active,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-preset-btn.is-active,
+.umlcanvas-theme-dark .umlcanvas-font-pill-btn.is-active,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-pill-btn.is-active,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-pill-btn.is-active,
+.umlcanvas-theme-dark .umlcanvas-font-family-item.is-active,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-family-item.is-active,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-family-item.is-active {
+  background-color: #7b68ee !important;
+  border-color: #7b68ee !important;
+  color: #ffffff !important;
+}
+
+.umlcanvas-theme-dark .umlcanvas-font-pill-btn,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-pill-btn,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-pill-btn,
+.umlcanvas-theme-dark .umlcanvas-font-family-item,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-family-item,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-family-item {
+  color: #dcddde !important;
+  background-color: rgba(255, 255, 255, 0.04) !important;
+  border: 1px solid #38383e !important;
+  box-shadow: none !important;
+}
+
+.umlcanvas-theme-dark .umlcanvas-font-pill-btn:hover:not(:disabled),
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-pill-btn:hover:not(:disabled),
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-pill-btn:hover:not(:disabled),
+.umlcanvas-theme-dark .umlcanvas-font-family-item:hover:not(:disabled),
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-family-item:hover:not(:disabled),
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-font-family-item:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  color: #7b68ee !important;
+}
+
+.umlcanvas-theme-dark .umlcanvas-menu-divider,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-menu-divider,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-menu-divider,
+.umlcanvas-theme-dark .umlcanvas-align-separator,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-align-separator,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-align-separator {
+  background-color: #38383e !important;
+}
+
+.umlcanvas-theme-dark .umlcanvas-menu-item-icon,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-menu-item-icon,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-menu-item-icon,
+.umlcanvas-theme-dark .umlcanvas-align-icon,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-align-icon,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-align-icon,
+.umlcanvas-theme-dark .umlcanvas-btn-chevron,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-btn-chevron,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-btn-chevron {
+  color: #999999 !important;
+}
+
+.umlcanvas-theme-dark .umlcanvas-menu-item:hover:not(:disabled) .umlcanvas-menu-item-icon,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-menu-item:hover:not(:disabled) .umlcanvas-menu-item-icon,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-menu-item:hover:not(:disabled) .umlcanvas-menu-item-icon,
+.umlcanvas-theme-dark .umlcanvas-align-item:hover:not(:disabled) .umlcanvas-align-icon,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-align-item:hover:not(:disabled) .umlcanvas-align-icon,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-align-item:hover:not(:disabled) .umlcanvas-align-icon {
+  color: #7b68ee !important;
+}
+
+.umlcanvas-theme-dark .umlcanvas-menu-item-icon svg,
+.umlcanvas-theme-dark .umlcanvas-menu-item-icon .svg-icon,
+.umlcanvas-theme-dark .umlcanvas-align-icon svg,
+.umlcanvas-theme-dark .umlcanvas-align-icon .svg-icon,
+.umlcanvas-theme-dark .umlcanvas-btn-chevron svg,
+.umlcanvas-theme-dark .umlcanvas-btn-chevron .svg-icon,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-menu-item-icon svg,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-menu-item-icon .svg-icon,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-align-icon svg,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-align-icon .svg-icon,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-btn-chevron svg,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-btn-chevron .svg-icon,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-menu-item-icon svg,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-menu-item-icon .svg-icon,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-align-icon svg,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-align-icon .svg-icon,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-btn-chevron svg,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-btn-chevron .svg-icon {
+  stroke: currentColor !important;
+  fill: none !important;
+}
+
+.umlcanvas-theme-dark .umlcanvas-menu-item-icon svg *,
+.umlcanvas-theme-dark .umlcanvas-menu-item-icon .svg-icon *,
+.umlcanvas-theme-dark .umlcanvas-align-icon svg *,
+.umlcanvas-theme-dark .umlcanvas-align-icon .svg-icon *,
+.umlcanvas-theme-dark .umlcanvas-btn-chevron svg *,
+.umlcanvas-theme-dark .umlcanvas-btn-chevron .svg-icon *,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-menu-item-icon svg *,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-menu-item-icon .svg-icon *,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-align-icon svg *,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-align-icon .svg-icon *,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-btn-chevron svg *,
+.theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-btn-chevron .svg-icon *,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-menu-item-icon svg *,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-menu-item-icon .svg-icon *,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-align-icon svg *,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-align-icon .svg-icon *,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-btn-chevron svg *,
+.theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-btn-chevron .svg-icon * {
+  stroke: currentColor !important;
+  fill: none !important;
+}
+
+/* --- Unified Line Properties Popover & Context Controls --- */
+
+.umlcanvas-line-popover {
+  min-width: 280px;
+  max-width: 330px;
+  max-height: 480px;
+  overflow-y: auto;
+  padding: 10px 12px;
+}
+
+.umlcanvas-line-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  margin: 10px 0 6px 2px;
+}
+
+.umlcanvas-line-section-title:first-of-type {
+  margin-top: 4px;
+}
+
+.umlcanvas-line-marker-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.umlcanvas-line-type-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.umlcanvas-line-type-row .umlcanvas-line-opt-btn {
+  flex: 1 1 auto;
+  justify-content: center;
+}
+
+.umlcanvas-line-opt-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  font-size: 11.5px;
+  border-radius: 4px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-normal);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.umlcanvas-line-opt-btn:hover {
+  background: var(--background-modifier-hover);
+}
+
+.umlcanvas-line-opt-btn.is-active {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent, #ffffff);
+  border-color: var(--interactive-accent);
+  font-weight: 600;
+}
+
+.umlcanvas-line-opt-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.umlcanvas-edge-start-btn,
+.umlcanvas-edge-linetype-btn,
+.umlcanvas-edge-end-btn {
+  font-size: 12px;
+  padding: 4px 8px;
 }

@@ -1,13 +1,20 @@
 import { Diagram } from "../../domain/entities/Diagram";
 import { DiagramNode, createDiagramNode, NodeStyle } from "../../domain/entities/DiagramNode";
-import { DiagramEdge, createDiagramEdge } from "../../domain/entities/DiagramEdge";
+import {
+  DiagramEdge,
+  EdgeStyle,
+  LinePatternType,
+  LineEndingType,
+  createDiagramEdge,
+} from "../../domain/entities/DiagramEdge";
 import { Point } from "../../domain/value-objects/Point";
-import { Rect, Size, rect, intersects } from "../../domain/value-objects/Rect";
+import { Rect, Size, rect, intersects, contains, center } from "../../domain/value-objects/Rect";
 import { CommandStack } from "../commands/CommandStack";
 import { Layer, createLayer } from "../../domain/entities/Layer";
 import { Group } from "../../domain/entities/Group";
 import { Port } from "../../domain/entities/Port";
 import { Compartment } from "../../domain/entities/Compartment";
+import { Label } from "../../domain/entities/Label";
 import {
   AddNodeCommand,
   DeleteNodesAndEdgesCommand,
@@ -41,12 +48,16 @@ import {
   UpdateEdgeWaypointsCommand,
   MoveEdgesCommand,
   ReverseEdgeCommand,
+  UpdateEdgeKindCommand,
+  UpdateEdgeStyleCommand,
   EdgeMove,
   SwitchDiagramTypeCommand,
   AutoResizeNodeCommand,
   LayoutSequenceDiagramCommand,
   CompoundCommand,
   SetColorCommand,
+  SetFontCommand,
+  FontStylePatch,
   UpdateChipNodeCommand,
   PropagateChipInterfaceCommand,
   NodeMove,
@@ -62,7 +73,7 @@ import {
 } from "../../domain/services/CustomChipRegistry";
 import { EdgeRouting, DiagramTypeId, Side } from "../../domain/types";
 import { defaultDiagramTypeRegistry } from "../../domain/services/DiagramTypeRegistry";
-import { lineSegmentIntersectsRect, getRectCenter } from "../../domain/services/Geometry";
+import { lineSegmentIntersectsRect, getRectCenter, getFacingSide } from "../../domain/services/Geometry";
 import { ValidationIssue } from "../../domain/entities/DiagramTypeDefinition";
 import { calculateNodeFitSize } from "../../domain/services/TextMeasurement";
 import { defaultJsonCanvasImporter } from "../../infrastructure/persistence/JsonCanvasImporter";
@@ -72,10 +83,16 @@ import {
   SequenceLayoutOptions,
   SequenceLayoutResult,
 } from "../../domain/services/SequenceLayoutEngine";
+import {
+  getNodeFontStyle,
+  getEdgeFontStyle,
+  getGroupFontStyle,
+  FontStyleConfig,
+} from "../../presentation/theme/Typography";
 import { DiagramRepository } from "../ports/DiagramRepository";
-import { defaultJsonCanvasExporter, JsonCanvasExportOptions } from "../../infrastructure/export/JsonCanvasExporter";
 import { defaultSvgExporter, SvgExportOptions } from "../../infrastructure/export/SvgExporter";
 import { ExportForRAG } from "./ExportForRAG";
+import { defaultEdgeStyleRegistry } from "../../presentation/renderer/EdgeStyleRegistry";
 
 export interface BreadcrumbItem {
   id: string;
@@ -91,7 +108,10 @@ export interface AddNodeOptions {
   ports?: Port[];
   childDiagramId?: string;
   stereotype?: string;
+  taggedValues?: Record<string, string>;
+  compartments?: Compartment[];
   style?: NodeStyle;
+  labels?: Partial<Label>[];
   customData?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
 }
@@ -120,6 +140,7 @@ export class DiagramEditor {
   private selectedNodeIdSet = new Set<string>();
   private selectedEdgeIdSet = new Set<string>();
   private selectedGroupIdSet = new Set<string>();
+  private activeFontStyle: FontStyleConfig = {};
   private dirty = false;
   private listeners = new Set<() => void>();
 
@@ -132,6 +153,10 @@ export class DiagramEditor {
       this.dirty = true;
       this.notify();
     });
+  }
+
+  getActiveFont(): FontStyleConfig {
+    return { ...this.activeFontStyle };
   }
 
   get isDirty(): boolean {
@@ -347,7 +372,21 @@ export class DiagramEditor {
     const kind = options?.kind ?? "generic.rectangle";
     const position = options?.position ?? { x: 100, y: 100 };
     const size = options?.size ?? { width: 140, height: 80 };
-    const title = options?.title ?? "New Node";
+    const title = options?.title ?? options?.labels?.[0]?.text ?? "New Node";
+
+    const hasActiveFont =
+      this.activeFontStyle.fontSize !== undefined ||
+      Boolean(this.activeFontStyle.bold) ||
+      Boolean(this.activeFontStyle.italic) ||
+      Boolean(this.activeFontStyle.fontFamily);
+
+    const effectiveStyle: NodeStyle = {
+      ...(this.activeFontStyle.fontSize !== undefined ? { fontSize: this.activeFontStyle.fontSize } : {}),
+      ...(this.activeFontStyle.bold ? { bold: true } : {}),
+      ...(this.activeFontStyle.italic ? { italic: true } : {}),
+      ...(this.activeFontStyle.fontFamily ? { fontFamily: this.activeFontStyle.fontFamily } : {}),
+      ...(options?.style ?? {}),
+    };
 
     const node = createDiagramNode({
       id,
@@ -357,17 +396,39 @@ export class DiagramEditor {
       ports: options?.ports ?? [],
       childDiagramId: options?.childDiagramId,
       stereotype: options?.stereotype,
-      style: options?.style,
+      taggedValues: options?.taggedValues,
+      compartments: options?.compartments,
+      style: options?.style || hasActiveFont ? effectiveStyle : undefined,
       customData: options?.customData,
       metadata: options?.metadata ? { ...options.metadata } : {},
-      labels: [
-        {
-          id: `label-${id}-0`,
-          text: title,
-          anchor: "node",
-          position: { x: 0, y: 0 },
-        },
-      ],
+      labels: options?.labels && options.labels.length > 0
+        ? options.labels.map((l, idx) => ({
+            id: l.id || `label-${id}-${idx}`,
+            text: l.text ?? title,
+            anchor: l.anchor ?? "node",
+            position: l.position ?? { x: 0, y: 0 },
+            style: {
+              ...(effectiveStyle.fontSize !== undefined ? { fontSize: effectiveStyle.fontSize } : {}),
+              ...(effectiveStyle.bold ? { bold: true } : {}),
+              ...(effectiveStyle.italic ? { italic: true } : {}),
+              ...(effectiveStyle.fontFamily ? { fontFamily: effectiveStyle.fontFamily } : {}),
+              ...(l.style ?? {}),
+            },
+          }))
+        : [
+            {
+              id: `label-${id}-0`,
+              text: title,
+              anchor: "node",
+              position: { x: 0, y: 0 },
+              style: {
+                ...(effectiveStyle.fontSize !== undefined ? { fontSize: effectiveStyle.fontSize } : {}),
+                ...(effectiveStyle.bold ? { bold: true } : {}),
+                ...(effectiveStyle.italic ? { italic: true } : {}),
+                ...(effectiveStyle.fontFamily ? { fontFamily: effectiveStyle.fontFamily } : {}),
+              },
+            },
+          ],
     });
 
     const cmd = new AddNodeCommand(this.diagram, node);
@@ -495,6 +556,9 @@ export class DiagramEditor {
 
   public defaultRouting: EdgeRouting = "orthogonal";
   public activeEdgeKind: string = "uml.association";
+  public defaultMarkerStart?: string;
+  public defaultMarkerEnd?: string;
+  public defaultLineType?: LinePatternType;
 
   addEdge(
     fromNodeId: string,
@@ -505,6 +569,24 @@ export class DiagramEditor {
       options?.id ?? `edge-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
     const kind = options?.kind ?? this.activeEdgeKind;
     const routing = options?.routing ?? this.defaultRouting;
+
+    let edgeStyle = options?.style ? { ...options.style } : undefined;
+    if (
+      this.defaultMarkerStart !== undefined ||
+      this.defaultMarkerEnd !== undefined ||
+      this.defaultLineType !== undefined
+    ) {
+      edgeStyle = edgeStyle ?? {};
+      if (edgeStyle.markerStart === undefined && this.defaultMarkerStart !== undefined) {
+        edgeStyle.markerStart = this.defaultMarkerStart;
+      }
+      if (edgeStyle.markerEnd === undefined && this.defaultMarkerEnd !== undefined) {
+        edgeStyle.markerEnd = this.defaultMarkerEnd;
+      }
+      if (edgeStyle.lineType === undefined && this.defaultLineType !== undefined) {
+        edgeStyle.lineType = this.defaultLineType;
+      }
+    }
 
     const labels = options?.labels ? [...options.labels] : [];
     if (labels.length === 0) {
@@ -539,7 +621,7 @@ export class DiagramEditor {
       labels,
       multiplicitySource: options?.multiplicitySource,
       multiplicityTarget: options?.multiplicityTarget,
-      style: options?.style,
+      style: edgeStyle,
     });
 
     const cmd = new AddEdgeCommand(this.diagram, edge);
@@ -569,7 +651,7 @@ export class DiagramEditor {
 
   // --- Groups & Layers (F-010) ---
 
-  groupSelection(name = "Group"): Group | null {
+  groupSelection(name = "Group", color?: string): Group | null {
     if (this.selectedNodeIdSet.size === 0) return null;
     const nodeIds = Array.from(this.selectedNodeIdSet);
     const groupId = `group-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
@@ -587,18 +669,76 @@ export class DiagramEditor {
         maxY = Math.max(maxY, n.position.y + n.size.height);
       }
     }
+    // If no explicit color was specified, check if all selected nodes share a common color preset/hex
+    if (!color) {
+      const selectedNodes = this.diagram.nodes.filter((n) => nodeIds.includes(n.id));
+      const firstColor = selectedNodes[0]?.style?.color;
+      if (firstColor && selectedNodes.every((n) => n.style?.color === firstColor)) {
+        color = firstColor;
+      }
+    }
+
     const pad = 16;
     const initialPos = isFinite(minX) ? { x: Math.round(minX - pad), y: Math.round(minY - pad - 26) } : undefined;
     const initialSize = isFinite(minX) ? { width: Math.round(maxX - minX + pad * 2), height: Math.round(maxY - minY + pad * 2 + 26) } : undefined;
 
-    const cmd = new GroupSelectionCommand(this.diagram, groupId, name, nodeIds, initialPos, initialSize);
+    const cmd = new GroupSelectionCommand(this.diagram, groupId, name, nodeIds, initialPos, initialSize, color);
     this.commandStack.execute(cmd);
 
     const group = this.diagram.groups.find((g) => g.id === groupId) ?? null;
     if (group) {
+      this.selectedNodeIdSet.clear();
+      this.selectedEdgeIdSet.clear();
+      this.selectedGroupIdSet.clear();
       this.selectedGroupIdSet.add(group.id);
       this.notify();
     }
+    return group;
+  }
+
+  addGroup(params?: {
+    name?: string;
+    color?: string;
+    position?: Point;
+    size?: Size;
+    nodeIds?: string[];
+  }): Group {
+    const groupId = `group-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    const name = params?.name ?? "Group";
+    const color = params?.color;
+    const nodeIds = params?.nodeIds ? [...params.nodeIds] : [];
+    const position = params?.position ?? { x: 100, y: 100 };
+    const size = params?.size ?? { width: 300, height: 200 };
+
+    if (!params?.nodeIds) {
+      const groupRect = rect(position, size);
+      for (const node of this.diagram.nodes) {
+        const nodeCenter = center(rect(node.position, node.size));
+        if (contains(groupRect, nodeCenter) || contains(groupRect, node.position)) {
+          if (!nodeIds.includes(node.id)) {
+            nodeIds.push(node.id);
+          }
+        }
+      }
+    }
+
+    const cmd = new GroupSelectionCommand(
+      this.diagram,
+      groupId,
+      name,
+      nodeIds,
+      position,
+      size,
+      color
+    );
+    this.commandStack.execute(cmd);
+
+    const group = this.diagram.groups.find((g) => g.id === groupId)!;
+    this.selectedNodeIdSet.clear();
+    this.selectedEdgeIdSet.clear();
+    this.selectedGroupIdSet.clear();
+    this.selectedGroupIdSet.add(group.id);
+    this.notify();
     return group;
   }
 
@@ -644,7 +784,7 @@ export class DiagramEditor {
   resizeGroup(groupId: string, newPosition: Point, newSize: Size): void {
     const group = this.diagram.groups.find((g) => g.id === groupId);
     if (!group || group.locked) return;
-    const cmd = new ResizeGroupCommand(group, newPosition, newSize);
+    const cmd = new ResizeGroupCommand(group, newPosition, newSize, this.diagram);
     this.commandStack.execute(cmd);
   }
 
@@ -667,6 +807,7 @@ export class DiagramEditor {
     if (!group || nodeIds.length === 0) return;
     const set = new Set(group.nodeIds);
     for (const nid of nodeIds) set.add(nid);
+    if (set.size === group.nodeIds.length) return;
     const cmd = new UpdateGroupMembershipCommand(group, Array.from(set));
     this.commandStack.execute(cmd);
   }
@@ -827,6 +968,169 @@ export class DiagramEditor {
     this.commandStack.execute(cmd);
   }
 
+  updateEdgeKind(edgeId: string, kind: string): void {
+    const edge = this.diagram.edges.find((e) => e.id === edgeId);
+    if (!edge) return;
+    const styleDef = defaultEdgeStyleRegistry.get(kind);
+    const newStyle: Partial<EdgeStyle> = {
+      markerStart: styleDef.markerStartId ?? "none",
+      markerEnd: styleDef.markerEndId ?? "none",
+      lineType: styleDef.strokeDasharray ? "dashed" : "solid",
+      dashed: Boolean(styleDef.strokeDasharray),
+      strokeDasharray: styleDef.strokeDasharray,
+    };
+    const cmd = new UpdateEdgeKindCommand(this.diagram, edgeId, kind, newStyle);
+    this.commandStack.execute(cmd);
+  }
+
+  updateEdgeStyle(
+    edgeId: string,
+    styleUpdates: Partial<EdgeStyle>,
+    newKind?: string
+  ): void {
+    const cmd = new UpdateEdgeStyleCommand(this.diagram, edgeId, styleUpdates, newKind);
+    this.commandStack.execute(cmd);
+  }
+
+  setEdgeMarkerStart(edgeId: string, markerStart: string | undefined): void {
+    const edge = this.diagram.edges.find((e) => e.id === edgeId);
+    if (!edge) return;
+    const norm = markerStart || "none";
+    const currentEnd = edge.style?.markerEnd ?? defaultEdgeStyleRegistry.get(edge.kind).markerEndId ?? "none";
+    const currentType = edge.style?.lineType ?? (edge.style?.dashed || defaultEdgeStyleRegistry.get(edge.kind).strokeDasharray ? "dashed" : "solid");
+    const inferredKind = this.inferEdgeKind(norm, currentEnd, currentType, edge.kind);
+    this.updateEdgeStyle(edgeId, { markerStart: norm }, inferredKind);
+  }
+
+  setEdgeMarkerEnd(edgeId: string, markerEnd: string | undefined): void {
+    const edge = this.diagram.edges.find((e) => e.id === edgeId);
+    if (!edge) return;
+    const norm = markerEnd || "none";
+    const currentStart = edge.style?.markerStart ?? defaultEdgeStyleRegistry.get(edge.kind).markerStartId ?? "none";
+    const currentType = edge.style?.lineType ?? (edge.style?.dashed || defaultEdgeStyleRegistry.get(edge.kind).strokeDasharray ? "dashed" : "solid");
+    const inferredKind = this.inferEdgeKind(currentStart, norm, currentType, edge.kind);
+    this.updateEdgeStyle(edgeId, { markerEnd: norm }, inferredKind);
+  }
+
+  setEdgeLineType(edgeId: string, lineType: LinePatternType): void {
+    const edge = this.diagram.edges.find((e) => e.id === edgeId);
+    if (!edge) return;
+    const dashMap: Record<LinePatternType, string | undefined> = {
+      solid: undefined,
+      dashed: "6 4",
+      dotted: "2 4",
+      "dash-dot": "8 4 2 4",
+      "long-dash": "12 5",
+    };
+    const dashed = lineType !== "solid";
+    const currentStart = edge.style?.markerStart ?? defaultEdgeStyleRegistry.get(edge.kind).markerStartId ?? "none";
+    const currentEnd = edge.style?.markerEnd ?? defaultEdgeStyleRegistry.get(edge.kind).markerEndId ?? "none";
+    const inferredKind = this.inferEdgeKind(currentStart, currentEnd, lineType, edge.kind);
+    this.updateEdgeStyle(
+      edgeId,
+      {
+        lineType,
+        strokeDasharray: dashMap[lineType],
+        dashed,
+      },
+      inferredKind
+    );
+  }
+
+  setEdgeLineSettings(
+    edgeId: string,
+    settings: {
+      markerStart?: string;
+      markerEnd?: string;
+      lineType?: LinePatternType;
+      routing?: EdgeRouting;
+      kind?: string;
+    }
+  ): void {
+    const edge = this.diagram.edges.find((e) => e.id === edgeId);
+    if (!edge) return;
+
+    const dashMap: Record<LinePatternType, string | undefined> = {
+      solid: undefined,
+      dashed: "6 4",
+      dotted: "2 4",
+      "dash-dot": "8 4 2 4",
+      "long-dash": "12 5",
+    };
+
+    const styleUpdates: Partial<EdgeStyle> = {};
+    if (settings.markerStart !== undefined) styleUpdates.markerStart = settings.markerStart;
+    if (settings.markerEnd !== undefined) styleUpdates.markerEnd = settings.markerEnd;
+    if (settings.lineType !== undefined) {
+      styleUpdates.lineType = settings.lineType;
+      styleUpdates.strokeDasharray = dashMap[settings.lineType];
+      styleUpdates.dashed = settings.lineType !== "solid";
+    }
+
+    const start = settings.markerStart ?? edge.style?.markerStart ?? defaultEdgeStyleRegistry.get(edge.kind).markerStartId ?? "none";
+    const end = settings.markerEnd ?? edge.style?.markerEnd ?? defaultEdgeStyleRegistry.get(edge.kind).markerEndId ?? "none";
+    const type = settings.lineType ?? edge.style?.lineType ?? (edge.style?.dashed || defaultEdgeStyleRegistry.get(edge.kind).strokeDasharray ? "dashed" : "solid");
+    const inferredKind = settings.kind ?? this.inferEdgeKind(start, end, type, edge.kind);
+
+    if (settings.routing && settings.routing !== edge.routing) {
+      this.updateEdgeRouting(edgeId, settings.routing);
+    }
+    this.updateEdgeStyle(edgeId, styleUpdates, inferredKind);
+  }
+
+  public inferEdgeKind(
+    markerStart: string,
+    markerEnd: string,
+    lineType: LinePatternType | string,
+    fallbackKind?: string
+  ): string {
+    const s = markerStart.replace(/^uml-marker-/, "");
+    const e = markerEnd.replace(/^uml-marker-/, "");
+    const isDashed = lineType === "dashed" || lineType === "dotted";
+
+    if (s === "diamond-hollow" && (e === "open-arrow" || e === "arrow")) return "uml.directedAggregation";
+    if (s === "diamond-filled" && (e === "open-arrow" || e === "arrow")) return "uml.directedComposition";
+    if (s === "diamond-hollow" && (e === "none" || !e)) return "uml.aggregation";
+    if (s === "diamond-filled" && (e === "none" || !e)) return "uml.composition";
+    if ((s === "none" || !s) && (e === "triangle-hollow" || e === "triangle") && isDashed) return "uml.realization";
+    if ((s === "none" || !s) && (e === "triangle-hollow" || e === "triangle")) return "uml.generalization";
+    if ((s === "none" || !s) && (e === "open-arrow" || e === "arrow") && isDashed) return "uml.dependency";
+    if ((s === "none" || !s) && (e === "open-arrow" || e === "arrow")) return "uml.directedAssociation";
+    if ((s === "none" || !s) && (e === "none" || !e)) return "uml.association";
+    if ((s === "none" || !s) && e === "triangle-filled") return "profile.extension";
+    if ((s === "none" || !s) && e === "arrow-filled") return "sequence.syncMessage";
+    return fallbackKind ?? "uml.association";
+  }
+
+  getEdgeEffectiveStartMarker(edge: DiagramEdge): string {
+    if (edge.style?.markerStart !== undefined) {
+      return edge.style.markerStart;
+    }
+    const def = defaultEdgeStyleRegistry.get(edge.kind);
+    return def.markerStartId ?? "none";
+  }
+
+  getEdgeEffectiveEndMarker(edge: DiagramEdge): string {
+    if (edge.style?.markerEnd !== undefined) {
+      return edge.style.markerEnd;
+    }
+    const def = defaultEdgeStyleRegistry.get(edge.kind);
+    return def.markerEndId ?? "none";
+  }
+
+  getEdgeEffectiveLineType(edge: DiagramEdge): LinePatternType {
+    if (edge.style?.lineType) {
+      return edge.style.lineType;
+    }
+    if (edge.style?.strokeDasharray?.includes("2") || edge.style?.strokeDasharray?.includes("3")) {
+      return "dotted";
+    }
+    if (edge.style?.dashed || edge.style?.strokeDasharray || defaultEdgeStyleRegistry.get(edge.kind).strokeDasharray) {
+      return "dashed";
+    }
+    return "solid";
+  }
+
   updateEdgeRouting(edgeId: string, routing: EdgeRouting): void {
     const cmd = new UpdateEdgeRoutingCommand(this.diagram, edgeId, routing);
     this.commandStack.execute(cmd);
@@ -925,20 +1229,215 @@ export class DiagramEditor {
     this.commandStack.execute(cmd);
   }
 
+  getGroupColor(groupId: string): string | undefined {
+    const group = this.diagram.groups.find((g) => g.id === groupId);
+    return group?.color;
+  }
+
   setColorForSelection(color: string | undefined): void {
     const nodes = this.diagram.nodes.filter((n) => this.selectedNodeIds.includes(n.id));
     const edges = this.diagram.edges.filter((e) => this.selectedEdgeIds.includes(e.id));
     
-    // Include any directly selected groups or groups whose nodes are selected
+    // Include directly selected groups, or groups whose nodes are selected if no groups are explicitly selected
     const groups = this.diagram.groups.filter((g) =>
       this.selectedGroupIdSet.has(g.id) ||
-      g.nodeIds.some((id) => this.selectedNodeIds.includes(id))
+      (this.selectedGroupIdSet.size === 0 && g.nodeIds.length > 0 && g.nodeIds.every((id) => this.selectedNodeIds.includes(id)))
     );
 
     if (nodes.length === 0 && edges.length === 0 && groups.length === 0) return;
 
     const cmd = new SetColorCommand({ nodes, edges, groups }, color);
     this.commandStack.execute(cmd);
+  }
+
+  // --- Font Adjustments (Font Size, Weights, Italics) ---
+
+  setNodeFont(nodeId: string | string[], patch: FontStylePatch): void {
+    const ids = Array.isArray(nodeId) ? nodeId : [nodeId];
+    const nodes = this.diagram.nodes.filter((n) => ids.includes(n.id));
+    if (nodes.length === 0) return;
+    const cmd = new SetFontCommand({ nodes }, patch);
+    this.commandStack.execute(cmd);
+  }
+
+  getNodeFont(nodeId: string): FontStyleConfig {
+    const node = this.diagram.nodes.find((n) => n.id === nodeId);
+    if (!node) return {};
+    return getNodeFontStyle(node);
+  }
+
+  setEdgeFont(edgeId: string | string[], patch: FontStylePatch): void {
+    const ids = Array.isArray(edgeId) ? edgeId : [edgeId];
+    const edges = this.diagram.edges.filter((e) => ids.includes(e.id));
+    if (edges.length === 0) return;
+    const cmd = new SetFontCommand({ edges }, patch);
+    this.commandStack.execute(cmd);
+  }
+
+  getEdgeFont(edgeId: string): FontStyleConfig {
+    const edge = this.diagram.edges.find((e) => e.id === edgeId);
+    if (!edge) return {};
+    return getEdgeFontStyle(edge);
+  }
+
+  setGroupFont(groupId: string | string[], patch: FontStylePatch): void {
+    const ids = Array.isArray(groupId) ? groupId : [groupId];
+    const groups = this.diagram.groups.filter((g) => ids.includes(g.id));
+    if (groups.length === 0) return;
+    const cmd = new SetFontCommand({ groups }, patch);
+    this.commandStack.execute(cmd);
+  }
+
+  getGroupFont(groupId: string): FontStyleConfig {
+    const group = this.diagram.groups.find((g) => g.id === groupId);
+    if (!group) return {};
+    return getGroupFontStyle(group);
+  }
+
+  setFontForSelection(patch: FontStylePatch): void {
+    if (patch.reset) {
+      this.activeFontStyle = {};
+    } else {
+      if (patch.fontSize !== undefined) this.activeFontStyle.fontSize = patch.fontSize;
+      if (patch.bold !== undefined) this.activeFontStyle.bold = patch.bold;
+      if (patch.italic !== undefined) this.activeFontStyle.italic = patch.italic;
+      if (patch.fontWeight !== undefined) this.activeFontStyle.fontWeight = patch.fontWeight;
+      if (patch.fontStyle !== undefined) {
+        this.activeFontStyle.fontStyle = patch.fontStyle;
+        this.activeFontStyle.italic = patch.fontStyle === "italic";
+      }
+      if (patch.fontFamily !== undefined) this.activeFontStyle.fontFamily = patch.fontFamily;
+    }
+
+    const nodes = this.diagram.nodes.filter((n) => this.selectedNodeIds.includes(n.id));
+    const edges = this.diagram.edges.filter((e) => this.selectedEdgeIds.includes(e.id));
+    const groups = this.diagram.groups.filter((g) =>
+      this.selectedGroupIdSet.has(g.id) ||
+      g.nodeIds.some((id) => this.selectedNodeIds.includes(id))
+    );
+
+    if (nodes.length === 0 && edges.length === 0 && groups.length === 0) {
+      this.notify();
+      return;
+    }
+
+    const cmd = new SetFontCommand({ nodes, edges, groups }, patch);
+    this.commandStack.execute(cmd);
+  }
+
+  setFontForAllElements(patch: FontStylePatch): void {
+    if (patch.reset) {
+      this.activeFontStyle = {};
+    } else {
+      if (patch.fontSize !== undefined) this.activeFontStyle.fontSize = patch.fontSize;
+      if (patch.bold !== undefined) this.activeFontStyle.bold = patch.bold;
+      if (patch.italic !== undefined) this.activeFontStyle.italic = patch.italic;
+      if (patch.fontWeight !== undefined) this.activeFontStyle.fontWeight = patch.fontWeight;
+      if (patch.fontStyle !== undefined) {
+        this.activeFontStyle.fontStyle = patch.fontStyle;
+        this.activeFontStyle.italic = patch.fontStyle === "italic";
+      }
+      if (patch.fontFamily !== undefined) this.activeFontStyle.fontFamily = patch.fontFamily;
+    }
+
+    const nodes = [...this.diagram.nodes];
+    const edges = [...this.diagram.edges];
+    const groups = [...this.diagram.groups];
+
+    if (nodes.length === 0 && edges.length === 0 && groups.length === 0) {
+      this.notify();
+      return;
+    }
+
+    const cmd = new SetFontCommand({ nodes, edges, groups }, patch);
+    this.commandStack.execute(cmd);
+  }
+
+  setFontFamilyForSelection(fontFamily?: string): void {
+    this.setFontForSelection({ fontFamily });
+  }
+
+  setFontFamilyForAllElements(fontFamily?: string): void {
+    this.setFontForAllElements({ fontFamily });
+  }
+
+  setFontSizeForSelection(fontSize: number | undefined): void {
+    if (fontSize === undefined) {
+      this.setFontForSelection({ reset: true });
+    } else {
+      this.setFontForSelection({ fontSize });
+    }
+  }
+
+  toggleBoldForSelection(): void {
+    const font = this.getSelectionFont();
+    this.setFontForSelection({ bold: !font.isBold });
+  }
+
+  toggleItalicForSelection(): void {
+    const font = this.getSelectionFont();
+    this.setFontForSelection({ italic: !font.isItalic });
+  }
+
+  adjustFontSizeForSelection(delta: number): void {
+    const font = this.getSelectionFont();
+    const currentSize = font.fontSize ?? 13;
+    const newSize = Math.max(8, Math.min(72, currentSize + delta));
+    this.setFontSizeForSelection(newSize);
+  }
+
+  resetFontForSelection(): void {
+    this.setFontForSelection({ reset: true });
+  }
+
+  getSelectionFont(): {
+    fontSize?: number;
+    isBold: boolean;
+    isItalic: boolean;
+    bold: boolean;
+    italic: boolean;
+    fontFamily?: string;
+  } {
+    const nodes = this.diagram.nodes.filter((n) => this.selectedNodeIds.includes(n.id));
+    const edges = this.diagram.edges.filter((e) => this.selectedEdgeIds.includes(e.id));
+    const groups = this.diagram.groups.filter((g) =>
+      this.selectedGroupIdSet.has(g.id) ||
+      g.nodeIds.some((id) => this.selectedNodeIds.includes(id))
+    );
+
+    const firstNode = nodes[0];
+    const firstEdge = edges[0];
+    const firstGroup = groups[0];
+
+    if (firstNode) {
+      const f = getNodeFontStyle(firstNode);
+      const isBold = Boolean(f.bold);
+      const isItalic = Boolean(f.italic);
+      return { fontSize: f.fontSize, isBold, isItalic, bold: isBold, italic: isItalic, fontFamily: f.fontFamily };
+    }
+    if (firstEdge) {
+      const f = getEdgeFontStyle(firstEdge);
+      const isBold = Boolean(f.bold);
+      const isItalic = Boolean(f.italic);
+      return { fontSize: f.fontSize, isBold, isItalic, bold: isBold, italic: isItalic, fontFamily: f.fontFamily };
+    }
+    if (firstGroup) {
+      const f = getGroupFontStyle(firstGroup);
+      const isBold = Boolean(f.bold);
+      const isItalic = Boolean(f.italic);
+      return { fontSize: f.fontSize, isBold, isItalic, bold: isBold, italic: isItalic, fontFamily: f.fontFamily };
+    }
+
+    const isBold = Boolean(this.activeFontStyle.bold);
+    const isItalic = Boolean(this.activeFontStyle.italic);
+    return {
+      fontSize: this.activeFontStyle.fontSize,
+      isBold,
+      isItalic,
+      bold: isBold,
+      italic: isItalic,
+      fontFamily: this.activeFontStyle.fontFamily,
+    };
   }
 
   // --- Diagram Type & Validation (F-040, F-041, F-042, F-054) ---
@@ -1053,11 +1552,7 @@ export class DiagramEditor {
     return target;
   }
 
-  // --- Export Helpers (F-024, F-025) ---
-
-  exportToJsonCanvas(options?: JsonCanvasExportOptions): string {
-    return defaultJsonCanvasExporter.exportCanvas(this.diagram, options);
-  }
+  // --- Export Helpers (F-024) ---
 
   exportToSvg(options?: SvgExportOptions): string {
     return defaultSvgExporter.exportToSvg(this.diagram, options);
@@ -1143,6 +1638,115 @@ export class DiagramEditor {
 
     const confidenceThreshold = opts.confidenceThreshold ?? 0.65;
     const result = defaultShapeRecognizer.recognize(stroke);
+    const dt = this.diagram.diagramType;
+
+    const isClosedShape =
+      result.shape === "rectangle" ||
+      result.shape === "square" ||
+      result.shape === "diamond" ||
+      result.shape === "ellipse" ||
+      result.shape === "circle" ||
+      result.shape === "triangle";
+
+    const sp =
+      result.startPoint ??
+      (stroke.points && stroke.points.length > 0
+        ? stroke.points[0]
+        : {
+            x: result.bounds.position.x,
+            y: result.bounds.position.y,
+          });
+    const ep =
+      result.endPoint ??
+      (stroke.points && stroke.points.length > 0
+        ? stroke.points[stroke.points.length - 1]
+        : {
+            x: result.bounds.position.x + result.bounds.size.width,
+            y: result.bounds.position.y + result.bounds.size.height,
+          });
+
+    // 1. Handdrawn Connection Line between 2 components (Issue #5)
+    // If user drew a line or stroke between two components, connect them directly
+    if (!isClosedShape && stroke.points && stroke.points.length >= 2) {
+      const fromNode = this.findNearestNode(sp, 140);
+      const toNode = this.findNearestNode(ep, 140, fromNode?.id);
+
+      if (fromNode && toNode && fromNode.id !== toNode.id) {
+        let edgeKind = "uml.association";
+        if (result.shape === "arrow") {
+          switch (dt) {
+            case "uml.activity":
+            case "uml.interactionOverview":
+              edgeKind = "activity.controlFlow";
+              break;
+            case "uml.stateMachine":
+              edgeKind = "state.transition";
+              break;
+            case "uml.package":
+              edgeKind = "package.dependency";
+              break;
+            case "uml.profile":
+              edgeKind = "profile.extension";
+              break;
+            case "uml.class":
+            default:
+              edgeKind = "uml.dependency";
+          }
+        } else {
+          switch (dt) {
+            case "schematic":
+              edgeKind = "schematic.wire";
+              break;
+            case "uml.sequence":
+              edgeKind = "sequence.syncMessage";
+              break;
+            case "uml.object":
+              edgeKind = "uml.link";
+              break;
+            case "uml.composite":
+              edgeKind = "composite.connector";
+              break;
+            case "uml.class":
+            default:
+              edgeKind = this.activeEdgeKind ?? "uml.association";
+          }
+        }
+
+        // Determine optimal connection sides between the two components
+        const fromCenter = {
+          x: fromNode.position.x + fromNode.size.width / 2,
+          y: fromNode.position.y + fromNode.size.height / 2,
+        };
+        const toCenter = {
+          x: toNode.position.x + toNode.size.width / 2,
+          y: toNode.position.y + toNode.size.height / 2,
+        };
+
+        const distFromCenter = Math.hypot(sp.x - fromCenter.x, sp.y - fromCenter.y);
+        const distToCenter = Math.hypot(ep.x - toCenter.x, ep.y - toCenter.y);
+
+        const fromSide: Side =
+          distFromCenter > 20
+            ? getFacingSide(fromNode.position, fromNode.size, sp)
+            : getFacingSide(fromNode.position, fromNode.size, toCenter);
+        const toSide: Side =
+          distToCenter > 20
+            ? getFacingSide(toNode.position, toNode.size, ep)
+            : getFacingSide(toNode.position, toNode.size, fromCenter);
+
+        const fromPort = fromNode.ports?.find((p) => p.side === fromSide);
+        const toPort = toNode.ports?.find((p) => p.side === toSide);
+
+        return this.addEdge(fromNode.id, toNode.id, {
+          kind: edgeKind,
+          fromSide,
+          toSide,
+          fromPortId: fromPort?.id,
+          toPortId: toPort?.id,
+        });
+      }
+    }
+
     if (result.confidence < confidenceThreshold || result.shape === "none") {
       if (opts.fallbackToFreehand) {
         return this.addFreehandNode(stroke);
@@ -1150,16 +1754,8 @@ export class DiagramEditor {
       return null;
     }
 
-    const dt = this.diagram.diagramType;
-
-    // Closed nodes: Rectangle, Diamond, Ellipse, Circle, Triangle
-    if (
-      result.shape === "rectangle" ||
-      result.shape === "diamond" ||
-      result.shape === "ellipse" ||
-      result.shape === "circle" ||
-      result.shape === "triangle"
-    ) {
+    // Closed nodes: Rectangle, Square, Diamond, Ellipse, Circle, Triangle
+    if (isClosedShape) {
       let nodeKind = "generic.rectangle";
       let title = "";
 
@@ -1177,7 +1773,7 @@ export class DiagramEditor {
       } else if (result.shape === "triangle") {
         nodeKind = "generic.triangle";
         title = "";
-      } else if (result.shape === "rectangle") {
+      } else if (result.shape === "rectangle" || result.shape === "square") {
         switch (dt) {
           case "uml.class":
             nodeKind = "uml.class";
@@ -1259,7 +1855,7 @@ export class DiagramEditor {
 
       let width = Math.max(30, Math.round(result.bounds.size.width));
       let height = Math.max(30, Math.round(result.bounds.size.height));
-      if (nodeKind === "generic.circle") {
+      if (nodeKind === "generic.circle" || result.shape === "square") {
         const side = Math.round((width + height) / 2);
         width = Math.max(30, side);
         height = Math.max(30, side);
@@ -1279,67 +1875,6 @@ export class DiagramEditor {
       });
     }
 
-    // Connectors: Line or Arrow
-    if (result.shape === "line" || result.shape === "arrow") {
-      const sp = result.startPoint ?? {
-        x: result.bounds.position.x,
-        y: result.bounds.position.y,
-      };
-      const ep = result.endPoint ?? {
-        x: result.bounds.position.x + result.bounds.size.width,
-        y: result.bounds.position.y + result.bounds.size.height,
-      };
-
-      const fromNode = this.findNearestNode(sp, 100);
-      const toNode = this.findNearestNode(ep, 100);
-
-      if (fromNode && toNode) {
-        let edgeKind = "uml.association";
-        if (result.shape === "arrow") {
-          switch (dt) {
-            case "uml.activity":
-            case "uml.interactionOverview":
-              edgeKind = "activity.controlFlow";
-              break;
-            case "uml.stateMachine":
-              edgeKind = "state.transition";
-              break;
-            case "uml.package":
-              edgeKind = "package.dependency";
-              break;
-            case "uml.profile":
-              edgeKind = "profile.extension";
-              break;
-            case "uml.class":
-            default:
-              edgeKind = "uml.dependency";
-          }
-        } else {
-          switch (dt) {
-            case "schematic":
-              edgeKind = "schematic.wire";
-              break;
-            case "uml.sequence":
-              edgeKind = "sequence.syncMessage";
-              break;
-            case "uml.object":
-              edgeKind = "uml.link";
-              break;
-            case "uml.composite":
-              edgeKind = "composite.connector";
-              break;
-            case "uml.class":
-            default:
-              edgeKind = "uml.association";
-          }
-        }
-
-        return this.addEdge(fromNode.id, toNode.id, {
-          kind: edgeKind,
-        });
-      }
-    }
-
     if (opts.fallbackToFreehand) {
       return this.addFreehandNode(stroke);
     }
@@ -1347,17 +1882,52 @@ export class DiagramEditor {
     return null;
   }
 
-  private findNearestNode(pt: Point, maxDist = 100): DiagramNode | null {
+  private distanceToNode(pt: Point, node: DiagramNode): number {
+    const rx = node.position.x;
+    const ry = node.position.y;
+    const rw = node.size.width;
+    const rh = node.size.height;
+
+    // Inside node bounds -> distance is 0
+    if (pt.x >= rx && pt.x <= rx + rw && pt.y >= ry && pt.y <= ry + rh) {
+      return 0;
+    }
+
+    // Minimum distance from pt to rectangle perimeter
+    const clampedX = Math.max(rx, Math.min(rx + rw, pt.x));
+    const clampedY = Math.max(ry, Math.min(ry + rh, pt.y));
+    return Math.hypot(pt.x - clampedX, pt.y - clampedY);
+  }
+
+  private findNearestNode(
+    pt: Point,
+    maxDist = 120,
+    excludeNodeId?: string
+  ): DiagramNode | null {
     let bestNode: DiagramNode | null = null;
     let minDist = maxDist;
 
+    // Prefer standard shapes over raw freehand doodles
     for (const node of this.diagram.nodes) {
-      const cx = node.position.x + node.size.width / 2;
-      const cy = node.position.y + node.size.height / 2;
-      const d = Math.hypot(pt.x - cx, pt.y - cy);
+      if (excludeNodeId && node.id === excludeNodeId) continue;
+      if (node.kind === "generic.freehand") continue;
+
+      const d = this.distanceToNode(pt, node);
       if (d < minDist) {
         minDist = d;
         bestNode = node;
+      }
+    }
+
+    // Fallback: include freehand nodes if no standard shape was found within range
+    if (!bestNode) {
+      for (const node of this.diagram.nodes) {
+        if (excludeNodeId && node.id === excludeNodeId) continue;
+        const d = this.distanceToNode(pt, node);
+        if (d < minDist) {
+          minDist = d;
+          bestNode = node;
+        }
       }
     }
 

@@ -1,5 +1,59 @@
 import { DiagramNode } from "../entities/DiagramNode";
 import { Size } from "../value-objects/Rect";
+import { getNodeFontStyle } from "../../presentation/theme/Typography";
+
+/**
+ * Wraps arbitrary text into lines that fit within maxWidth pixels,
+ * respecting manual newlines, word boundaries, and breaking oversized words.
+ */
+export function wrapTextToLines(
+  text: string,
+  maxWidth: number,
+  charWidth: number
+): string[] {
+  if (!text) return [];
+  const rawParagraphs = text.split(/\r?\n/);
+  const result: string[] = [];
+  const safeCharWidth = Math.max(1, charWidth);
+  const maxCharsPerLine = Math.max(1, Math.floor(maxWidth / safeCharWidth));
+
+  for (const para of rawParagraphs) {
+    if (!para) {
+      result.push("");
+      continue;
+    }
+    const words = para.split(/\s+/);
+    let currentLine = "";
+
+    for (const word of words) {
+      if (!word) continue;
+      const candidate = currentLine ? `${currentLine} ${word}` : word;
+      if (candidate.length * safeCharWidth <= maxWidth) {
+        currentLine = candidate;
+      } else {
+        if (currentLine) {
+          result.push(currentLine);
+          currentLine = "";
+        }
+        if (word.length * safeCharWidth > maxWidth) {
+          let rem = word;
+          while (rem.length > maxCharsPerLine) {
+            result.push(rem.slice(0, maxCharsPerLine));
+            rem = rem.slice(maxCharsPerLine);
+          }
+          currentLine = rem;
+        } else {
+          currentLine = word;
+        }
+      }
+    }
+    if (currentLine) {
+      result.push(currentLine);
+    }
+  }
+
+  return result;
+}
 
 /**
  * Pure calculation of required node dimensions to comfortably fit its text,
@@ -7,6 +61,10 @@ import { Size } from "../value-objects/Rect";
  */
 export function calculateNodeFitSize(node: DiagramNode): Size {
   const kind = node.kind;
+  const fontStyle = getNodeFontStyle(node);
+  const baseSize = fontStyle.fontSize ?? (kind === "uml.actor" ? 12 : 13);
+  const scale = baseSize / 13;
+  const boldMult = fontStyle.bold ? 1.08 : 1.0;
 
   if (kind === "uml.actor") {
     const labelText = node.labels[0]?.text ?? "";
@@ -44,10 +102,18 @@ export function calculateNodeFitSize(node: DiagramNode): Size {
 
   if (kind === "generic.stickyNote") {
     const titleText = node.labels[0]?.text ?? "";
-    const lines = titleText.split("\n");
-    const maxChars = lines.reduce((m, l) => Math.max(m, l.length), 0);
-    const contentW = Math.max(140, maxChars * 8.5 + 32);
-    const contentH = Math.max(100, 32 + lines.length * 20 + 16);
+    const rawLines = titleText.split(/\r?\n/);
+    const maxRawChars = rawLines.reduce((m, l) => Math.max(m, l.length), 0);
+    const contentW = Math.max(180, Math.ceil(maxRawChars * 8.5 * scale * boldMult + 32));
+
+    const effectiveWidth = Math.max(node.size.width, contentW);
+    const availableW = Math.max(60, effectiveWidth - 24);
+    const charW = Math.max(5, baseSize * 0.58 * scale * boldMult);
+    const wrappedLines = wrapTextToLines(titleText, availableW, charW);
+    const effectiveLines = Math.max(rawLines.length, wrappedLines.length);
+
+    const lineSpacing = Math.round(baseSize * 1.38);
+    const contentH = Math.max(100, 26 + baseSize + effectiveLines * lineSpacing + 16);
     return {
       width: Math.max(node.size.width, contentW),
       height: Math.max(node.size.height, contentH),
@@ -56,7 +122,7 @@ export function calculateNodeFitSize(node: DiagramNode): Size {
 
   if (kind === "generic.image") {
     const titleText = node.labels[0]?.text ?? "";
-    const minW = Math.max(160, titleText.length * 8.5 + 32);
+    const minW = Math.max(160, titleText.length * 8.5 * scale * boldMult + 32);
     return {
       width: Math.max(node.size.width, minW),
       height: node.size.height,
@@ -91,7 +157,7 @@ export function calculateNodeFitSize(node: DiagramNode): Size {
   const titleText = node.labels[0]?.text ?? "";
   const titleLines = titleText.split("\n");
   const maxTitleChars = titleLines.reduce((m, l) => Math.max(m, l.length), 0);
-  let maxContentWidth = maxTitleChars * 8.5;
+  let maxContentWidth = maxTitleChars * 8.5 * scale * boldMult;
 
   if (node.stereotype) {
     const stereoWidth = (node.stereotype.length + 4) * 7.5;
@@ -108,7 +174,7 @@ export function calculateNodeFitSize(node: DiagramNode): Size {
   // Calculate header section height
   const hasStereo = Boolean(node.stereotype);
   const hasTagged = Boolean(node.taggedValues && Object.keys(node.taggedValues).length > 0);
-  let totalHeight = 16 + titleLines.length * 18;
+  let totalHeight = 16 + titleLines.length * Math.round(18 * scale);
   if (hasStereo) totalHeight += 16;
   if (hasTagged) totalHeight += 14;
 

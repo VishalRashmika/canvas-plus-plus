@@ -1,3 +1,5 @@
+import * as fs from "fs";
+import * as path from "path";
 import { DiagramEditor } from "../src/application/use-cases/DiagramEditor";
 import { createDiagram } from "../src/domain/entities/Diagram";
 import { Toolbar } from "../src/presentation/views/Toolbar";
@@ -10,11 +12,29 @@ class MockElement {
   classList = {
     classes: new Set<string>(),
     add: (...cls: string[]) => {
-      cls.forEach((c) => c && c.split(" ").forEach((k) => k && this.classList.classes.add(k)));
+      cls.forEach((c) => {
+        if (!c) return;
+        if (c.includes(" ")) {
+          throw new DOMException(
+            `Failed to execute 'add' on 'DOMTokenList': The token provided ('${c}') contains HTML space characters, which are not valid in tokens.`,
+            "InvalidCharacterError"
+          );
+        }
+        this.classList.classes.add(c);
+      });
       this.className = Array.from(this.classList.classes).join(" ");
     },
     remove: (...cls: string[]) => {
-      cls.forEach((c) => c && c.split(" ").forEach((k) => k && this.classList.classes.delete(k)));
+      cls.forEach((c) => {
+        if (!c) return;
+        if (c.includes(" ")) {
+          throw new DOMException(
+            `Failed to execute 'remove' on 'DOMTokenList': The token provided ('${c}') contains HTML space characters, which are not valid in tokens.`,
+            "InvalidCharacterError"
+          );
+        }
+        this.classList.classes.delete(c);
+      });
       this.className = Array.from(this.classList.classes).join(" ");
     },
     toggle: (c: string, force?: boolean) => {
@@ -39,7 +59,14 @@ class MockElement {
   constructor(tagName: string, options?: any) {
     this.tagName = tagName.toUpperCase();
     if (options?.cls) {
-      this.classList.add(options.cls);
+      const classes =
+        typeof options.cls === "string"
+          ? options.cls.split(/\s+/).filter(Boolean)
+          : Array.isArray(options.cls)
+          ? options.cls
+          : [options.cls];
+      classes.forEach((c: string) => this.classList.classes.add(c));
+      this.className = Array.from(this.classList.classes).join(" ");
     }
     if (options?.text) {
       this.textContent = options.text;
@@ -200,10 +227,14 @@ describe("Toolbar Redesign Tests", () => {
     rendererMock = {
       isFreehandEnabled: true,
       freehandMode: false,
+      grabMode: false,
       isAutoShapeDetection: false,
       currentTransform: { panX: 0, panY: 0, zoom: 1 },
       setFreehandMode: jest.fn((val: boolean) => {
         (rendererMock as any).freehandMode = val;
+      }),
+      setGrabMode: jest.fn((val: boolean) => {
+        (rendererMock as any).grabMode = val;
       }),
       setAutoShapeDetection: jest.fn((val: boolean) => {
         (rendererMock as any).isAutoShapeDetection = val;
@@ -232,6 +263,47 @@ describe("Toolbar Redesign Tests", () => {
     expect(bottomToolbar).toBeDefined();
     expect(mainToolbar).not.toBeNull();
     expect(bottomToolbar).not.toBeNull();
+
+    toolbar.destroy();
+  });
+
+  it("should assign clickable-icon class to toolbar buttons to prevent host button overlays", () => {
+    const toolbar = new Toolbar(
+      container as any,
+      editor,
+      rendererMock as any
+    );
+
+    const buttons = container.querySelectorAll(".umlcanvas-toolbar-btn");
+    expect(buttons.length).toBeGreaterThan(0);
+    for (const btn of buttons) {
+      expect(btn.classList.contains("clickable-icon")).toBe(true);
+    }
+
+    toolbar.destroy();
+  });
+
+  it("should correctly add compound extraClass tokens without throwing InvalidCharacterError", () => {
+    const toolbar = new Toolbar(
+      container as any,
+      editor,
+      rendererMock as any
+    );
+    expect(toolbar).toBeDefined();
+
+    const decBtns = container.querySelectorAll(".umlcanvas-font-dec-btn");
+    expect(decBtns.length).toBeGreaterThanOrEqual(2);
+    for (const decBtn of decBtns) {
+      expect(decBtn.classList.contains("umlcanvas-font-step-btn")).toBe(true);
+      expect(decBtn.classList.contains("umlcanvas-font-dec-btn")).toBe(true);
+    }
+
+    const incBtns = container.querySelectorAll(".umlcanvas-font-inc-btn");
+    expect(incBtns.length).toBeGreaterThanOrEqual(2);
+    for (const incBtn of incBtns) {
+      expect(incBtn.classList.contains("umlcanvas-font-step-btn")).toBe(true);
+      expect(incBtn.classList.contains("umlcanvas-font-inc-btn")).toBe(true);
+    }
 
     toolbar.destroy();
   });
@@ -267,13 +339,37 @@ describe("Toolbar Redesign Tests", () => {
     const labels = items.map((i) => i.textContent);
     expect(labels.some((l) => l.includes("Save Diagram"))).toBe(true);
     expect(labels.some((l) => l.includes("Export Standalone SVG"))).toBe(true);
-    expect(labels.some((l) => l.includes("Export Obsidian .canvas"))).toBe(true);
+    expect(labels.some((l) => l.includes("Export Obsidian .canvas"))).toBe(false);
+    expect(labels.some((l) => l.toLowerCase().includes("obsidian .canvas"))).toBe(false);
+    expect(labels.some((l) => l.toLowerCase().includes("obsidian canvas"))).toBe(false);
     expect(labels.some((l) => l.includes("Export for LLM"))).toBe(true);
 
     // Click Save
     const saveItem = items.find((i) => i.textContent.includes("Save Diagram"));
     saveItem?.click();
     expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onExportCanvas).not.toHaveBeenCalled();
+
+    toolbar.destroy();
+  });
+
+  it("should not provide any option to export to obsidian canvas in File menu", () => {
+    const toolbar = new Toolbar(
+      container as any,
+      editor,
+      rendererMock as any
+    );
+
+    const fileBtn = container.querySelector(".umlcanvas-menu-trigger");
+    fileBtn?.click();
+
+    const fileDropdown = container.querySelector(".umlcanvas-file-menu-dropdown");
+    expect(fileDropdown).not.toBeNull();
+
+    const items = fileDropdown?.querySelectorAll(".umlcanvas-menu-item") || [];
+    const labels = items.map((i) => (i.textContent || "").toLowerCase());
+    expect(labels.some((l) => l.includes(".canvas"))).toBe(false);
+    expect(labels.some((l) => l.includes("obsidian canvas"))).toBe(false);
 
     toolbar.destroy();
   });
@@ -359,6 +455,46 @@ describe("Toolbar Redesign Tests", () => {
     toolbar.destroy();
   });
 
+  it("should show font management controls in context group when a component is selected", () => {
+    const toolbar = new Toolbar(
+      container as any,
+      editor,
+      rendererMock as any
+    );
+
+    const node = editor.addNode({ title: "Box Typography" });
+    editor.selectNode(node.id, false);
+
+    const contextGroup = container.querySelector(".umlcanvas-context-group");
+    expect(contextGroup).not.toBeNull();
+    expect(contextGroup?.classList.contains("is-hidden")).toBe(false);
+
+    const fontStepper = contextGroup?.querySelector(".umlcanvas-context-font-stepper");
+    expect(fontStepper).not.toBeNull();
+
+    const decBtn = contextGroup?.querySelector(".umlcanvas-font-dec-btn");
+    const incBtn = contextGroup?.querySelector(".umlcanvas-font-inc-btn");
+    const sizeBtn = contextGroup?.querySelector(".umlcanvas-context-font-size-btn");
+    const boldBtn = contextGroup?.querySelector(".umlcanvas-context-bold-btn");
+    const italicBtn = contextGroup?.querySelector(".umlcanvas-context-italic-btn");
+
+    expect(decBtn).not.toBeNull();
+    expect(incBtn).not.toBeNull();
+    expect(sizeBtn).not.toBeNull();
+    expect(boldBtn).not.toBeNull();
+    expect(italicBtn).not.toBeNull();
+
+    // Click bold in context group
+    boldBtn?.click();
+    expect(editor.getNodeFont(node.id).bold).toBe(true);
+
+    // Click incBtn in context group
+    incBtn?.click();
+    expect(editor.getNodeFont(node.id).fontSize).toBe(14);
+
+    toolbar.destroy();
+  });
+
   it("should have select, draw, shape creation, and line tools in floating bottom toolbar with icons", () => {
     const toolbar = new Toolbar(
       container as any,
@@ -376,7 +512,9 @@ describe("Toolbar Redesign Tests", () => {
       expect(btn.classList.contains("is-icon-only")).toBe(true);
     }
 
-    // Verify Shape Creation buttons: Rectangle, Circle, Diamond, Triangle, Note
+    // Verify Shape Creation buttons: Rectangle, Circle, Diamond, Triangle, Note, Grab
+    const selectBtn = buttons.find((b) => b.title.includes("Select"));
+    const grabBtn = buttons.find((b) => b.title.includes("Grab"));
     const rectBtn = buttons.find((b) => b.title.includes("Rectangle"));
     const circleBtn = buttons.find((b) => b.title.includes("Circle"));
     const diamondBtn = buttons.find((b) => b.title.includes("Diamond"));
@@ -384,6 +522,8 @@ describe("Toolbar Redesign Tests", () => {
     const noteBtn = buttons.find((b) => b.title.includes("Note"));
     const lineBtn = buttons.find((b) => b.title.includes("Connector"));
 
+    expect(selectBtn).toBeDefined();
+    expect(grabBtn).toBeDefined();
     expect(rectBtn).toBeDefined();
     expect(circleBtn).toBeDefined();
     expect(diamondBtn).toBeDefined();
@@ -402,10 +542,14 @@ describe("Toolbar Redesign Tests", () => {
     expect(editor.diagram.nodes.length).toBe(2);
     expect(editor.diagram.nodes[1].kind).toBe("generic.circle");
 
-    // Clicking Diamond creates a generic.diamond node
+    // Clicking Diamond creates a generic.diamond node named Diamond
+    expect(diamondBtn?.title).toBe("Diamond (D)");
+    expect(diamondBtn?.title.toLowerCase()).not.toContain("decision");
     diamondBtn?.click();
     expect(editor.diagram.nodes.length).toBe(3);
     expect(editor.diagram.nodes[2].kind).toBe("generic.diamond");
+    expect(editor.diagram.nodes[2].labels[0].text).toBe("Diamond");
+    expect(editor.diagram.nodes[2].labels[0].text.toLowerCase()).not.toContain("decision");
 
     // Test Line Tool: selecting 2 nodes and clicking line connects them!
     editor.clearSelection();
@@ -451,6 +595,151 @@ describe("Toolbar Redesign Tests", () => {
     toolbar.destroy();
   });
 
+  it("should activate grab tool and synchronize active states between select and grab buttons", () => {
+    const toolbar = new Toolbar(
+      container as any,
+      editor,
+      rendererMock as any
+    );
+
+    const bottomToolbar = container.querySelector(".umlcanvas-floating-bottom-toolbar");
+    const buttons = bottomToolbar?.querySelectorAll("button") || [];
+    const selectBtn = buttons.find((b) => b.title.includes("Select"));
+    const grabBtn = buttons.find((b) => b.title.includes("Grab"));
+
+    expect(selectBtn).toBeDefined();
+    expect(grabBtn).toBeDefined();
+
+    // Initially select tool is active
+    expect(selectBtn?.classList.contains("is-active")).toBe(true);
+    expect(grabBtn?.classList.contains("is-active")).toBe(false);
+
+    // Clicking grab tool activates grab mode
+    grabBtn?.click();
+    expect(rendererMock.setGrabMode).toHaveBeenCalledWith(true);
+
+    // Simulate renderer mode update
+    (rendererMock as any).grabMode = true;
+    toolbar.updateToolMode();
+
+    expect(grabBtn?.classList.contains("is-active")).toBe(true);
+    expect(selectBtn?.classList.contains("is-active")).toBe(false);
+
+    // Clicking select tool switches back to select mode
+    selectBtn?.click();
+    expect(rendererMock.setGrabMode).toHaveBeenCalledWith(false);
+    expect(rendererMock.setFreehandMode).toHaveBeenCalledWith(false);
+
+    (rendererMock as any).grabMode = false;
+    toolbar.updateToolMode();
+
+    expect(selectBtn?.classList.contains("is-active")).toBe(true);
+    expect(grabBtn?.classList.contains("is-active")).toBe(false);
+
+    toolbar.destroy();
+  });
+
+  it("should never have Select tool and Auto Shape tool active at the same time", () => {
+    // Enable auto shape detection in renderer (default setting)
+    (rendererMock as any).isAutoShapeDetection = true;
+    (rendererMock as any).freehandMode = false;
+    (rendererMock as any).grabMode = false;
+
+    const toolbar = new Toolbar(
+      container as any,
+      editor,
+      rendererMock as any
+    );
+
+    const bottomToolbar = container.querySelector(".umlcanvas-floating-bottom-toolbar");
+    const buttons = bottomToolbar?.querySelectorAll("button") || [];
+    const selectBtn = buttons.find((b) => b.title.includes("Select"));
+    const autoShapeBtn = buttons.find((b) => b.title.includes("Auto Shape"));
+    const drawBtn = buttons.find((b) => b.title.includes("Draw"));
+    const grabBtn = buttons.find((b) => b.title.includes("Grab"));
+
+    expect(selectBtn).toBeDefined();
+    expect(autoShapeBtn).toBeDefined();
+    expect(drawBtn).toBeDefined();
+    expect(grabBtn).toBeDefined();
+
+    // 1. Initial State: Only Select tool is active, Auto Shape is NOT active
+    expect(selectBtn?.classList.contains("is-active")).toBe(true);
+    expect(autoShapeBtn?.classList.contains("is-active")).toBe(false);
+    expect(drawBtn?.classList.contains("is-active")).toBe(false);
+    expect(grabBtn?.classList.contains("is-active")).toBe(false);
+
+    // 2. Click Auto Shape tool: Activates Auto Shape mode
+    autoShapeBtn?.click();
+    expect(rendererMock.setAutoShapeDetection).toHaveBeenCalledWith(true);
+    expect(rendererMock.setFreehandMode).toHaveBeenCalledWith(true);
+
+    // Simulate renderer updated to auto shape mode
+    (rendererMock as any).freehandMode = true;
+    (rendererMock as any).isAutoShapeDetection = true;
+    toolbar.updateToolMode();
+
+    expect(autoShapeBtn?.classList.contains("is-active")).toBe(true);
+    expect(selectBtn?.classList.contains("is-active")).toBe(false);
+    expect(drawBtn?.classList.contains("is-active")).toBe(false);
+    expect(grabBtn?.classList.contains("is-active")).toBe(false);
+
+    // 3. Click Select & Move tool: Switches back to Select mode
+    selectBtn?.click();
+    expect(rendererMock.setFreehandMode).toHaveBeenCalledWith(false);
+
+    (rendererMock as any).freehandMode = false;
+    // autoShapeDetection setting is still true in renderer
+    (rendererMock as any).isAutoShapeDetection = true;
+    toolbar.updateToolMode();
+
+    // MUST NOT have both active! Only selectBtn is active
+    expect(selectBtn?.classList.contains("is-active")).toBe(true);
+    expect(autoShapeBtn?.classList.contains("is-active")).toBe(false);
+    expect(drawBtn?.classList.contains("is-active")).toBe(false);
+    expect(grabBtn?.classList.contains("is-active")).toBe(false);
+
+    // 4. Click Draw tool: Switches to Draw mode (autoShapeDetection = false)
+    drawBtn?.click();
+    expect(rendererMock.setAutoShapeDetection).toHaveBeenCalledWith(false);
+    expect(rendererMock.setFreehandMode).toHaveBeenCalledWith(true);
+
+    (rendererMock as any).freehandMode = true;
+    (rendererMock as any).isAutoShapeDetection = false;
+    toolbar.updateToolMode();
+
+    expect(drawBtn?.classList.contains("is-active")).toBe(true);
+    expect(selectBtn?.classList.contains("is-active")).toBe(false);
+    expect(autoShapeBtn?.classList.contains("is-active")).toBe(false);
+    expect(grabBtn?.classList.contains("is-active")).toBe(false);
+
+    // 5. From Draw mode, click Auto Shape tool: Switches directly to Auto Shape
+    autoShapeBtn?.click();
+    expect(rendererMock.setAutoShapeDetection).toHaveBeenCalledWith(true);
+    expect(rendererMock.setFreehandMode).toHaveBeenCalledWith(true);
+
+    (rendererMock as any).freehandMode = true;
+    (rendererMock as any).isAutoShapeDetection = true;
+    toolbar.updateToolMode();
+
+    expect(autoShapeBtn?.classList.contains("is-active")).toBe(true);
+    expect(drawBtn?.classList.contains("is-active")).toBe(false);
+    expect(selectBtn?.classList.contains("is-active")).toBe(false);
+
+    // 6. Click Auto Shape tool while active: Toggles off to Select mode
+    autoShapeBtn?.click();
+    expect(rendererMock.setFreehandMode).toHaveBeenCalledWith(false);
+
+    (rendererMock as any).freehandMode = false;
+    toolbar.updateToolMode();
+
+    expect(selectBtn?.classList.contains("is-active")).toBe(true);
+    expect(autoShapeBtn?.classList.contains("is-active")).toBe(false);
+    expect(drawBtn?.classList.contains("is-active")).toBe(false);
+
+    toolbar.destroy();
+  });
+
   it("should properly destroy and remove DOM elements", () => {
     const toolbar = new Toolbar(
       container as any,
@@ -465,5 +754,41 @@ describe("Toolbar Redesign Tests", () => {
     expect(container.querySelector(".umlcanvas-main-toolbar")).toBeNull();
     expect(container.querySelector(".umlcanvas-floating-bottom-toolbar")).toBeNull();
     expect(container.querySelector(".umlcanvas-breadcrumbs")).toBeNull();
+  });
+
+  it("should render color selection menu button with non-clipping umlcanvas-color-btn class", () => {
+    const node = editor.addNode({ title: "Test Color Node", style: { color: "1" } });
+    editor.selectNode(node.id);
+
+    const toolbar = new Toolbar(
+      container as any,
+      editor,
+      rendererMock as any
+    );
+
+    const colorBtn = container.querySelector(".umlcanvas-color-btn");
+    expect(colorBtn).not.toBeNull();
+    expect(colorBtn?.classList.contains("umlcanvas-toolbar-btn")).toBe(true);
+    expect(colorBtn?.classList.contains("clickable-icon")).toBe(true);
+
+    const iconSpan = colorBtn?.querySelector(".umlcanvas-btn-icon");
+    expect(iconSpan).not.toBeNull();
+
+    const indicator = colorBtn?.querySelector(".umlcanvas-color-indicator");
+    expect(indicator).not.toBeNull();
+    expect(indicator?.classList.contains("is-visible")).toBe(true);
+
+    // Clicking colorBtn toggles color palette popover
+    colorBtn?.click();
+    const popover = container.querySelector(".umlcanvas-color-palette-popover");
+    expect(popover).not.toBeNull();
+
+    // Verify styles.css contains non-clipping overflow: visible and auto width definitions
+    const stylesPath = path.resolve(__dirname, "../styles.css");
+    const stylesContent = fs.readFileSync(stylesPath, "utf-8");
+    expect(stylesContent).toContain(".umlcanvas-color-btn");
+    expect(stylesContent).toContain("overflow: visible");
+
+    toolbar.destroy();
   });
 });

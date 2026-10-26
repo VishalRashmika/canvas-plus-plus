@@ -1,12 +1,15 @@
 import { DiagramEditor } from "../../application/use-cases/DiagramEditor";
 import { DiagramNode } from "../../domain/entities/DiagramNode";
-import { DiagramEdge } from "../../domain/entities/DiagramEdge";
+import { DiagramEdge, EdgeStyle } from "../../domain/entities/DiagramEdge";
 import { Group } from "../../domain/entities/Group";
 import { Point, point } from "../../domain/value-objects/Point";
-import { Rect, Size, size, rect, rectFromBounds, intersects } from "../../domain/value-objects/Rect";
+import { Rect, Size, size, rect, rectFromBounds, intersects, contains, center } from "../../domain/value-objects/Rect";
 import { Side } from "../../domain/types";
 import { ShapeRegistry, defaultShapeRegistry } from "./ShapeRegistry";
-import { estimateMarkdownContentHeight } from "../../domain/services/TextMeasurement";
+import {
+  estimateMarkdownContentHeight,
+  wrapTextToLines,
+} from "../../domain/services/TextMeasurement";
 import {
   ViewportTransform,
   screenToCanvas,
@@ -17,10 +20,16 @@ import {
 import { getSidePoint, getRectCenter, getFacingSide } from "./ConnectorGeometry";
 import { defaultRoutingService } from "../../domain/services/RoutingService";
 import { defaultSnappingService, AlignmentGuides } from "../../domain/services/SnappingService";
-import { defaultEdgeStyleRegistry } from "./EdgeStyleRegistry";
+import { defaultEdgeStyleRegistry, EdgeStyleDefinition } from "./EdgeStyleRegistry";
 import { Stroke, StrokePoint } from "../../domain/services/ShapeRecognizer";
 import { resolveCanvasColor, isCanvasColorPreset } from "../../domain/value-objects/CanvasColor";
 import { defaultCustomChipRegistry } from "../../domain/services/CustomChipRegistry";
+import {
+  applyFontToSvgElement,
+  getNodeFontStyle,
+  getEdgeFontStyle,
+  getGroupFontStyle,
+} from "../theme/Typography";
 
 export interface SvgSceneRendererOptions {
   shapeRegistry?: ShapeRegistry;
@@ -32,7 +41,7 @@ export interface SvgSceneRendererOptions {
   virtualizationThreshold?: number;
   enableFreehand?: boolean;
   autoShapeDetection?: boolean;
-  onModeChange?: (mode: "select" | "draw") => void;
+  onModeChange?: (mode: "select" | "draw" | "grab") => void;
   onContextMenu?: (
     e: MouseEvent,
     canvasPoint: Point,
@@ -80,6 +89,8 @@ type DragMode =
       startClient: Point;
       initialPosition: Point;
       initialSize: Size;
+      initialPoints?: Point[];
+      initialPathData?: string;
     }
   | {
       type: "group-resize";
@@ -176,7 +187,9 @@ export class SvgSceneRenderer {
   private enableVirtualization: boolean;
   private virtualizationThreshold: number;
   private enableFreehand: boolean;
-  private onModeChange?: (mode: "select" | "draw") => void;
+  private onModeChange?: (mode: "select" | "draw" | "grab") => void;
+
+  private isGrabMode = false;
 
   private dragMode: DragMode = { type: "none" };
   private isSpacePressed = false;
@@ -471,22 +484,48 @@ export class SvgSceneRenderer {
     if (active && !this.enableFreehand) {
       return;
     }
+    if (active && this.isGrabMode) {
+      this.isGrabMode = false;
+      this.container.classList.remove("umlcanvas-grab-mode");
+    }
     this.isFreehandMode = active;
     if (active) {
       this.container.classList.add("umlcanvas-freehand-mode");
     } else {
       this.container.classList.remove("umlcanvas-freehand-mode");
     }
-    this.onModeChange?.(active ? "draw" : "select");
+    this.onModeChange?.(active ? "draw" : (this.isGrabMode ? "grab" : "select"));
   }
 
   get freehandMode(): boolean {
     return this.isFreehandMode;
   }
 
+  setGrabMode(active: boolean): void {
+    if (active && this.isFreehandMode) {
+      this.isFreehandMode = false;
+      this.container.classList.remove("umlcanvas-freehand-mode");
+    }
+    this.isGrabMode = active;
+    if (active) {
+      this.container.classList.add("umlcanvas-grab-mode");
+    } else {
+      this.container.classList.remove("umlcanvas-grab-mode");
+    }
+    this.onModeChange?.(active ? "grab" : (this.isFreehandMode ? "draw" : "select"));
+  }
+
+  get grabMode(): boolean {
+    return this.isGrabMode;
+  }
+
   setAutoShapeDetection(active: boolean): void {
     this.autoShapeDetection = active;
-    this.onModeChange?.(this.isFreehandMode ? "draw" : "select");
+    if (active && this.isGrabMode) {
+      this.isGrabMode = false;
+      this.container.classList.remove("umlcanvas-grab-mode");
+    }
+    this.onModeChange?.(this.isGrabMode ? "grab" : (this.isFreehandMode ? "draw" : "select"));
   }
 
   get isAutoShapeDetection(): boolean {
@@ -569,6 +608,9 @@ export class SvgSceneRenderer {
       if (opts.className) p.setAttribute("class", opts.className);
       if (opts.fill) p.setAttribute("fill", opts.fill);
       if (opts.stroke) p.setAttribute("stroke", opts.stroke);
+      p.setAttribute("stroke-width", "1.5");
+      p.setAttribute("stroke-linejoin", "round");
+      p.setAttribute("stroke-linecap", "round");
       m.appendChild(p);
       this.defsEl.appendChild(m);
       this.createdMarkerIds.add(id);
@@ -595,6 +637,11 @@ export class SvgSceneRenderer {
 
     // 3. Hollow triangle (generalization, realization)
     registerMarker("uml-marker-triangle-hollow", "M 0 1 L 10 5 L 0 9 Z", {
+      viewBox: "0 0 10 10",
+      refX: "10",
+      refY: "5",
+      width: "8",
+      height: "8",
       className: "umlcanvas-marker-triangle-hollow",
       fill: "var(--background-primary)",
       stroke: "currentColor",
@@ -603,7 +650,7 @@ export class SvgSceneRenderer {
     // 4. Hollow diamond (aggregation)
     registerMarker("uml-marker-diamond-hollow", "M 0 5 L 6 1 L 12 5 L 6 9 Z", {
       viewBox: "0 0 12 10",
-      refX: "0",
+      refX: "12",
       refY: "5",
       width: "8",
       height: "6",
@@ -615,7 +662,7 @@ export class SvgSceneRenderer {
     // 5. Filled diamond (composition)
     registerMarker("uml-marker-diamond-filled", "M 0 5 L 6 1 L 12 5 L 6 9 Z", {
       viewBox: "0 0 12 10",
-      refX: "0",
+      refX: "12",
       refY: "5",
       width: "8",
       height: "6",
@@ -644,6 +691,30 @@ export class SvgSceneRenderer {
       width: "8",
       height: "8",
       className: "umlcanvas-marker-triangle-filled",
+      fill: "currentColor",
+      stroke: "currentColor",
+    });
+
+    // 8. Hollow circle (interface lollipop / socket / mapping)
+    registerMarker("uml-marker-circle-hollow", "M 1 5 A 4 4 0 1 1 9 5 A 4 4 0 1 1 1 5 Z", {
+      viewBox: "0 0 10 10",
+      refX: "9",
+      refY: "5",
+      width: "8",
+      height: "8",
+      className: "umlcanvas-marker-circle-hollow",
+      fill: "var(--background-primary)",
+      stroke: "currentColor",
+    });
+
+    // 9. Filled circle (junction / dot endpoint)
+    registerMarker("uml-marker-circle-filled", "M 1 5 A 4 4 0 1 1 9 5 A 4 4 0 1 1 1 5 Z", {
+      viewBox: "0 0 10 10",
+      refX: "9",
+      refY: "5",
+      width: "8",
+      height: "8",
+      className: "umlcanvas-marker-circle-filled",
       fill: "currentColor",
       stroke: "currentColor",
     });
@@ -690,17 +761,32 @@ export class SvgSceneRenderer {
     const p = document.createElementNS(svgNS, "path");
     p.setAttribute("d", template.pathD);
     if (template.opts.className) p.setAttribute("class", template.opts.className);
+    p.setAttribute("stroke-width", "1.5");
+    p.setAttribute("stroke-linejoin", "round");
+    p.setAttribute("stroke-linecap", "round");
 
     // Apply color depending on marker type
     if (template.opts.fill === "none") {
       p.setAttribute("fill", "none");
       p.setAttribute("stroke", colorVal);
+      if (p.style) {
+        p.style.fill = "none";
+        p.style.stroke = colorVal;
+      }
     } else if (template.opts.fill === "var(--background-primary)") {
       p.setAttribute("fill", "var(--background-primary)");
       p.setAttribute("stroke", colorVal);
+      if (p.style) {
+        p.style.fill = "var(--background-primary)";
+        p.style.stroke = colorVal;
+      }
     } else {
       p.setAttribute("fill", colorVal);
       p.setAttribute("stroke", colorVal);
+      if (p.style) {
+        p.style.fill = colorVal;
+        p.style.stroke = colorVal;
+      }
     }
 
     this.defsEl.appendChild(m);
@@ -708,6 +794,80 @@ export class SvgSceneRenderer {
     this.createdMarkerIds.add(targetId);
 
     return targetId;
+  }
+
+  private normalizeMarkerId(markerId?: string): string | undefined {
+    if (!markerId || markerId === "none") return undefined;
+    if (markerId.startsWith("uml-marker-")) return markerId;
+    switch (markerId) {
+      case "arrow-open":
+      case "open-arrow":
+        return "uml-marker-open-arrow";
+      case "arrow-filled":
+      case "arrow":
+      case "arrow-head":
+        return "uml-marker-arrow-head";
+      case "triangle-hollow":
+      case "triangle":
+      case "hollow-triangle":
+        return "uml-marker-triangle-hollow";
+      case "triangle-filled":
+      case "filled-triangle":
+        return "uml-marker-triangle-filled";
+      case "diamond-hollow":
+      case "diamond":
+      case "hollow-diamond":
+        return "uml-marker-diamond-hollow";
+      case "diamond-filled":
+      case "filled-diamond":
+        return "uml-marker-diamond-filled";
+      case "circle-hollow":
+      case "circle":
+      case "hollow-circle":
+        return "uml-marker-circle-hollow";
+      case "circle-filled":
+      case "filled-circle":
+      case "dot":
+        return "uml-marker-circle-filled";
+      case "stop":
+      case "timing-stop":
+        return "uml-marker-timing-stop";
+      default:
+        return markerId;
+    }
+  }
+
+  private resolveStrokeDasharray(
+    edgeStyle?: EdgeStyle,
+    styleDef?: EdgeStyleDefinition
+  ): string | undefined {
+    if (edgeStyle?.strokeDasharray !== undefined && edgeStyle.strokeDasharray !== "") {
+      if (edgeStyle.strokeDasharray === "solid" || edgeStyle.strokeDasharray === "none") {
+        return undefined;
+      }
+      return edgeStyle.strokeDasharray;
+    }
+
+    if (edgeStyle?.lineType !== undefined) {
+      switch (edgeStyle.lineType) {
+        case "solid":
+          return undefined;
+        case "dashed":
+          return "6 4";
+        case "dotted":
+          return "2 3";
+        case "dash-dot":
+          return "8 3 2 3";
+        case "long-dash":
+          return "12 4";
+      }
+    }
+
+    if (edgeStyle?.dashed !== undefined) {
+      return edgeStyle.dashed ? "6 4" : undefined;
+    }
+
+    return styleDef?.strokeDasharray;
   }
 
   private updateViewportTransform(): void {
@@ -730,6 +890,9 @@ export class SvgSceneRenderer {
     this.renderEdges();
     this.renderNodes();
     this.renderInteractions();
+    if (this.inlineEditorEl) {
+      this.updateInlineEditorPosition();
+    }
   }
 
   public getGroupBounds(group: Group): Rect {
@@ -816,7 +979,12 @@ export class SvgSceneRenderer {
         groupEl.setAttribute("data-color", group.color);
         const resolvedColor = resolveCanvasColor(group.color);
         if (resolvedColor) {
-          groupEl.setCssProps({ "--canvas-color": resolvedColor });
+          if (typeof (groupEl as any).setCssProps === "function") {
+            (groupEl as any).setCssProps({ "--canvas-color": resolvedColor });
+          }
+          if (groupEl.style && typeof groupEl.style.setProperty === "function") {
+            groupEl.style.setProperty("--canvas-color", resolvedColor);
+          }
         }
         if (isCanvasColorPreset(group.color)) {
           groupEl.classList.add(`is-color-${group.color}`);
@@ -848,21 +1016,36 @@ export class SvgSceneRenderer {
         toggle.textContent = "▶";
         groupEl.appendChild(toggle);
 
+        const groupFont = getGroupFontStyle(group);
+        const badgeFontSize = groupFont.fontSize ? Math.max(8, Math.round(groupFont.fontSize * 0.85)) : undefined;
+
         const title = document.createElementNS(svgNS, "text");
         title.setAttribute("x", String(gx + 26));
         title.setAttribute("y", String(gy + 22));
         title.setAttribute("class", "umlcanvas-group-title");
         title.setAttribute("data-group-id", group.id);
         title.textContent = group.name;
+        applyFontToSvgElement(title, groupFont);
         groupEl.appendChild(title);
 
         const badge = document.createElementNS(svgNS, "text");
-        badge.setAttribute("x", String(gx + cardW - 10));
+        badge.setAttribute("x", String(gx + cardW - 28));
         badge.setAttribute("y", String(gy + 22));
         badge.setAttribute("text-anchor", "end");
         badge.setAttribute("class", "umlcanvas-group-badge");
         badge.textContent = `(${group.nodeIds.length})`;
+        applyFontToSvgElement(badge, { ...groupFont, fontSize: badgeFontSize, bold: false });
         groupEl.appendChild(badge);
+
+        const colorDot = document.createElementNS(svgNS, "circle");
+        colorDot.setAttribute("cx", String(gx + cardW - 14));
+        colorDot.setAttribute("cy", String(gy + 17));
+        colorDot.setAttribute("r", "5");
+        colorDot.setAttribute("class", "umlcanvas-group-color-dot");
+        colorDot.setAttribute("data-group-id", group.id);
+        const resolvedCollapsedDotColor = group.color ? (resolveCanvasColor(group.color) ?? group.color) : "var(--interactive-accent)";
+        colorDot.setAttribute("fill", resolvedCollapsedDotColor);
+        groupEl.appendChild(colorDot);
       } else {
         const rectEl = document.createElementNS(svgNS, "rect");
         rectEl.setAttribute("x", String(gx));
@@ -896,25 +1079,40 @@ export class SvgSceneRenderer {
         toggle.textContent = "▼";
         groupEl.appendChild(toggle);
 
+        const groupFont = getGroupFontStyle(group);
+        const badgeFontSize = groupFont.fontSize ? Math.max(8, Math.round(groupFont.fontSize * 0.85)) : undefined;
+
         const title = document.createElementNS(svgNS, "text");
         title.setAttribute("x", String(gx + 26));
         title.setAttribute("y", String(gy + 18));
         title.setAttribute("class", "umlcanvas-group-title");
         title.setAttribute("data-group-id", group.id);
         title.textContent = group.name;
+        applyFontToSvgElement(title, groupFont);
         groupEl.appendChild(title);
 
         const badge = document.createElementNS(svgNS, "text");
-        badge.setAttribute("x", String(gx + gw - 12));
+        badge.setAttribute("x", String(gx + gw - 32));
         badge.setAttribute("y", String(gy + 18));
         badge.setAttribute("text-anchor", "end");
         badge.setAttribute("class", "umlcanvas-group-badge");
         badge.textContent = `${group.nodeIds.length} items`;
+        applyFontToSvgElement(badge, { ...groupFont, fontSize: badgeFontSize, bold: false });
         groupEl.appendChild(badge);
+
+        const colorDot = document.createElementNS(svgNS, "circle");
+        colorDot.setAttribute("cx", String(gx + gw - 16));
+        colorDot.setAttribute("cy", String(gy + 14));
+        colorDot.setAttribute("r", "5");
+        colorDot.setAttribute("class", "umlcanvas-group-color-dot");
+        colorDot.setAttribute("data-group-id", group.id);
+        const resolvedExpandedDotColor = group.color ? (resolveCanvasColor(group.color) ?? group.color) : "var(--interactive-accent)";
+        colorDot.setAttribute("fill", resolvedExpandedDotColor);
+        groupEl.appendChild(colorDot);
 
         if (isLocked) {
           const lockIcon = document.createElementNS(svgNS, "text");
-          lockIcon.setAttribute("x", String(gx + gw - 64));
+          lockIcon.setAttribute("x", String(gx + gw - 84));
           lockIcon.setAttribute("y", String(gy + 18));
           lockIcon.setAttribute("text-anchor", "end");
           lockIcon.setAttribute("class", "umlcanvas-group-lock-icon");
@@ -1026,8 +1224,27 @@ export class SvgSceneRenderer {
       );
 
       const customStroke = edge.style?.color ?? edge.style?.strokeColor;
-      let markerEndId = styleDef.markerEndId;
-      let markerStartId = styleDef.markerStartId;
+
+      let rawMarkerEndId: string | undefined;
+      if (edge.style?.markerEnd !== undefined) {
+        rawMarkerEndId = edge.style.markerEnd === "none" || !edge.style.markerEnd
+          ? undefined
+          : this.normalizeMarkerId(edge.style.markerEnd);
+      } else {
+        rawMarkerEndId = styleDef.markerEndId;
+      }
+
+      let rawMarkerStartId: string | undefined;
+      if (edge.style?.markerStart !== undefined) {
+        rawMarkerStartId = edge.style.markerStart === "none" || !edge.style.markerStart
+          ? undefined
+          : this.normalizeMarkerId(edge.style.markerStart);
+      } else {
+        rawMarkerStartId = styleDef.markerStartId;
+      }
+
+      let markerEndId = rawMarkerEndId;
+      let markerStartId = rawMarkerStartId;
 
       if (isSelected) {
         if (markerEndId) markerEndId = this.getOrCreateColoredMarker(markerEndId, "", true);
@@ -1044,8 +1261,9 @@ export class SvgSceneRenderer {
         path.setAttribute("marker-start", `url(#${markerStartId})`);
       }
 
-      if (edge.style?.dashed || styleDef.strokeDasharray) {
-        path.setAttribute("stroke-dasharray", styleDef.strokeDasharray ?? "4 4");
+      const strokeDasharray = this.resolveStrokeDasharray(edge.style, styleDef);
+      if (strokeDasharray) {
+        path.setAttribute("stroke-dasharray", strokeDasharray);
       }
       if (edge.style?.color) {
         edgeGroup.setAttribute("data-color", edge.style.color);
@@ -1095,10 +1313,13 @@ export class SvgSceneRenderer {
         labelGroup.setAttribute("class", "umlcanvas-edge-label-group");
         labelGroup.setAttribute("data-edge-id", edge.id);
 
+        const edgeFont = getEdgeFontStyle(edge);
+        const fontSize = edgeFont.fontSize ?? 11;
         const padX = 6;
         const textLen = displayLabel.length;
-        const bgWidth = Math.max(24, textLen * 7 + padX * 2);
-        const bgHeight = 18;
+        const charWidth = fontSize * 0.6;
+        const bgWidth = Math.max(24, Math.round(textLen * charWidth + padX * 2));
+        const bgHeight = Math.max(18, Math.round(fontSize * 1.5));
 
         const bgRect = document.createElementNS(svgNS, "rect");
         bgRect.setAttribute("x", String(Math.round(midX - bgWidth / 2)));
@@ -1117,6 +1338,7 @@ export class SvgSceneRenderer {
         text.setAttribute("dominant-baseline", "central");
         text.setAttribute("class", "umlcanvas-edge-label");
         text.textContent = displayLabel;
+        applyFontToSvgElement(text, edgeFont);
         labelGroup.appendChild(text);
 
         edgeGroup.appendChild(labelGroup);
@@ -1128,6 +1350,8 @@ export class SvgSceneRenderer {
         const secondPt = routingResult.points[1];
         const endPt = routingResult.points[routingResult.points.length - 1];
         const beforeEndPt = routingResult.points[routingResult.points.length - 2];
+        const edgeFont = getEdgeFontStyle(edge);
+        const multFontSize = edgeFont.fontSize ? Math.max(8, Math.round(edgeFont.fontSize * 0.85)) : undefined;
 
         if (edge.multiplicitySource) {
           const sText = document.createElementNS(svgNS, "text");
@@ -1137,6 +1361,7 @@ export class SvgSceneRenderer {
           sText.setAttribute("y", String(startPt.y + (dirY !== 0 ? dirY * 18 : -8)));
           sText.setAttribute("class", "umlcanvas-edge-multiplicity umlcanvas-multiplicity-source");
           sText.textContent = edge.multiplicitySource;
+          applyFontToSvgElement(sText, { ...edgeFont, fontSize: multFontSize });
           edgeGroup.appendChild(sText);
         }
 
@@ -1148,6 +1373,7 @@ export class SvgSceneRenderer {
           tText.setAttribute("y", String(endPt.y - (dirY !== 0 ? dirY * 22 : 8)));
           tText.setAttribute("class", "umlcanvas-edge-multiplicity umlcanvas-multiplicity-target");
           tText.textContent = edge.multiplicityTarget;
+          applyFontToSvgElement(tText, { ...edgeFont, fontSize: multFontSize });
           edgeGroup.appendChild(tText);
         }
       }
@@ -1208,14 +1434,17 @@ export class SvgSceneRenderer {
       }
 
       // Transparent hitbox covering node boundary for reliable grabbing & moving
-      const hitbox = document.createElementNS(svgNS, "rect");
-      hitbox.setAttribute("x", "0");
-      hitbox.setAttribute("y", "0");
-      hitbox.setAttribute("width", String(node.size.width));
-      hitbox.setAttribute("height", String(node.size.height));
-      hitbox.setAttribute("fill", "transparent");
-      hitbox.setAttribute("class", "umlcanvas-node-hitbox");
-      nodeGroup.appendChild(hitbox);
+      // Note: generic.freehand uses a stroked path hitbox so empty space inside the bounding box can be clicked through and deselected
+      if (node.kind !== "generic.freehand") {
+        const hitbox = document.createElementNS(svgNS, "rect");
+        hitbox.setAttribute("x", "0");
+        hitbox.setAttribute("y", "0");
+        hitbox.setAttribute("width", String(node.size.width));
+        hitbox.setAttribute("height", String(node.size.height));
+        hitbox.setAttribute("fill", "transparent");
+        hitbox.setAttribute("class", "umlcanvas-node-hitbox");
+        nodeGroup.appendChild(hitbox);
+      }
 
       const shapeDef = this.shapeRegistry.get(node.kind);
       const renderedShape = shapeDef.renderSvg(node, { isSelected });
@@ -1350,6 +1579,7 @@ export class SvgSceneRenderer {
       outline.setAttribute("width", String(node.size.width + 4));
       outline.setAttribute("height", String(node.size.height + 4));
       outline.setAttribute("class", "umlcanvas-selection-outline");
+      outline.setAttribute("pointer-events", "none");
       this.interactionLayerEl.appendChild(outline);
 
       // If single node selected and not locked, show resize handles
@@ -1486,7 +1716,33 @@ export class SvgSceneRenderer {
       line.setAttribute("x2", String(this.dragMode.currentCanvasPoint.x));
       line.setAttribute("y2", String(this.dragMode.currentCanvasPoint.y));
       line.setAttribute("class", "umlcanvas-edge-preview-line");
-      line.setAttribute("marker-end", "url(#umlcanvas-arrow-end)");
+      const activeKind = this.editor.activeEdgeKind ?? "uml.association";
+      const activeStyle = defaultEdgeStyleRegistry.get(activeKind);
+      const previewMarkerEnd =
+        this.editor.defaultMarkerEnd !== undefined
+          ? this.editor.defaultMarkerEnd === "none"
+            ? undefined
+            : this.normalizeMarkerId(this.editor.defaultMarkerEnd)
+          : activeStyle.markerEndId;
+      const previewMarkerStart =
+        this.editor.defaultMarkerStart !== undefined
+          ? this.editor.defaultMarkerStart === "none"
+            ? undefined
+            : this.normalizeMarkerId(this.editor.defaultMarkerStart)
+          : activeStyle.markerStartId;
+      const previewDash = this.resolveStrokeDasharray(
+        { lineType: this.editor.defaultLineType },
+        activeStyle
+      );
+      if (previewMarkerEnd) {
+        line.setAttribute("marker-end", `url(#${previewMarkerEnd})`);
+      }
+      if (previewMarkerStart) {
+        line.setAttribute("marker-start", `url(#${previewMarkerStart})`);
+      }
+      if (previewDash) {
+        line.setAttribute("stroke-dasharray", previewDash);
+      }
       this.interactionLayerEl.appendChild(line);
     }
 
@@ -1502,7 +1758,32 @@ export class SvgSceneRenderer {
         "class",
         "umlcanvas-edge-preview-line umlcanvas-edge-reconnect-line"
       );
-      line.setAttribute("marker-end", "url(#umlcanvas-arrow-end)");
+      const edge = this.editor.diagram.edges.find((ed) => ed.id === reconnectState.edgeId);
+      const activeStyle = edge ? defaultEdgeStyleRegistry.get(edge.kind) : undefined;
+      const reconnectMarkerEnd =
+        edge?.style?.markerEnd !== undefined
+          ? edge.style.markerEnd === "none"
+            ? undefined
+            : this.normalizeMarkerId(edge.style.markerEnd)
+          : activeStyle?.markerEndId;
+      const reconnectMarkerStart =
+        edge?.style?.markerStart !== undefined
+          ? edge.style.markerStart === "none"
+            ? undefined
+            : this.normalizeMarkerId(edge.style.markerStart)
+          : activeStyle?.markerStartId;
+      const reconnectDash = edge
+        ? this.resolveStrokeDasharray(edge.style, activeStyle)
+        : activeStyle?.strokeDasharray;
+      if (reconnectMarkerEnd) {
+        line.setAttribute("marker-end", `url(#${reconnectMarkerEnd})`);
+      }
+      if (reconnectMarkerStart) {
+        line.setAttribute("marker-start", `url(#${reconnectMarkerStart})`);
+      }
+      if (reconnectDash) {
+        line.setAttribute("stroke-dasharray", reconnectDash);
+      }
       this.interactionLayerEl.appendChild(line);
 
       // If hovering a target candidate node, highlight it
@@ -1612,6 +1893,18 @@ export class SvgSceneRenderer {
 
   private handleMouseDown(e: MouseEvent): void {
     if ((e as any)._umlHandled) return;
+
+    const target = e.target as Element | null;
+    if (
+      target &&
+      typeof target.closest === "function" &&
+      target.closest(
+        ".umlcanvas-main-toolbar, .umlcanvas-floating-bottom-toolbar, .umlcanvas-toolbar, .umlcanvas-menu-dropdown, .umlcanvas-palette-panel, .umlcanvas-minimap, .umlcanvas-color-palette-popover, .umlcanvas-align-popover, .umlcanvas-font-size-popover, .umlcanvas-font-size-dropdown, .umlcanvas-font-family-dropdown, .umlcanvas-connector-popover, .umlcanvas-line-popover, .umlcanvas-breadcrumbs, .umlcanvas-inline-editor, .modal, .menu, [class*='popover'], [class*='dropdown']"
+      )
+    ) {
+      return;
+    }
+
     (e as any)._umlHandled = true;
 
     if (this.inlineEditorEl) {
@@ -1621,8 +1914,8 @@ export class SvgSceneRenderer {
     const clientPoint = this.getClientCoords(e);
     const canvasPoint = screenToCanvas(clientPoint, this.transform);
 
-    // Pan via middle button or spacebar + left click
-    if (e.button === 1 || (e.button === 0 && this.isSpacePressed)) {
+    // Pan via middle button or spacebar + left click or grab tool + left click
+    if (e.button === 1 || (e.button === 0 && (this.isSpacePressed || this.isGrabMode))) {
       e.preventDefault();
       this.dragMode = {
         type: "pan",
@@ -1635,7 +1928,34 @@ export class SvgSceneRenderer {
 
     if (e.button !== 0) return;
 
-    const target = e.target as Element;
+    // Freehand / Hand-drawing mode: Start drawing stroke across canvas (F-070, F-071)
+    if (this.isFreehandMode && this.enableFreehand && !this.isSpacePressed) {
+      e.preventDefault();
+      if (!e.shiftKey && !e.metaKey && !e.ctrlKey && this.editor.hasSelection) {
+        this.editor.clearSelection();
+      }
+      const initialPoint: StrokePoint = {
+        x: canvasPoint.x,
+        y: canvasPoint.y,
+        pressure: (e as unknown as PointerEvent).pressure ?? 0.5,
+        time: Date.now(),
+      };
+      this.activeStroke = {
+        id: `stroke-${Date.now()}`,
+        points: [initialPoint],
+      };
+
+      const path = this.viewportEl.createSvg("path", {
+        cls: "umlcanvas-freehand-stroke",
+        attr: { d: `M ${canvasPoint.x},${canvasPoint.y}` },
+      });
+      this.freehandPathEl = path;
+
+      this.dragMode = { type: "freehand" };
+      return;
+    }
+
+    if (!target) return;
 
     // Edge endpoint handle click -> start reconnecting (F-007)
     if (target.classList.contains("umlcanvas-edge-endpoint-handle")) {
@@ -1783,6 +2103,14 @@ export class SvgSceneRenderer {
           startClient: clientPoint,
           initialPosition: { ...node.position },
           initialSize: { ...node.size },
+          initialPoints:
+            node.kind === "generic.freehand" && node.customData?.points
+              ? JSON.parse(JSON.stringify(node.customData.points))
+              : undefined,
+          initialPathData:
+            node.kind === "generic.freehand" && typeof node.customData?.pathData === "string"
+              ? (node.customData.pathData as string)
+              : undefined,
         };
         return;
       }
@@ -1960,9 +2288,26 @@ export class SvgSceneRenderer {
       }
     }
 
+    // Group Color Dot click -> Cycle color preset
+    const colorDot = target.closest(".umlcanvas-group-color-dot");
+    if (colorDot) {
+      const groupId = colorDot.getAttribute("data-group-id");
+      if (groupId) {
+        const group = this.editor.diagram.groups.find((g) => g.id === groupId);
+        if (group) {
+          this.editor.selectGroup(groupId, false);
+          const presets = ["1", "2", "3", "4", "5", "6"];
+          const curIdx = group.color ? presets.indexOf(group.color) : -1;
+          const nextColor = curIdx === -1 ? "1" : (curIdx === presets.length - 1 ? undefined : presets[curIdx + 1]);
+          this.editor.setGroupColor(groupId, nextColor);
+          return;
+        }
+      }
+    }
+
     // Group click -> Select & start move
     const groupTarget = target.closest(
-      ".umlcanvas-group-header-bg, .umlcanvas-group-title, .umlcanvas-group-badge, .umlcanvas-group-collapsed-card, .umlcanvas-group-box, .umlcanvas-group"
+      ".umlcanvas-group-header-bg, .umlcanvas-group-title, .umlcanvas-group-badge, .umlcanvas-group-collapsed-card, .umlcanvas-group-box, .umlcanvas-group, .umlcanvas-group-color-dot"
     );
     if (groupTarget) {
       const groupId = groupTarget.getAttribute("data-group-id");
@@ -1983,6 +2328,28 @@ export class SvgSceneRenderer {
           }
 
           if (!group.locked) {
+            if (group.position && group.size) {
+              const groupBounds = rect(group.position, group.size);
+              for (const node of this.editor.diagram.nodes) {
+                const nodeCenter = center(rect(node.position, node.size));
+                if (contains(groupBounds, nodeCenter) || contains(groupBounds, node.position)) {
+                  if (!group.nodeIds.includes(node.id)) {
+                    const otherSmallerGroup = this.editor.diagram.groups.find(
+                      (og) =>
+                        og.id !== group.id &&
+                        og.position &&
+                        og.size &&
+                        (contains(rect(og.position, og.size), nodeCenter) || contains(rect(og.position, og.size), node.position)) &&
+                        og.size.width * og.size.height < group.size!.width * group.size!.height
+                    );
+                    if (!otherSmallerGroup) {
+                      group.nodeIds.push(node.id);
+                    }
+                  }
+                }
+              }
+            }
+
             const initialMemberPositions = new Map<string, Point>();
             for (const nid of group.nodeIds) {
               const n = this.editor.diagram.nodes.find((nd) => nd.id === nid);
@@ -2007,32 +2374,7 @@ export class SvgSceneRenderer {
       }
     }
 
-    // Empty canvas background click:
-    // If in Freehand mode, draw stroke (F-070)
-    if (this.isFreehandMode && this.enableFreehand && !this.isSpacePressed) {
-      e.preventDefault();
-      const initialPoint: StrokePoint = {
-        x: canvasPoint.x,
-        y: canvasPoint.y,
-        pressure: (e as unknown as PointerEvent).pressure ?? 0.5,
-        time: Date.now(),
-      };
-      this.activeStroke = {
-        id: `stroke-${Date.now()}`,
-        points: [initialPoint],
-      };
-
-      const path = this.viewportEl.createSvg("path", {
-        cls: "umlcanvas-freehand-stroke",
-        attr: { d: `M ${canvasPoint.x},${canvasPoint.y}` },
-      });
-      this.freehandPathEl = path;
-
-      this.dragMode = { type: "freehand" };
-      return;
-    }
-
-    // Canvas background click -> marquee
+    // Empty canvas background click -> deselect and start marquee
     if (!e.shiftKey && !e.metaKey && !e.ctrlKey) {
       this.editor.clearSelection();
     }
@@ -2198,6 +2540,24 @@ export class SvgSceneRenderer {
 
       node.position = { x: Math.round(newX), y: Math.round(newY) };
       node.size = { width: Math.round(newW), height: Math.round(newH) };
+
+      if (node.kind === "generic.freehand" && node.customData && resizeState.initialPoints) {
+        const initPts = resizeState.initialPoints;
+        const initSize = resizeState.initialSize;
+        if (initSize.width > 0 && initSize.height > 0) {
+          const sx = newW / initSize.width;
+          const sy = newH / initSize.height;
+          const scaledPoints = initPts.map((p) => ({
+            x: Math.round(p.x * sx * 10) / 10,
+            y: Math.round(p.y * sy * 10) / 10,
+          }));
+          node.customData.points = scaledPoints;
+          node.customData.pathData = scaledPoints.reduce(
+            (acc, p, i) => `${acc}${i === 0 ? "M" : " L"} ${p.x},${p.y}`,
+            ""
+          );
+        }
+      }
 
       this.renderEdges();
       this.renderNodes();
@@ -2382,6 +2742,11 @@ export class SvgSceneRenderer {
           const shiftKeyHeld = Boolean(e.shiftKey);
           const effectiveAutoDetect = shiftKeyHeld ? !this.autoShapeDetection : this.autoShapeDetection;
           this.onStrokeComplete(stroke, { autoDetect: effectiveAutoDetect });
+        } else if (isMicroStroke) {
+          if (!e.shiftKey && !e.metaKey && !e.ctrlKey && this.editor.hasSelection) {
+            this.editor.clearSelection();
+          }
+          this.renderInteractions();
         }
       }
       this.dragMode = { type: "none" };
@@ -2421,7 +2786,8 @@ export class SvgSceneRenderer {
           node &&
           !this.editor.isNodeLocked(node.id) &&
           node.kind !== "obsidian.note" &&
-          node.kind !== "schematic.chip"
+          node.kind !== "schematic.chip" &&
+          node.kind !== "generic.freehand"
         ) {
           this.dragMode = { type: "none" };
           this.renderInteractions();
@@ -2486,8 +2852,28 @@ export class SvgSceneRenderer {
       if (node) {
         this.editor.resizeNode(
           node.id,
-          { position: resizeState.initialPosition, size: resizeState.initialSize },
-          { position: { ...node.position }, size: { ...node.size } }
+          {
+            position: resizeState.initialPosition,
+            size: resizeState.initialSize,
+            customData:
+              node.kind === "generic.freehand" && resizeState.initialPoints
+                ? {
+                    points: resizeState.initialPoints,
+                    pathData: resizeState.initialPathData,
+                  }
+                : undefined,
+          },
+          {
+            position: { ...node.position },
+            size: { ...node.size },
+            customData:
+              node.kind === "generic.freehand" && node.customData
+                ? {
+                    points: node.customData.points,
+                    pathData: node.customData.pathData,
+                  }
+                : undefined,
+          }
         );
       }
       this.dragMode = { type: "none" };
@@ -2626,6 +3012,7 @@ export class SvgSceneRenderer {
   }
 
   private handleDblClick(e: MouseEvent): void {
+    if (this.isGrabMode) return;
     const target = e.target as Element;
 
     // Double-click on waypoint handle -> remove waypoint
@@ -2778,7 +3165,10 @@ export class SvgSceneRenderer {
     }
   }
 
-  public getNodeInPlaceEditorBounds(node: DiagramNode): {
+  public getNodeInPlaceEditorBounds(
+    node: DiagramNode,
+    customText?: string
+  ): {
     x: number;
     y: number;
     width: number;
@@ -2791,9 +3181,22 @@ export class SvgSceneRenderer {
     let inPlaceH = node.size.height;
     let textAlign: "center" | "left" | "right" = "center";
 
-    const lines = (node.labels[0]?.text ?? "").split("\n");
+    const textToMeasure =
+      customText !== undefined
+        ? customText
+        : this.inlineEditorEl &&
+          this.inlineEditorEl.getAttribute("data-node-id") === node.id
+        ? this.inlineEditorEl.value
+        : node.labels[0]?.text ?? "";
+
+    const lines = textToMeasure.split(/\r?\n/);
     const lineCount = Math.max(1, lines.length);
-    const contentH = Math.max(24, lineCount * 20);
+
+    const nodeFont = getNodeFontStyle(node);
+    const baseFontSize = nodeFont.fontSize ?? 13;
+    const lineHeight = Math.round(baseFontSize * 1.35);
+    // Ensure content height accommodates font size and lines with vertical padding
+    const contentH = Math.max(24, lineCount * lineHeight + 8);
 
     if (
       node.kind.startsWith("uml.class") ||
@@ -2808,19 +3211,19 @@ export class SvgSceneRenderer {
       inPlaceX = node.position.x + 8;
       inPlaceY = node.position.y + 4 + stereoH + taggedH;
       inPlaceW = Math.max(40, node.size.width - 16);
-      inPlaceH = Math.max(24, 28);
+      inPlaceH = Math.max(28, contentH);
       textAlign = "center";
     } else if (node.kind === "uml.actor") {
+      inPlaceH = Math.max(24, contentH);
       inPlaceX = node.position.x + 4;
-      inPlaceY = node.position.y + Math.max(0, node.size.height - 28);
+      inPlaceY = node.position.y + Math.max(0, node.size.height - inPlaceH - 4);
       inPlaceW = Math.max(40, node.size.width - 8);
-      inPlaceH = 24;
       textAlign = "center";
     } else if (node.kind === "generic.note") {
       inPlaceX = node.position.x + 10;
       inPlaceY = node.position.y + 10;
       inPlaceW = Math.max(40, node.size.width - 24);
-      inPlaceH = Math.max(26, node.size.height - 20);
+      inPlaceH = Math.max(node.size.height - 20, contentH);
       textAlign = "left";
     } else if (node.kind === "generic.stickyNote") {
       inPlaceX = node.position.x + 10;
@@ -2829,19 +3232,37 @@ export class SvgSceneRenderer {
       inPlaceH = Math.max(26, node.size.height - 32);
       textAlign = "left";
     } else if (node.kind === "generic.image") {
+      inPlaceH = Math.max(28, contentH);
       inPlaceX = node.position.x + 8;
-      inPlaceY = node.position.y + Math.max(0, node.size.height - 38);
+      inPlaceY = node.position.y + Math.max(0, node.size.height - inPlaceH - 10);
       inPlaceW = Math.max(40, node.size.width - 16);
-      inPlaceH = 28;
       textAlign = "center";
     } else {
       // General shapes: vertically and horizontally centered in node
       inPlaceX = node.position.x + 8;
       inPlaceW = Math.max(40, node.size.width - 16);
-      const fittedH = Math.min(node.size.height - 12, contentH);
-      inPlaceY = node.position.y + Math.max(6, (node.size.height - fittedH) / 2);
-      inPlaceH = Math.max(24, fittedH);
+      if (contentH <= node.size.height - 12) {
+        inPlaceY = node.position.y + Math.max(6, (node.size.height - contentH) / 2);
+        inPlaceH = Math.max(24, contentH);
+      } else {
+        inPlaceY = node.position.y + (node.size.height - contentH) / 2;
+        inPlaceH = contentH;
+      }
       textAlign = "center";
+    }
+
+    if (nodeFont.fontSize !== undefined && nodeFont.fontSize > 13) {
+      if (node.kind !== "generic.stickyNote") {
+        const maxLineChars = lines.reduce((max, l) => Math.max(max, l.length), 0);
+        const estimatedW = Math.ceil(maxLineChars * baseFontSize * 0.65 + 24);
+        if (estimatedW > inPlaceW) {
+          const extraW = estimatedW - inPlaceW;
+          if (textAlign === "center") {
+            inPlaceX -= extraW / 2;
+          }
+          inPlaceW = estimatedW;
+        }
+      }
     }
 
     return {
@@ -2860,14 +3281,19 @@ export class SvgSceneRenderer {
     if (nodeId) {
       const node = this.editor.diagram.nodes.find((n) => n.id === nodeId);
       if (node) {
-        const bounds = this.getNodeInPlaceEditorBounds(node);
+        const bounds = this.getNodeInPlaceEditorBounds(
+          node,
+          this.inlineEditorEl.value
+        );
         const screenPos = canvasToScreen({ x: bounds.x, y: bounds.y }, this.transform);
         const screenW = bounds.width * this.transform.zoom;
         const screenH = bounds.height * this.transform.zoom;
-        const fontSize = Math.max(10, Math.round(13 * this.transform.zoom));
+        const nodeFont = getNodeFontStyle(node);
+        const baseFontSize = nodeFont.fontSize ?? 13;
+        const fontSize = Math.max(10, Math.round(baseFontSize * this.transform.zoom));
         const lineHeight = Math.round(fontSize * 1.35);
 
-        this.inlineEditorEl.setCssStyles({
+        const styles: Record<string, string> = {
           left: `${screenPos.x}px`,
           top: `${screenPos.y}px`,
           width: `${screenW}px`,
@@ -2875,7 +3301,15 @@ export class SvgSceneRenderer {
           fontSize: `${fontSize}px`,
           lineHeight: `${lineHeight}px`,
           textAlign: bounds.textAlign,
-        });
+        };
+        styles.fontWeight = nodeFont.bold ? "bold" : "normal";
+        styles.fontStyle = nodeFont.italic ? "italic" : "normal";
+        if (nodeFont.fontFamily) {
+          styles.fontFamily = nodeFont.fontFamily;
+        } else {
+          styles.fontFamily = "";
+        }
+        this.inlineEditorEl.setCssStyles(styles);
       }
       return;
     }
@@ -2887,11 +3321,23 @@ export class SvgSceneRenderer {
         const centerCanvas = this.getEdgeCenter(edge);
         const screenPos = canvasToScreen(centerCanvas, this.transform);
         const width = Math.max(120, 140 * this.transform.zoom);
-        this.inlineEditorEl.setCssStyles({
+        const edgeFont = getEdgeFontStyle(edge);
+        const baseFontSize = edgeFont.fontSize ?? 11;
+        const fontSize = Math.max(10, Math.round(baseFontSize * this.transform.zoom));
+        const styles: Record<string, string> = {
           left: `${screenPos.x - width / 2}px`,
           top: `${screenPos.y - 14 * this.transform.zoom}px`,
           width: `${width}px`,
-        });
+          fontSize: `${fontSize}px`,
+        };
+        styles.fontWeight = edgeFont.bold ? "bold" : "normal";
+        styles.fontStyle = edgeFont.italic ? "italic" : "normal";
+        if (edgeFont.fontFamily) {
+          styles.fontFamily = edgeFont.fontFamily;
+        } else {
+          styles.fontFamily = "";
+        }
+        this.inlineEditorEl.setCssStyles(styles);
       }
       return;
     }
@@ -2909,13 +3355,23 @@ export class SvgSceneRenderer {
           120,
           Math.min(240, (bounds.size.width - 40) * this.transform.zoom)
         );
-        const fontSize = Math.max(10, Math.round(12 * this.transform.zoom));
-        this.inlineEditorEl.setCssStyles({
+        const groupFont = getGroupFontStyle(group);
+        const baseFontSize = groupFont.fontSize ?? 12;
+        const fontSize = Math.max(10, Math.round(baseFontSize * this.transform.zoom));
+        const styles: Record<string, string> = {
           left: `${screenPos.x}px`,
           top: `${screenPos.y}px`,
           width: `${width}px`,
           fontSize: `${fontSize}px`,
-        });
+        };
+        styles.fontWeight = groupFont.bold ? "bold" : "normal";
+        styles.fontStyle = groupFont.italic ? "italic" : "normal";
+        if (groupFont.fontFamily) {
+          styles.fontFamily = groupFont.fontFamily;
+        } else {
+          styles.fontFamily = "";
+        }
+        this.inlineEditorEl.setCssStyles(styles);
       }
       return;
     }
@@ -2928,15 +3384,27 @@ export class SvgSceneRenderer {
     const node = this.editor.diagram.nodes.find((n) => n.id === nodeId);
     if (!node) return;
 
-    const lines = this.inlineEditorEl.value.split("\n");
-    const lineCount = Math.max(1, lines.length);
-    const bounds = this.getNodeInPlaceEditorBounds(node);
-    const contentH = Math.max(bounds.height, lineCount * 20);
-    const screenH = contentH * this.transform.zoom;
+    if (node.kind === "generic.stickyNote" || node.kind === "generic.note") {
+      const newText = this.inlineEditorEl.value;
+      const nodeFont = getNodeFontStyle(node);
+      const fontSize = nodeFont.fontSize ?? (node.kind === "generic.note" ? 11 : 13);
+      const boldMultiplier = nodeFont.bold ? 1.1 : 1.0;
+      const charWidth = Math.max(5, fontSize * 0.58 * boldMultiplier);
+      const availableW = Math.max(40, node.size.width - (node.kind === "generic.stickyNote" ? 24 : 20));
+      const wrapped = wrapTextToLines(newText, availableW, charWidth);
+      const topOffset = node.kind === "generic.stickyNote" ? (26 + fontSize) : (14 + fontSize);
+      const neededH = topOffset + Math.max(1, wrapped.length) * Math.round(fontSize * 1.38) + 12;
+      if (neededH > node.size.height) {
+        node.size = {
+          width: node.size.width,
+          height: Math.round(neededH),
+        };
+        this.renderNodes();
+        this.renderInteractions();
+      }
+    }
 
-    this.inlineEditorEl.setCssStyles({
-      height: `${screenH}px`,
-    });
+    this.updateInlineEditorPosition();
   }
 
   public startInlineEditor(node: DiagramNode): void {
@@ -2948,6 +3416,10 @@ export class SvgSceneRenderer {
       this.commitInlineEditor();
     }
 
+    if (!this.editor.isNodeSelected(node.id)) {
+      this.editor.selectNode(node.id, false);
+    }
+
     this.editingNodeId = node.id;
     const nodeEl = this.nodesLayerEl.querySelector<SVGGElement>(
       `[data-node-id="${node.id}"]`
@@ -2957,24 +3429,47 @@ export class SvgSceneRenderer {
     }
 
     const currentText = node.labels[0]?.text ?? "";
-    const bounds = this.getNodeInPlaceEditorBounds(node);
+
+    if (node.kind === "generic.stickyNote" || node.kind === "generic.note") {
+      const nodeFont = getNodeFontStyle(node);
+      const fontSize = nodeFont.fontSize ?? (node.kind === "generic.note" ? 11 : 13);
+      const boldMultiplier = nodeFont.bold ? 1.1 : 1.0;
+      const charWidth = Math.max(5, fontSize * 0.58 * boldMultiplier);
+      const availableW = Math.max(40, node.size.width - (node.kind === "generic.stickyNote" ? 24 : 20));
+      const wrapped = wrapTextToLines(currentText, availableW, charWidth);
+      const topOffset = node.kind === "generic.stickyNote" ? (26 + fontSize) : (14 + fontSize);
+      const neededH = topOffset + Math.max(1, wrapped.length) * Math.round(fontSize * 1.38) + 12;
+      if (neededH > node.size.height) {
+        node.size = {
+          width: node.size.width,
+          height: Math.round(neededH),
+        };
+        this.renderNodes();
+        this.renderInteractions();
+      }
+    }
+
+    const bounds = this.getNodeInPlaceEditorBounds(node, currentText);
     const screenPos = canvasToScreen({ x: bounds.x, y: bounds.y }, this.transform);
     const screenW = bounds.width * this.transform.zoom;
     const screenH = bounds.height * this.transform.zoom;
-    const fontSize = Math.max(10, Math.round(13 * this.transform.zoom));
+    const nodeFont = getNodeFontStyle(node);
+    const baseFontSize = nodeFont.fontSize ?? 13;
+    const fontSize = Math.max(10, Math.round(baseFontSize * this.transform.zoom));
     const lineHeight = Math.round(fontSize * 1.35);
 
     const textarea = this.container.createEl("textarea", {
       cls: "umlcanvas-inline-editor umlcanvas-node-inline-editor",
       attr: {
         "data-node-id": node.id,
+        "data-node-kind": node.kind,
         rows: "1",
         spellcheck: "false",
       },
     });
     textarea.value = currentText;
 
-    textarea.setCssStyles({
+    const styles: Record<string, string> = {
       left: `${screenPos.x}px`,
       top: `${screenPos.y}px`,
       width: `${screenW}px`,
@@ -2982,10 +3477,40 @@ export class SvgSceneRenderer {
       fontSize: `${fontSize}px`,
       lineHeight: `${lineHeight}px`,
       textAlign: bounds.textAlign,
-    });
+    };
+    styles.fontWeight = nodeFont.bold ? "bold" : "normal";
+    styles.fontStyle = nodeFont.italic ? "italic" : "normal";
+    if (nodeFont.fontFamily) {
+      styles.fontFamily = nodeFont.fontFamily;
+    }
+    textarea.setCssStyles(styles);
 
     textarea.addEventListener("keydown", (e: KeyboardEvent) => {
       e.stopPropagation();
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
+        e.preventDefault();
+        this.editor.toggleBoldForSelection();
+        this.adjustInlineEditorHeight();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "i") {
+        e.preventDefault();
+        this.editor.toggleItalicForSelection();
+        this.adjustInlineEditorHeight();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "[") {
+        e.preventDefault();
+        this.editor.adjustFontSizeForSelection(-2);
+        this.adjustInlineEditorHeight();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "]") {
+        e.preventDefault();
+        this.editor.adjustFontSizeForSelection(2);
+        this.adjustInlineEditorHeight();
+        return;
+      }
       if (e.key === "Enter") {
         if (e.shiftKey) {
           // Shift+Enter inserts a newline for multiline in-place editing
@@ -3143,10 +3668,17 @@ export class SvgSceneRenderer {
       this.commitInlineEditor();
     }
 
+    if (!this.editor.isEdgeSelected(edge.id)) {
+      this.editor.selectEdge(edge.id, false);
+    }
+
     const centerCanvas = atPoint ?? this.getEdgeCenter(edge);
     const screenPos = canvasToScreen(centerCanvas, this.transform);
 
     const width = Math.max(120, 140 * this.transform.zoom);
+    const edgeFont = getEdgeFontStyle(edge);
+    const baseFontSize = edgeFont.fontSize ?? 11;
+    const fontSize = Math.max(10, Math.round(baseFontSize * this.transform.zoom));
     const input = this.container.createEl("input", {
       type: "text",
       value: edge.labels && edge.labels.length > 0 ? edge.labels[0].text : "",
@@ -3154,13 +3686,32 @@ export class SvgSceneRenderer {
       cls: "umlcanvas-inline-editor umlcanvas-edge-inline-editor",
       attr: { "data-edge-id": edge.id },
     });
-    input.setCssStyles({
+    const edgeStyles: Record<string, string> = {
       left: `${screenPos.x - width / 2}px`,
       top: `${screenPos.y - 14 * this.transform.zoom}px`,
       width: `${width}px`,
-    });
+      fontSize: `${fontSize}px`,
+    };
+    edgeStyles.fontWeight = edgeFont.bold ? "bold" : "normal";
+    edgeStyles.fontStyle = edgeFont.italic ? "italic" : "normal";
+    if (edgeFont.fontFamily) {
+      edgeStyles.fontFamily = edgeFont.fontFamily;
+    }
+    input.setCssStyles(edgeStyles);
 
     input.addEventListener("keydown", (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
+        e.preventDefault();
+        this.editor.toggleBoldForSelection();
+        this.updateInlineEditorPosition();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "i") {
+        e.preventDefault();
+        this.editor.toggleItalicForSelection();
+        this.updateInlineEditorPosition();
+        return;
+      }
       if (e.key === "Enter") {
         e.preventDefault();
         this.commitInlineEditor();
@@ -3190,6 +3741,10 @@ export class SvgSceneRenderer {
       this.commitInlineEditor();
     }
 
+    if (!this.editor.isGroupSelected(group.id)) {
+      this.editor.selectGroup(group.id, false);
+    }
+
     this.editingGroupId = group.id;
     const groupEl = this.groupsLayerEl.querySelector<SVGGElement>(
       `[data-group-id="${group.id}"]`
@@ -3203,7 +3758,9 @@ export class SvgSceneRenderer {
     const screenPos = canvasToScreen(canvasPos, this.transform);
 
     const width = Math.max(120, Math.min(240, (bounds.size.width - 40) * this.transform.zoom));
-    const fontSize = Math.max(10, Math.round(12 * this.transform.zoom));
+    const groupFont = getGroupFontStyle(group);
+    const baseFontSize = groupFont.fontSize ?? 12;
+    const fontSize = Math.max(10, Math.round(baseFontSize * this.transform.zoom));
 
     const input = this.container.createEl("input", {
       type: "text",
@@ -3212,15 +3769,35 @@ export class SvgSceneRenderer {
       cls: "umlcanvas-inline-editor umlcanvas-group-inline-editor",
       attr: { "data-group-id": group.id },
     });
-    input.setCssStyles({
+    const groupStyles: Record<string, string> = {
       left: `${screenPos.x}px`,
       top: `${screenPos.y}px`,
       width: `${width}px`,
       fontSize: `${fontSize}px`,
-    });
+    };
+    groupStyles.fontWeight = groupFont.bold ? "bold" : "normal";
+    groupStyles.fontStyle = groupFont.italic ? "italic" : "normal";
+    if (groupFont.fontFamily) {
+      groupStyles.fontFamily = groupFont.fontFamily;
+    }
+    input.setCssStyles(groupStyles);
 
     input.addEventListener("keydown", (e: KeyboardEvent) => {
       e.stopPropagation();
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
+        e.preventDefault();
+        this.editor.toggleBoldForSelection();
+        const updatedFont = getGroupFontStyle(group);
+        input.setCssStyles({ fontWeight: updatedFont.bold ? "bold" : "normal" });
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "i") {
+        e.preventDefault();
+        this.editor.toggleItalicForSelection();
+        const updatedFont = getGroupFontStyle(group);
+        input.setCssStyles({ fontStyle: updatedFont.italic ? "italic" : "normal" });
+        return;
+      }
       if (e.key === "Enter") {
         e.preventDefault();
         this.commitInlineEditor();
@@ -3264,9 +3841,37 @@ export class SvgSceneRenderer {
     this.cleanupInlineEditor();
 
     if (nodeId) {
-      if (newText) {
-        this.editor.updateNodeLabel(nodeId, newText);
+      const node = this.editor.diagram.nodes.find((n) => n.id === nodeId);
+      if (node) {
+        const nodeFont = getNodeFontStyle(node);
+        const fontSize = nodeFont.fontSize ?? (node.kind === "generic.note" ? 11 : 13);
+        const boldMultiplier = nodeFont.bold ? 1.1 : 1.0;
+        const charWidth = Math.max(5, fontSize * 0.58 * boldMultiplier);
+        const lines = newText.split(/\r?\n/);
+        const lineSpacing = Math.round(fontSize * 1.35);
+
+        if (node.kind === "generic.stickyNote" || node.kind === "generic.note") {
+          const availableW = Math.max(40, node.size.width - (node.kind === "generic.stickyNote" ? 24 : 20));
+          const wrapped = wrapTextToLines(newText, availableW, charWidth);
+          const topOffset = node.kind === "generic.stickyNote" ? (26 + fontSize) : (14 + fontSize);
+          const neededH = topOffset + Math.max(1, wrapped.length) * Math.round(fontSize * 1.38) + 12;
+          if (neededH > node.size.height) {
+            node.size = {
+              width: node.size.width,
+              height: Math.round(neededH),
+            };
+          }
+        } else if (lines.length > 1 || fontSize > 14) {
+          const neededH = Math.max(node.size.height, lines.length * lineSpacing + 28);
+          if (neededH > node.size.height) {
+            node.size = {
+              width: node.size.width,
+              height: Math.round(neededH),
+            };
+          }
+        }
       }
+      this.editor.updateNodeLabel(nodeId, newText);
     } else if (edgeId) {
       this.editor.updateEdgeLabel(edgeId, newText);
     } else if (groupId && newText) {
@@ -3395,6 +4000,42 @@ export class SvgSceneRenderer {
       return;
     }
 
+    // Bold toggle: Ctrl+B / Cmd+B
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
+      if (hasSelection) {
+        e.preventDefault();
+        this.editor.toggleBoldForSelection();
+        return;
+      }
+    }
+
+    // Italic toggle: Ctrl+I / Cmd+I
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "i") {
+      if (hasSelection) {
+        e.preventDefault();
+        this.editor.toggleItalicForSelection();
+        return;
+      }
+    }
+
+    // Font size increase: Ctrl+] / Cmd+] or Ctrl+= / Cmd+=
+    if ((e.ctrlKey || e.metaKey) && (e.key === "]" || e.key === "}" || e.key === "=" || e.key === "+")) {
+      if (hasSelection) {
+        e.preventDefault();
+        this.editor.adjustFontSizeForSelection(2);
+        return;
+      }
+    }
+
+    // Font size decrease: Ctrl+[ / Cmd+[ or Ctrl+- / Cmd+-
+    if ((e.ctrlKey || e.metaKey) && (e.key === "[" || e.key === "{" || e.key === "-")) {
+      if (hasSelection) {
+        e.preventDefault();
+        this.editor.adjustFontSizeForSelection(-2);
+        return;
+      }
+    }
+
     // Undo: Ctrl+Z or Cmd+Z
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && !e.shiftKey) {
       e.preventDefault();
@@ -3487,12 +4128,45 @@ export class SvgSceneRenderer {
         if (moves.length > 0) {
           this.editor.moveEdges(moves);
         }
+      } else if (this.editor.selectedGroupIds.length > 0) {
+        e.preventDefault();
+        for (const groupId of this.editor.selectedGroupIds) {
+          const group = this.editor.diagram.groups.find((g) => g.id === groupId);
+          if (group && !group.locked) {
+            this.editor.moveGroup(groupId, { x: dx, y: dy });
+          }
+        }
         return;
       }
     }
 
-    // Escape: exit freehand mode or deselect
+    // Group Box tool shortcut: G (without Ctrl/Cmd: add standalone group box at center if no selection)
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "g" && !this.freehandMode) {
+      if (this.editor.selectedNodeIds.length === 0 && this.editor.selectedGroupIds.length === 0 && this.editor.selectedEdgeIds.length === 0) {
+        e.preventDefault();
+        const centerCanvas = screenToCanvas(
+          { x: this.container.clientWidth / 2, y: this.container.clientHeight / 2 },
+          this.transform
+        );
+        this.editor.addGroup({
+          name: "Group",
+          position: {
+            x: Math.round(centerCanvas.x - 160),
+            y: Math.round(centerCanvas.y - 110),
+          },
+          size: { width: 320, height: 220 },
+        });
+        return;
+      }
+    }
+
+    // Escape: exit grab mode or freehand mode or deselect
     if (e.key === "Escape") {
+      if (this.isGrabMode) {
+        e.preventDefault();
+        this.setGrabMode(false);
+        return;
+      }
       if (this.isFreehandMode) {
         e.preventDefault();
         this.setFreehandMode(false);
@@ -3511,9 +4185,30 @@ export class SvgSceneRenderer {
 
     // Select tool shortcut: V
     if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "v") {
-      if (this.isFreehandMode) {
+      if (this.isFreehandMode || this.isGrabMode) {
         e.preventDefault();
         this.setFreehandMode(false);
+        this.setGrabMode(false);
+        return;
+      }
+    }
+
+    // Grab tool shortcut: H
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "h") {
+      e.preventDefault();
+      this.setGrabMode(!this.isGrabMode);
+      return;
+    }
+
+    // Connector / Line tool shortcut: L (connect 2 selected nodes)
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "l") {
+      if (this.editor.selectedNodeIds.length === 2) {
+        e.preventDefault();
+        const [fromId, toId] = this.editor.selectedNodeIds;
+        this.editor.addEdge(fromId, toId, {
+          kind: this.editor.activeEdgeKind,
+          routing: this.editor.defaultRouting,
+        });
         return;
       }
     }
@@ -3522,14 +4217,23 @@ export class SvgSceneRenderer {
     if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "p" && this.enableFreehand) {
       if (e.shiftKey) {
         e.preventDefault();
-        this.setAutoShapeDetection(!this.autoShapeDetection);
-        if (!this.isFreehandMode) {
+        const isAutoShapeActive = this.isFreehandMode && this.autoShapeDetection;
+        if (isAutoShapeActive) {
+          this.setFreehandMode(false);
+        } else {
+          this.setAutoShapeDetection(true);
           this.setFreehandMode(true);
         }
         return;
       } else {
         e.preventDefault();
-        this.setFreehandMode(!this.isFreehandMode);
+        const isDrawActive = this.isFreehandMode && !this.autoShapeDetection;
+        if (isDrawActive) {
+          this.setFreehandMode(false);
+        } else {
+          this.setAutoShapeDetection(false);
+          this.setFreehandMode(true);
+        }
         return;
       }
     }
@@ -3593,6 +4297,7 @@ export class SvgSceneRenderer {
 
     this.container.classList.remove("umlcanvas-moving");
     this.container.classList.remove("umlcanvas-freehand-mode");
+    this.container.classList.remove("umlcanvas-grab-mode");
     this.container.classList.remove("umlcanvas-space-pressed");
     this.container.classList.remove("umlcanvas-panning");
 

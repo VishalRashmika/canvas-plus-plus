@@ -49,6 +49,12 @@ export class EdgeStyleRegistry {
     });
 
     this.register({
+      kind: "uml.directedAssociation",
+      displayName: "Directed Association",
+      markerEndId: "uml-marker-open-arrow",
+    });
+
+    this.register({
       kind: "uml.aggregation",
       displayName: "Aggregation",
       markerStartId: "uml-marker-diamond-hollow",
@@ -56,10 +62,24 @@ export class EdgeStyleRegistry {
     });
 
     this.register({
+      kind: "uml.directedAggregation",
+      displayName: "Directed Aggregation",
+      markerStartId: "uml-marker-diamond-hollow",
+      markerEndId: "uml-marker-open-arrow",
+    });
+
+    this.register({
       kind: "uml.composition",
       displayName: "Composition",
       markerStartId: "uml-marker-diamond-filled",
       markerEndId: undefined,
+    });
+
+    this.register({
+      kind: "uml.directedComposition",
+      displayName: "Directed Composition",
+      markerStartId: "uml-marker-diamond-filled",
+      markerEndId: "uml-marker-open-arrow",
     });
 
     this.register({

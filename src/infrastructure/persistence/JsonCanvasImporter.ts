@@ -155,7 +155,7 @@ export class JsonCanvasImporter {
 
       const edge = createDiagramEdge({
         id: e.id,
-        kind: "uml.association",
+        kind: e.toEnd === "arrow" ? "uml.directedAssociation" : "uml.association",
         fromNodeId: e.fromNode,
         toNodeId: e.toNode,
         fromSide: e.fromSide,

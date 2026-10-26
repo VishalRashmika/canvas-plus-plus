@@ -21,9 +21,9 @@ function createTestDiagram(type = "uml.class"): Diagram {
 describe("Domain & Application Tests", () => {
   describe("CanvasColor Value Objects", () => {
     it("should resolve valid canvas color presets", () => {
-      expect(resolveCanvasColor("1")).toBe("var(--canvas-color-1, #fb464c)");
-      expect(resolveCanvasColor("4")).toBe("var(--canvas-color-4, #44cf6e)");
-      expect(resolveCanvasColor("6")).toBe("var(--canvas-color-6, #a882ff)");
+      expect(resolveCanvasColor("1")).toBe("var(--canvas-color-1, #ff758f)");
+      expect(resolveCanvasColor("4")).toBe("var(--canvas-color-4, #69db7c)");
+      expect(resolveCanvasColor("6")).toBe("var(--canvas-color-6, #b197fc)");
     });
 
     it("should pass through hex colors", () => {

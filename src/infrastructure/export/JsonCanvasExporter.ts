@@ -134,6 +134,9 @@ export class JsonCanvasExporter {
       // If it's a directed edge, indicate arrow on end
       if (
         edge.kind.includes("dependency") ||
+        edge.kind.includes("directedAssociation") ||
+        edge.kind.includes("directedAggregation") ||
+        edge.kind.includes("directedComposition") ||
         edge.kind.includes("generalization") ||
         edge.kind.includes("realization") ||
         edge.kind.includes("message") ||

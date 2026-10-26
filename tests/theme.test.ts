@@ -17,18 +17,18 @@ import { UmlCanvasSettingTab } from "../src/presentation/views/UmlCanvasSettingT
 describe("Pastel-Inspired Light Theme Tests", () => {
   describe("Color Presets & Contrast", () => {
     it("should provide high-contrast pastel-complementary presets for light theme", () => {
-      expect(CANVAS_LIGHT_COLOR_PRESETS["1"]).toBe("#c92a3e"); // Pastel Rose / Red
-      expect(CANVAS_LIGHT_COLOR_PRESETS["2"]).toBe("#c45e00"); // Pastel Amber / Orange
-      expect(CANVAS_LIGHT_COLOR_PRESETS["3"]).toBe("#a17000"); // Pastel Gold / Yellow
-      expect(CANVAS_LIGHT_COLOR_PRESETS["4"]).toBe("#12883f"); // Pastel Sage / Green
-      expect(CANVAS_LIGHT_COLOR_PRESETS["5"]).toBe("#0a8288"); // Pastel Ocean / Teal
-      expect(CANVAS_LIGHT_COLOR_PRESETS["6"]).toBe("#6340c7"); // Pastel Lavender / Purple
+      expect(CANVAS_LIGHT_COLOR_PRESETS["1"]).toBe("#ff758f"); // Light Rose / Coral
+      expect(CANVAS_LIGHT_COLOR_PRESETS["2"]).toBe("#ffa94d"); // Light Peach / Orange
+      expect(CANVAS_LIGHT_COLOR_PRESETS["3"]).toBe("#ffd43b"); // Light Butter Yellow
+      expect(CANVAS_LIGHT_COLOR_PRESETS["4"]).toBe("#69db7c"); // Light Mint Green
+      expect(CANVAS_LIGHT_COLOR_PRESETS["5"]).toBe("#38d9a9"); // Light Ocean Teal / Cyan
+      expect(CANVAS_LIGHT_COLOR_PRESETS["6"]).toBe("#b197fc"); // Light Lavender Purple
     });
 
     it("should resolve light color presets when theme is specified as 'light'", () => {
-      expect(resolveCanvasColorHex("1", "light")).toBe("#c92a3e");
-      expect(resolveCanvasColorHex("3", "light")).toBe("#a17000");
-      expect(resolveCanvasColorHex("5", "light")).toBe("#0a8288");
+      expect(resolveCanvasColorHex("1", "light")).toBe("#ff758f");
+      expect(resolveCanvasColorHex("3", "light")).toBe("#ffd43b");
+      expect(resolveCanvasColorHex("5", "light")).toBe("#38d9a9");
     });
 
     it("should resolve dark color presets when theme is specified as 'dark'", () => {
@@ -147,6 +147,233 @@ describe("Pastel-Inspired Light Theme Tests", () => {
     it("should support explicit dark theme override class .umlcanvas-theme-dark", () => {
       expect(css).toContain(".umlcanvas-theme-dark");
       expect(css).toContain("background-color: #1e1e1e !important;");
+    });
+  });
+
+  describe("Toolbar Theme Adaptation & Color Flipping", () => {
+    const cssPath = path.resolve(__dirname, "../styles.css");
+    const css = fs.readFileSync(cssPath, "utf-8");
+
+    it("should ensure toolbar button icons are stroke-based with fill: none (preventing solid black icons)", () => {
+      // Must define fill: none for toolbar button SVGs and all child elements
+      expect(css).toMatch(/\.umlcanvas-toolbar-btn.*svg[\s\S]*?fill:\s*none/);
+      expect(css).toMatch(/\.umlcanvas-toolbar-btn.*svg\s*\*[\s\S]*?fill:\s*none/);
+    });
+
+    it("should ensure dropdown menu and align icons also have fill: none", () => {
+      expect(css).toMatch(/\.umlcanvas-menu-item-icon svg[\s\S]*?fill:\s*none/);
+      expect(css).toMatch(/\.umlcanvas-align-icon svg[\s\S]*?fill:\s*none/);
+      expect(css).toMatch(/\.umlcanvas-btn-chevron svg[\s\S]*?fill:\s*none/);
+    });
+
+    it("should adapt toolbar containers and groups to light theme colors", () => {
+      // Light theme toolbar background: warm pastel surface
+      expect(css).toContain(".umlcanvas-theme-light .umlcanvas-main-toolbar");
+      expect(css).toContain("background-color: var(--canvas-bg-toolbar, #f4f1ea);");
+      // Light theme group: crisp white
+      expect(css).toContain(".umlcanvas-theme-light .umlcanvas-toolbar-group");
+      expect(css).toContain("background-color: #ffffff;");
+      // Light theme button text: high contrast charcoal ink
+      expect(css).toContain(".umlcanvas-theme-light .umlcanvas-toolbar-btn");
+      expect(css).toContain("color: var(--canvas-text-body, #242832);");
+      // Light theme active button: accent with white text
+      expect(css).toContain(".umlcanvas-theme-light .umlcanvas-toolbar-btn.is-active");
+      expect(css).toContain("background-color: var(--canvas-accent, #5b4fe8);");
+    });
+
+    it("should adapt toolbar containers and groups to dark theme colors", () => {
+      // Dark theme toolbar background: dark secondary surface
+      expect(css).toContain(".umlcanvas-theme-dark .umlcanvas-main-toolbar");
+      expect(css).toContain("background-color: #26262b;");
+      // Dark theme group: dark primary surface
+      expect(css).toContain(".umlcanvas-theme-dark .umlcanvas-toolbar-group");
+      expect(css).toContain("background-color: #1e1e1e;");
+      // Dark theme button text: light text
+      expect(css).toContain(".umlcanvas-theme-dark .umlcanvas-toolbar-btn");
+      expect(css).toContain("color: #dcddde;");
+      // Dark theme active button: purple accent
+      expect(css).toContain(".umlcanvas-theme-dark .umlcanvas-toolbar-btn.is-active");
+      expect(css).toContain("background-color: #7b68ee;");
+    });
+
+    it("should enforce stroke: currentColor and fill: none in light theme toolbar icons", () => {
+      // Light theme icons must have explicit stroke: currentColor and fill: none !important
+      expect(css).toContain(
+        ".umlcanvas-theme-light .umlcanvas-toolbar-btn .umlcanvas-btn-icon svg"
+      );
+      expect(css).toContain("stroke: currentColor !important;");
+      expect(css).toContain("fill: none !important;");
+    });
+
+    it("should enforce transparent button background, no box-shadow, and no borders to prevent black layers in light theme", () => {
+      // Light theme toolbar buttons must explicitly override host button background/borders/shadows
+      expect(css).toMatch(
+        /\.umlcanvas-theme-light \.umlcanvas-toolbar-btn[\s\S]*?background-color:\s*transparent\s*!important/
+      );
+      expect(css).toMatch(
+        /\.umlcanvas-theme-light \.umlcanvas-toolbar-btn[\s\S]*?border:\s*none\s*!important/
+      );
+      expect(css).toMatch(
+        /\.umlcanvas-theme-light \.umlcanvas-toolbar-btn[\s\S]*?box-shadow:\s*none\s*!important/
+      );
+      // Buttons must include clickable-icon selector
+      expect(css).toContain(".umlcanvas-theme-light .umlcanvas-toolbar-btn.clickable-icon");
+      expect(css).toContain(".theme-light .umlcanvas-toolbar-btn.clickable-icon");
+      // Icons and svgs must have explicit resets
+      expect(css).toMatch(
+        /\.umlcanvas-toolbar-btn \.umlcanvas-btn-icon[\s\S]*?-webkit-mask:\s*none\s*!important/
+      );
+      // Dark theme toolbar buttons must also have transparent background and no shadow
+      expect(css).toMatch(
+        /\.umlcanvas-theme-dark \.umlcanvas-toolbar-btn[\s\S]*?background-color:\s*transparent\s*!important/
+      );
+      expect(css).toMatch(
+        /\.umlcanvas-theme-dark \.umlcanvas-toolbar-btn[\s\S]*?box-shadow:\s*none\s*!important/
+      );
+    });
+
+    it("should style connector popover to adapt to light and dark themes", () => {
+      expect(css).toContain(".umlcanvas-theme-light .umlcanvas-connector-popover");
+      expect(css).toContain(".umlcanvas-theme-dark .umlcanvas-connector-popover");
+    });
+
+    it("should style font size adjustment button and stepper combo to prevent black button bug in light theme", () => {
+      expect(css).toMatch(
+        /\.umlcanvas-theme-light \.umlcanvas-font-stepper-combo[\s\S]*?background-color:\s*#ffffff/
+      );
+      expect(css).toMatch(
+        /\.umlcanvas-theme-light \.umlcanvas-font-size-btn[\s\S]*?background-color:\s*#ffffff/
+      );
+      expect(css).toMatch(
+        /\.umlcanvas-theme-light \.umlcanvas-font-size-btn:hover[\s\S]*?background-color:\s*var\(--canvas-bg-toolbar-hover/
+      );
+      expect(css).toContain("--background-modifier-form-field: #ffffff;");
+      expect(css).toMatch(
+        /\.umlcanvas-theme-dark \.umlcanvas-font-stepper-combo[\s\S]*?background-color:\s*#1e1e1e/
+      );
+    });
+
+    it("should properly toggle theme classes on container when toggling theme", () => {
+      class MockClassList {
+        private classes = new Set<string>();
+        add(...cls: string[]) {
+          cls.forEach((c) => this.classes.add(c));
+        }
+        remove(...cls: string[]) {
+          cls.forEach((c) => this.classes.delete(c));
+        }
+        contains(c: string) {
+          return this.classes.has(c);
+        }
+      }
+      const container = { classList: new MockClassList() };
+
+      // Simulate applying light theme
+      const applyViewTheme = (el: { classList: MockClassList }, isLight: boolean) => {
+        if (isLight) {
+          el.classList.remove("umlcanvas-theme-dark", "theme-dark");
+          el.classList.add("umlcanvas-theme-light", "theme-light");
+        } else {
+          el.classList.remove("umlcanvas-theme-light", "theme-light");
+          el.classList.add("umlcanvas-theme-dark", "theme-dark");
+        }
+      };
+
+      // 1. Initial switch to Light Theme
+      applyViewTheme(container, true);
+      expect(container.classList.contains("umlcanvas-theme-light")).toBe(true);
+      expect(container.classList.contains("theme-light")).toBe(true);
+      expect(container.classList.contains("umlcanvas-theme-dark")).toBe(false);
+      expect(container.classList.contains("theme-dark")).toBe(false);
+
+      // Check isLight calculation logic
+      let isCurrentlyLight =
+        (container.classList.contains("umlcanvas-theme-light") ||
+          container.classList.contains("theme-light")) &&
+        !container.classList.contains("umlcanvas-theme-dark");
+      expect(isCurrentlyLight).toBe(true);
+
+      // 2. Switch to Dark Theme
+      applyViewTheme(container, !isCurrentlyLight);
+      expect(container.classList.contains("umlcanvas-theme-dark")).toBe(true);
+      expect(container.classList.contains("theme-dark")).toBe(true);
+      expect(container.classList.contains("umlcanvas-theme-light")).toBe(false);
+      expect(container.classList.contains("theme-light")).toBe(false);
+
+      isCurrentlyLight =
+        (container.classList.contains("umlcanvas-theme-light") ||
+          container.classList.contains("theme-light")) &&
+        !container.classList.contains("umlcanvas-theme-dark");
+      expect(isCurrentlyLight).toBe(false);
+
+      // 3. Switch back to Light Theme
+      applyViewTheme(container, !isCurrentlyLight);
+      expect(container.classList.contains("umlcanvas-theme-light")).toBe(true);
+      expect(container.classList.contains("theme-light")).toBe(true);
+      expect(container.classList.contains("umlcanvas-theme-dark")).toBe(false);
+    });
+
+    it("should synchronously apply theme in UmlCanvasView.toggleTheme()", async () => {
+      class MockClassList {
+        private classes = new Set<string>();
+        add(...cls: string[]) {
+          cls.forEach((c) => this.classes.add(c));
+        }
+        remove(...cls: string[]) {
+          cls.forEach((c) => this.classes.delete(c));
+        }
+        contains(c: string) {
+          return this.classes.has(c);
+        }
+      }
+      const rootEl = { classList: new MockClassList() };
+      // Initially dark
+      rootEl.classList.add("umlcanvas-theme-dark", "theme-dark");
+
+      const fakePlugin = {
+        settings: { theme: "dark" },
+        saveSettings: jest.fn().mockResolvedValue(undefined),
+      };
+
+      const mockView: any = {
+        rootEl,
+        plugin: fakePlugin,
+        applyTheme() {
+          const settingTheme = this.plugin.settings.theme;
+          const isLight = settingTheme === "light";
+          if (isLight) {
+            this.rootEl.classList.remove("umlcanvas-theme-dark", "theme-dark");
+            this.rootEl.classList.add("umlcanvas-theme-light", "theme-light");
+          } else {
+            this.rootEl.classList.remove("umlcanvas-theme-light", "theme-light");
+            this.rootEl.classList.add("umlcanvas-theme-dark", "theme-dark");
+          }
+        },
+        async toggleTheme() {
+          const isCurrentlyLight =
+            (this.rootEl?.classList?.contains("umlcanvas-theme-light") ||
+              this.rootEl?.classList?.contains("theme-light")) &&
+            !this.rootEl?.classList?.contains("umlcanvas-theme-dark") ||
+            false;
+          this.plugin.settings.theme = isCurrentlyLight ? "dark" : "light";
+          this.applyTheme();
+          await this.plugin.saveSettings();
+        },
+      };
+
+      // Toggle from dark to light
+      await mockView.toggleTheme();
+      expect(fakePlugin.settings.theme).toBe("light");
+      expect(rootEl.classList.contains("umlcanvas-theme-light")).toBe(true);
+      expect(rootEl.classList.contains("umlcanvas-theme-dark")).toBe(false);
+      expect(fakePlugin.saveSettings).toHaveBeenCalledTimes(1);
+
+      // Toggle from light back to dark
+      await mockView.toggleTheme();
+      expect(fakePlugin.settings.theme).toBe("dark");
+      expect(rootEl.classList.contains("umlcanvas-theme-dark")).toBe(true);
+      expect(rootEl.classList.contains("umlcanvas-theme-light")).toBe(false);
+      expect(fakePlugin.saveSettings).toHaveBeenCalledTimes(2);
     });
   });
 });

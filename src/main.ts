@@ -34,12 +34,42 @@ export default class CanvasPlusPlusPlugin extends Plugin {
   async onload(): Promise<void> {
     await this.loadSettings();
 
-    // F-001: Register custom view for .canvuspp files (supports .canvaspp and legacy .umlcanvas)
+    // Register custom view for all Canvas++ files (.canvas++, .canvuspp, .canvaspp, etc.)
     this.registerView(
       VIEW_TYPE_UML_CANVAS,
       (leaf) => new UmlCanvasView(leaf, this)
     );
-    this.registerExtensions(["canvuspp", "canvaspp", "umlcanvas"], VIEW_TYPE_UML_CANVAS);
+    const supportedExtensions = [
+      "canvas++",
+      "canvuspp",
+      "canvaspp",
+      "canvasplusplus",
+      "canvas-plus-plus",
+      "canvpp",
+      "canv",
+      "umlcanvas",
+    ];
+
+    for (const ext of supportedExtensions) {
+      try {
+        this.registerExtensions([ext], VIEW_TYPE_UML_CANVAS);
+      } catch (err) {
+        console.warn(`[Canvas++] Could not register extension .${ext}:`, err);
+      }
+    }
+
+    // Attempt to register 'canvas' only if not already claimed by Obsidian core or another plugin
+    try {
+      const viewRegistry = (this.app as any)?.viewRegistry;
+      const isCanvasClaimed = Boolean(
+        viewRegistry?.typeByExtension && viewRegistry.typeByExtension["canvas"]
+      );
+      if (!isCanvasClaimed) {
+        this.registerExtensions(["canvas"], VIEW_TYPE_UML_CANVAS);
+      }
+    } catch (err) {
+      console.warn("[Canvas++] Could not register extension .canvas:", err);
+    }
 
     // Customize File Explorer tag badges to show "CANVAS++"
     this.patchFileExplorerTags();
@@ -139,7 +169,13 @@ export default class CanvasPlusPlusPlugin extends Plugin {
       id: "toggle-canvas-theme",
       name: "Toggle canvas theme (Light / Dark)",
       callback: async () => {
-        const nextTheme = this.settings.theme === "light" ? "dark" : "light";
+        let isCurrentlyLight = this.settings.theme === "light";
+        if (this.settings.theme === "system") {
+          isCurrentlyLight =
+            typeof document !== "undefined" &&
+            Boolean(document.body?.classList?.contains("theme-light"));
+        }
+        const nextTheme = isCurrentlyLight ? "dark" : "light";
         this.settings.theme = nextTheme;
         await this.saveSettings();
         new Notice(`Canvas++ theme set to ${nextTheme === "light" ? "Pastel Light" : "Dark"}`);
@@ -200,12 +236,23 @@ export default class CanvasPlusPlusPlugin extends Plugin {
     this.fs = new ObsidianFileSystem(this.app.vault);
     const diagramRepo = new FileDiagramRepository(
       this.fs,
-      (id) =>
-        id.endsWith(".canvuspp") ||
-        id.endsWith(".canvaspp") ||
-        id.endsWith(".umlcanvas")
-          ? id
-          : `${id}.canvuspp`,
+      (id) => {
+        const lower = id.toLowerCase();
+        if (
+          lower.endsWith(".canvuspp") ||
+          lower.endsWith(".canvaspp") ||
+          lower.endsWith(".canvas") ||
+          lower.endsWith(".canvas++") ||
+          lower.endsWith(".canvasplusplus") ||
+          lower.endsWith(".canvas-plus-plus") ||
+          lower.endsWith(".canvpp") ||
+          lower.endsWith(".canv") ||
+          lower.endsWith(".umlcanvas")
+        ) {
+          return id;
+        }
+        return `${id}.canvuspp`;
+      },
       this.serializer
     );
     const applyExternalPatch = new ApplyExternalPatch(diagramRepo);
@@ -234,8 +281,13 @@ export default class CanvasPlusPlusPlugin extends Plugin {
   }
 
   async loadSettings(): Promise<void> {
-    const loadedData = (await this.loadData()) as Partial<UmlCanvasSettings> | null;
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, loadedData ?? {});
+    try {
+      const loadedData = (await this.loadData()) as Partial<UmlCanvasSettings> | null;
+      this.settings = Object.assign({}, DEFAULT_SETTINGS, loadedData ?? {});
+    } catch (err) {
+      console.warn("[Canvas++] Failed to load settings, using defaults:", err);
+      this.settings = Object.assign({}, DEFAULT_SETTINGS);
+    }
   }
 
   async saveSettings(): Promise<void> {
@@ -443,7 +495,10 @@ export default class CanvasPlusPlusPlugin extends Plugin {
     }
 
     const fullPath = makeFullPath(fileName);
-    const diagramTitle = fileName.replace(/\.(canvuspp|canvaspp|umlcanvas)$/, "");
+    const diagramTitle = fileName.replace(
+      /\.(canvuspp|canvaspp|canvas\+\+|canvasplusplus|canvas-plus-plus|canvpp|canv|canvas|umlcanvas)$/i,
+      ""
+    );
 
     const newDiagram = createDiagram({
       id: `diag-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
@@ -455,9 +510,27 @@ export default class CanvasPlusPlusPlugin extends Plugin {
     const createdFile = await this.app.vault.create(fullPath, fileContent);
 
     // Open file in active or new leaf
-    const leaf = this.app.workspace.getLeaf(false);
+    const leaf =
+      this.app.workspace.getLeaf(false) ??
+      (typeof this.app.workspace.getLeaf === "function" ? this.app.workspace.getLeaf(true) : null);
+    const fileToOpen =
+      createdFile instanceof TFile
+        ? createdFile
+        : (this.app.vault.getAbstractFileByPath(fullPath) as TFile | null) ?? createdFile;
     if (leaf && typeof leaf.openFile === "function") {
-      await leaf.openFile(createdFile);
+      try {
+        await leaf.openFile(fileToOpen);
+      } catch (err) {
+        console.error("Failed to open file in active leaf, trying new leaf:", err);
+        try {
+          const freshLeaf = this.app.workspace.getLeaf(true);
+          if (freshLeaf && typeof freshLeaf.openFile === "function") {
+            await freshLeaf.openFile(fileToOpen);
+          }
+        } catch (leafErr) {
+          console.error("Fallback getLeaf(true) also failed:", leafErr);
+        }
+      }
     }
   }
 
@@ -479,48 +552,76 @@ export default class CanvasPlusPlusPlugin extends Plugin {
 
   private patchFileExplorerTags(): void {
     const updateTags = () => {
-      const leaves = this.app.workspace.getLeavesOfType("file-explorer");
-      for (const leaf of leaves) {
-        const container = leaf.view?.containerEl;
-        if (!container) continue;
-        const items = container.querySelectorAll<HTMLElement>(".nav-file-title, .tree-item-self");
-        items.forEach((titleEl) => {
-          const path = (titleEl.getAttribute("data-path") || "").toLowerCase();
-          if (
-            path.endsWith(".canvuspp") ||
-            path.endsWith(".canvaspp") ||
-            path.endsWith(".umlcanvas")
-          ) {
-            const tag = titleEl.querySelector<HTMLElement>(".nav-file-tag");
-            if (tag && tag.textContent !== "CANVAS++") {
-              tag.textContent = "CANVAS++";
+      try {
+        const leaves = this.app?.workspace?.getLeavesOfType?.("file-explorer") ?? [];
+        for (const leaf of leaves) {
+          const container = leaf.view?.containerEl;
+          if (!container) continue;
+          const items = container.querySelectorAll<HTMLElement>(".nav-file-title, .tree-item-self");
+          items.forEach((titleEl) => {
+            const path = (titleEl.getAttribute("data-path") || "").toLowerCase();
+            if (
+              path.endsWith(".canvuspp") ||
+              path.endsWith(".canvaspp") ||
+              path.endsWith(".canvas") ||
+              path.endsWith(".canvas++") ||
+              path.endsWith(".canvasplusplus") ||
+              path.endsWith(".canvas-plus-plus") ||
+              path.endsWith(".canvpp") ||
+              path.endsWith(".canv") ||
+              path.endsWith(".umlcanvas")
+            ) {
+              const tag = titleEl.querySelector<HTMLElement>(".nav-file-tag");
+              if (tag && tag.textContent !== "CANVAS++") {
+                tag.textContent = "CANVAS++";
+              }
             }
-          }
-        });
+          });
+        }
+      } catch (err) {
+        console.warn("[Canvas++] Error updating file explorer tags:", err);
       }
     };
 
-    this.app.workspace.onLayoutReady(() => {
-      updateTags();
-      const leaves = this.app.workspace.getLeavesOfType("file-explorer");
-      for (const leaf of leaves) {
-        const container = leaf.view?.containerEl;
-        if (container) {
-          const observer = new MutationObserver(() => updateTags());
-          observer.observe(container, { childList: true, subtree: true });
-          this.register(() => observer.disconnect());
-        }
+    try {
+      if (this.app?.workspace?.onLayoutReady) {
+        this.app.workspace.onLayoutReady(() => {
+          updateTags();
+          try {
+            const leaves = this.app.workspace.getLeavesOfType("file-explorer");
+            for (const leaf of leaves) {
+              const container = leaf.view?.containerEl;
+              if (container && typeof MutationObserver !== "undefined") {
+                const observer = new MutationObserver(() => updateTags());
+                observer.observe(container, { childList: true, subtree: true });
+                this.register(() => observer.disconnect());
+              }
+            }
+          } catch (err) {
+            console.warn("[Canvas++] Error setting up MutationObserver for file explorer tags:", err);
+          }
+        });
       }
-    });
 
-    this.registerEvent(this.app.vault.on("create", () => window.setTimeout(updateTags, 50)));
-    this.registerEvent(this.app.vault.on("rename", () => window.setTimeout(updateTags, 50)));
-    this.registerEvent(this.app.workspace.on("layout-change", () => updateTags()));
+      if (this.app?.vault?.on) {
+        this.registerEvent(this.app.vault.on("create", () => setTimeout(updateTags, 50)));
+        this.registerEvent(this.app.vault.on("rename", () => setTimeout(updateTags, 50)));
+      }
+      if (this.app?.workspace?.on) {
+        this.registerEvent(this.app.workspace.on("layout-change", () => updateTags()));
+      }
+    } catch (err) {
+      console.warn("[Canvas++] Error registering layout events:", err);
+    }
   }
 
   onunload(): void {
     if (this.fileWatcherBridge) {
-      this.fileWatcherBridge.stop();
+      try {
+        this.fileWatcherBridge.stop();
+      } catch (err) {
+        console.warn("[Canvas++] Error stopping fileWatcherBridge:", err);
+      }
       this.fileWatcherBridge = null;
     }
   }

@@ -1,4 +1,10 @@
-import { TextFileView, WorkspaceLeaf, Menu, TFile, MarkdownRenderer, Platform, App } from "obsidian";
+import { TextFileView, WorkspaceLeaf, Menu, MenuItem, TFile, MarkdownRenderer, Platform, App } from "obsidian";
+
+declare module "obsidian" {
+  interface MenuItem {
+    setSubmenu?(): Menu;
+  }
+}
 import type CanvasPlusPlusPlugin from "../../main";
 import { VIEW_TYPE_UML_CANVAS } from "../../main";
 import { Diagram, createDiagram } from "../../domain/entities/Diagram";
@@ -10,6 +16,7 @@ import { Size } from "../../domain/value-objects/Rect";
 import { DiagramEditor } from "../../application/use-cases/DiagramEditor";
 import { AutosaveCoordinator } from "../../application/use-cases/AutosaveCoordinator";
 import { JsonCanvasSerializer } from "../../infrastructure/persistence/JsonCanvasSerializer";
+import { defaultJsonCanvasImporter } from "../../infrastructure/persistence/JsonCanvasImporter";
 import { SvgSceneRenderer } from "../renderer/SvgSceneRenderer";
 import { Toolbar } from "./Toolbar";
 import { PalettePanel } from "./PalettePanel";
@@ -20,8 +27,10 @@ import { ChipDefinitionModal } from "./ChipDefinitionModal";
 import { ChipInterfaceDefinition } from "../../domain/entities/ChipInterfaceDefinition";
 import { defaultCustomChipRegistry } from "../../domain/services/CustomChipRegistry";
 import { Stroke } from "../../domain/services/ShapeRecognizer";
+import { wrapTextToLines } from "../../domain/services/TextMeasurement";
 import { UmlCanvasSettings } from "../../infrastructure/obsidian/PluginSettings";
 import { CANVAS_COLOR_PRESETS } from "../../domain/value-objects/CanvasColor";
+import { FONT_SIZE_PRESETS } from "../theme/Typography";
 
 interface AppWithDragManager extends App {
   dragManager?: {
@@ -73,6 +82,46 @@ export class UmlCanvasView extends TextFileView {
     return VIEW_TYPE_UML_CANVAS;
   }
 
+  canAcceptExtension(extension: string): boolean {
+    if (!extension || typeof extension !== "string") return false;
+    const ext = extension.toLowerCase().replace(/^\./, "").trim();
+    return (
+      ext === "canvuspp" ||
+      ext === "canvaspp" ||
+      ext === "canvas" ||
+      ext === "canvas++" ||
+      ext === "canvasplusplus" ||
+      ext === "canvas-plus-plus" ||
+      ext === "canvpp" ||
+      ext === "canv" ||
+      ext === "umlcanvas"
+    );
+  }
+
+  async onLoadFile(file: TFile): Promise<void> {
+    this.file = file;
+    let loadedData: string | null = null;
+    const vault = this.app?.vault ?? this.plugin?.app?.vault;
+    if (vault?.read) {
+      try {
+        loadedData = await vault.read(file);
+        this.data = loadedData;
+      } catch (err) {
+        console.error(`Error reading Canvas++ file "${file.path}":`, err);
+      }
+    }
+    try {
+      await super.onLoadFile(file);
+    } catch (err) {
+      console.warn(`Error in super.onLoadFile for "${file.path}":`, err);
+    }
+
+    // Ensure view is initialized if super.onLoadFile did not initialize it
+    if (!this.diagramEditor) {
+      this.setViewData(this.data ?? loadedData ?? "", true);
+    }
+  }
+
   getDisplayText(): string {
     return this.file ? this.file.basename : "Canvas++";
   }
@@ -100,23 +149,52 @@ export class UmlCanvasView extends TextFileView {
       // Blank new file
       diagram = createDiagram({
         id: this.file ? this.file.path : `diag-${Date.now()}`,
-        diagramType: this.plugin.settings.defaultDiagramType || "general",
+        diagramType: this.plugin?.settings?.defaultDiagramType || "general",
         title: this.file ? this.file.basename : "New Diagram",
       });
     } else {
       try {
         diagram = this.serializer.deserialize(trimmed);
-      } catch {
-        // Fallback for corrupted/invalid files
-        diagram = createDiagram({
-          id: this.file ? this.file.path : `diag-${Date.now()}`,
-          diagramType: this.plugin.settings.defaultDiagramType || "general",
-          title: this.file ? this.file.basename : "Recovered Diagram",
-        });
+      } catch (deserErr) {
+        // Fallback: try importing as JSON Canvas if file was formatted in plain .canvas format
+        try {
+          diagram = defaultJsonCanvasImporter.importCanvas(trimmed, {
+            diagramId: this.file ? this.file.path : undefined,
+            title: this.file ? this.file.basename : undefined,
+          });
+        } catch (importErr) {
+          console.warn("Failed to deserialize or import Canvas++ file, recovering:", deserErr, importErr);
+          // Fallback for corrupted/invalid files
+          diagram = createDiagram({
+            id: this.file ? this.file.path : `diag-${Date.now()}`,
+            diagramType: this.plugin?.settings?.defaultDiagramType || "general",
+            title: this.file ? this.file.basename : "Recovered Diagram",
+          });
+        }
       }
     }
 
-    this.initializeView(diagram);
+    try {
+      this.initializeView(diagram);
+    } catch (initErr) {
+      console.error("Critical error in Canvas++ initializeView:", initErr);
+      try {
+        const fallbackDiagram = createDiagram({
+          id: this.file ? this.file.path : `diag-${Date.now()}`,
+          diagramType: "general",
+          title: this.file ? this.file.basename : "Recovered Diagram",
+        });
+        this.initializeView(fallbackDiagram);
+      } catch (fatalErr) {
+        console.error("Fatal error rendering fallback Canvas++ view:", fatalErr);
+        this.contentEl.empty();
+        const errorContainer = this.contentEl.createDiv({ cls: "umlcanvas-view-error" });
+        errorContainer.createEl("h3", { text: "Canvas++ Document" });
+        errorContainer.createEl("p", {
+          text: `An error occurred while loading ${this.file?.basename || "diagram"}. Error details: ${String(initErr)}`,
+        });
+      }
+    }
   }
 
   clear(): void {
@@ -165,20 +243,22 @@ export class UmlCanvasView extends TextFileView {
 
     this.editor = new DiagramEditor(diagram);
 
+    const settings = this.plugin?.settings;
+
     // Setup debounced autosave via Obsidian's requestSave
     this.autosaveCoordinator = new AutosaveCoordinator(
       this.editor,
       async () => {
         this.requestSave();
       },
-      this.plugin.settings.autosaveDelayMs
+      settings?.autosaveDelayMs ?? 1000
     );
 
     // Setup SVG Renderer
     this.renderer = new SvgSceneRenderer(svgContainer, this.editor, {
-      showGrid: this.plugin.settings.showGrid,
-      enableFreehand: this.plugin.settings.enableFreehand,
-      autoShapeDetection: this.plugin.settings.autoShapeDetection ?? true,
+      showGrid: settings?.showGrid ?? true,
+      enableFreehand: settings?.enableFreehand ?? true,
+      autoShapeDetection: settings?.autoShapeDetection ?? true,
       onModeChange: () => {
         if (this.toolbar) {
           this.toolbar.updateToolMode();
@@ -344,7 +424,7 @@ export class UmlCanvasView extends TextFileView {
       if (!target) return;
       if (
         target.closest(
-          ".umlcanvas-toolbar, .umlcanvas-menu-dropdown, .umlcanvas-palette-panel, .umlcanvas-minimap, .umlcanvas-color-palette-popover, .umlcanvas-align-popover, .umlcanvas-inline-editor, .modal"
+          ".umlcanvas-toolbar, .umlcanvas-main-toolbar, .umlcanvas-floating-bottom-toolbar, .umlcanvas-menu-dropdown, .umlcanvas-palette-panel, .umlcanvas-minimap, .umlcanvas-color-palette-popover, .umlcanvas-align-popover, .umlcanvas-font-size-popover, .umlcanvas-font-size-dropdown, .umlcanvas-font-family-dropdown, .umlcanvas-connector-popover, .umlcanvas-line-popover, .umlcanvas-breadcrumbs, .umlcanvas-inline-editor, .modal, .menu, [class*='popover'], [class*='dropdown']"
         )
       ) {
         return;
@@ -359,19 +439,30 @@ export class UmlCanvasView extends TextFileView {
     this.rootEl.addEventListener("keydown", (e: KeyboardEvent) => {
       const isMac = Platform.isMacOS;
       const mod = isMac ? e.metaKey : e.ctrlKey;
+      const target = e.target as HTMLElement | null;
+      const isInput = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable || Boolean(target.closest(".umlcanvas-inline-editor")));
 
-      if (mod && e.key.toLowerCase() === "c") {
+      if (mod && e.key.toLowerCase() === "c" && !isInput) {
         e.preventDefault();
         this.editor?.copySelection();
-      } else if (mod && e.key.toLowerCase() === "v") {
+      } else if (mod && e.key.toLowerCase() === "v" && !isInput) {
         e.preventDefault();
         this.editor?.paste();
-      } else if (!mod && (e.key === "m" || e.key === "M")) {
-        const target = e.target as HTMLElement;
-        if (target.tagName !== "INPUT" && target.tagName !== "TEXTAREA") {
-          e.preventDefault();
-          this.minimap?.toggle();
-        }
+      } else if (mod && e.key.toLowerCase() === "b" && !isInput) {
+        e.preventDefault();
+        this.editor?.toggleBoldForSelection();
+      } else if (mod && e.key.toLowerCase() === "i" && !isInput) {
+        e.preventDefault();
+        this.editor?.toggleItalicForSelection();
+      } else if (mod && e.key === "[" && !isInput) {
+        e.preventDefault();
+        this.editor?.adjustFontSizeForSelection(-2);
+      } else if (mod && e.key === "]" && !isInput) {
+        e.preventDefault();
+        this.editor?.adjustFontSizeForSelection(2);
+      } else if (!mod && (e.key === "m" || e.key === "M") && !isInput) {
+        e.preventDefault();
+        this.minimap?.toggle();
       }
     });
 
@@ -504,11 +595,128 @@ export class UmlCanvasView extends TextFileView {
 
   public async toggleTheme(): Promise<void> {
     const isCurrentlyLight =
-      this.rootEl?.classList?.contains("umlcanvas-theme-light") ||
-      this.rootEl?.classList?.contains("theme-light") ||
+      (this.rootEl?.classList?.contains("umlcanvas-theme-light") ||
+        this.rootEl?.classList?.contains("theme-light")) &&
+      !this.rootEl?.classList?.contains("umlcanvas-theme-dark") ||
       false;
-    this.plugin.settings.theme = isCurrentlyLight ? "dark" : "light";
-    await this.plugin.saveSettings();
+    if (this.plugin?.settings) {
+      this.plugin.settings.theme = isCurrentlyLight ? "dark" : "light";
+    }
+    this.applyTheme();
+    if (this.plugin?.saveSettings) {
+      await this.plugin.saveSettings();
+    }
+  }
+
+  private addColorSubmenu(
+    menu: Menu,
+    currentColor: string | undefined,
+    onSelectColor: (colorId: string | undefined) => void,
+    isStickyOrNote?: boolean
+  ): void {
+    menu.addItem((item) => {
+      item.setTitle("Color").setIcon("palette");
+      const subMenu = item.setSubmenu ? item.setSubmenu() : null;
+      const targetMenu: Menu = subMenu ?? menu;
+      const prefix = subMenu ? "" : "Color: ";
+
+      const isDefault = !currentColor;
+      targetMenu.addItem((subItem) => {
+        subItem
+          .setTitle(`${prefix}Default (None)${isDefault ? " ✓" : ""}`)
+          .setIcon("rotate-ccw")
+          .onClick(() => {
+            onSelectColor(undefined);
+          });
+      });
+
+      for (const preset of CANVAS_COLOR_PRESETS) {
+        let label = preset.label;
+        if (isStickyOrNote) {
+          const stickyLabels: Record<string, string> = {
+            "1": "Pink",
+            "2": "Orange",
+            "3": "Yellow (Classic)",
+            "4": "Green (Mint)",
+            "5": "Blue (Sky)",
+            "6": "Purple",
+          };
+          label = stickyLabels[preset.id] ?? preset.label;
+        }
+        const isCurrent = currentColor === preset.id;
+        targetMenu.addItem((subItem) => {
+          subItem
+            .setTitle(`${prefix}${label} (${preset.id})${isCurrent ? " ✓" : ""}`)
+            .setIcon("palette")
+            .onClick(() => {
+              onSelectColor(preset.id);
+            });
+        });
+      }
+    });
+  }
+
+  private addFontSizeSubmenu(
+    menu: Menu,
+    currentFontSize: number | undefined,
+    defaultSize: number,
+    onAdjustSize: (delta: number) => void,
+    onSetSize: (size: number) => void,
+    onResetFont: () => void
+  ): void {
+    menu.addItem((item) => {
+      item.setTitle("Font size").setIcon("type");
+      const subMenu = item.setSubmenu ? item.setSubmenu() : null;
+      const targetMenu: Menu = subMenu ?? menu;
+      const prefix = subMenu ? "" : "Font size: ";
+
+      targetMenu.addItem((subItem) => {
+        subItem
+          .setTitle(`${prefix}Increase (+2px) [Ctrl+]]`)
+          .setIcon("plus")
+          .onClick(() => {
+            onAdjustSize(2);
+          });
+      });
+
+      targetMenu.addItem((subItem) => {
+        subItem
+          .setTitle(`${prefix}Decrease (-2px) [Ctrl+[]`)
+          .setIcon("minus")
+          .onClick(() => {
+            onAdjustSize(-2);
+          });
+      });
+
+      if (subMenu) {
+        subMenu.addSeparator();
+      }
+
+      for (const preset of FONT_SIZE_PRESETS) {
+        const isCurrent = (currentFontSize ?? defaultSize) === preset.size;
+        targetMenu.addItem((subItem) => {
+          subItem
+            .setTitle(`${prefix}${preset.label} (${preset.size}px)${isCurrent ? " ✓" : ""}`)
+            .setIcon("type")
+            .onClick(() => {
+              onSetSize(preset.size);
+            });
+        });
+      }
+
+      if (subMenu) {
+        subMenu.addSeparator();
+      }
+
+      targetMenu.addItem((subItem) => {
+        subItem
+          .setTitle(`Reset font (${defaultSize}px, normal)`)
+          .setIcon("rotate-ccw")
+          .onClick(() => {
+            onResetFont();
+          });
+      });
+    });
   }
 
   private showContextMenu(
@@ -619,37 +827,42 @@ export class UmlCanvasView extends TextFileView {
 
       menu.addSeparator();
 
+      this.addColorSubmenu(
+        menu,
+        node.style?.color,
+        (colorId) => this.editor?.setColorForSelection(colorId),
+        node.kind === "generic.stickyNote" || node.kind === "generic.note"
+      );
+
+      menu.addSeparator();
+
+      const nodeFont = this.editor?.getNodeFont(node.id) ?? {};
       menu.addItem((item) => {
         item
-          .setTitle("Color: Default (None)")
-          .setIcon("rotate-ccw")
+          .setTitle(nodeFont.bold ? "Bold: On (Ctrl+B) ✓" : "Bold: Off (Ctrl+B)")
+          .setIcon("bold")
           .onClick(() => {
-            this.editor?.setColorForSelection(undefined);
+            this.editor?.toggleBoldForSelection();
           });
       });
 
-      for (const preset of CANVAS_COLOR_PRESETS) {
-        menu.addItem((item) => {
-          let label = preset.label;
-          if (node.kind === "generic.stickyNote" || node.kind === "generic.note") {
-            const stickyLabels: Record<string, string> = {
-              "1": "Pink",
-              "2": "Orange",
-              "3": "Yellow (Classic)",
-              "4": "Green (Mint)",
-              "5": "Blue (Sky)",
-              "6": "Purple",
-            };
-            label = stickyLabels[preset.id] ?? preset.label;
-          }
-          item
-            .setTitle(`Color: ${label} (${preset.id})`)
-            .setIcon("palette")
-            .onClick(() => {
-              this.editor?.setColorForSelection(preset.id);
-            });
-        });
-      }
+      menu.addItem((item) => {
+        item
+          .setTitle(nodeFont.italic ? "Italic: On (Ctrl+I) ✓" : "Italic: Off (Ctrl+I)")
+          .setIcon("italic")
+          .onClick(() => {
+            this.editor?.toggleItalicForSelection();
+          });
+      });
+
+      this.addFontSizeSubmenu(
+        menu,
+        nodeFont.fontSize,
+        13,
+        (delta) => this.editor?.adjustFontSizeForSelection(delta),
+        (size) => this.editor?.setFontSizeForSelection(size),
+        () => this.editor?.resetFontForSelection()
+      );
 
       menu.addSeparator();
 
@@ -875,25 +1088,72 @@ export class UmlCanvasView extends TextFileView {
 
       menu.addSeparator();
 
-      menu.addItem((item) => {
-        item
-          .setTitle("Color: Default (None)")
-          .setIcon("rotate-ccw")
-          .onClick(() => {
-            this.editor?.setColorForSelection(undefined);
-          });
-      });
+      const connectorStyles: Array<{ kind: string; label: string; icon: string }> = [
+        { kind: "uml.association", label: "Association (Line)", icon: "minus" },
+        { kind: "uml.directedAssociation", label: "Directed Association (Arrow)", icon: "arrow-up-right" },
+        { kind: "uml.aggregation", label: "Aggregation (Hollow Diamond)", icon: "diamond" },
+        { kind: "uml.composition", label: "Composition (Filled Diamond)", icon: "diamond" },
+        { kind: "uml.generalization", label: "Generalization (Inherit)", icon: "triangle" },
+        { kind: "uml.realization", label: "Realization (Dashed)", icon: "git-branch" },
+        { kind: "uml.dependency", label: "Dependency (Arrow)", icon: "arrow-up-right" },
+        { kind: "uml.directedAggregation", label: "Directed Aggregation", icon: "diamond" },
+        { kind: "uml.directedComposition", label: "Directed Composition", icon: "diamond" },
+        { kind: "uml.link", label: "Plain Link", icon: "minus" },
+      ];
 
-      for (const preset of CANVAS_COLOR_PRESETS) {
+      for (const cs of connectorStyles) {
         menu.addItem((item) => {
+          const isCurrent = edge.kind === cs.kind;
           item
-            .setTitle(`Color: ${preset.label} (${preset.id})`)
-            .setIcon("palette")
+            .setTitle(`Style: ${cs.label}${isCurrent ? " ✓" : ""}`)
+            .setIcon(cs.icon)
             .onClick(() => {
-              this.editor?.setColorForSelection(preset.id);
+              this.editor?.updateEdgeKind(edge.id, cs.kind);
+              if (this.editor) {
+                this.editor.activeEdgeKind = cs.kind;
+              }
             });
         });
       }
+
+      menu.addSeparator();
+
+      this.addColorSubmenu(
+        menu,
+        edge.style?.color,
+        (colorId) => this.editor?.setColorForSelection(colorId),
+        false
+      );
+
+      menu.addSeparator();
+
+      const edgeFont = this.editor?.getEdgeFont(edge.id) ?? {};
+      menu.addItem((item) => {
+        item
+          .setTitle(edgeFont.bold ? "Bold: On (Ctrl+B) ✓" : "Bold: Off (Ctrl+B)")
+          .setIcon("bold")
+          .onClick(() => {
+            this.editor?.toggleBoldForSelection();
+          });
+      });
+
+      menu.addItem((item) => {
+        item
+          .setTitle(edgeFont.italic ? "Italic: On (Ctrl+I) ✓" : "Italic: Off (Ctrl+I)")
+          .setIcon("italic")
+          .onClick(() => {
+            this.editor?.toggleItalicForSelection();
+          });
+      });
+
+      this.addFontSizeSubmenu(
+        menu,
+        edgeFont.fontSize,
+        11,
+        (delta) => this.editor?.adjustFontSizeForSelection(delta),
+        (size) => this.editor?.setFontSizeForSelection(size),
+        () => this.editor?.resetFontForSelection()
+      );
 
       menu.addSeparator();
 
@@ -958,25 +1218,42 @@ export class UmlCanvasView extends TextFileView {
 
       menu.addSeparator();
 
+      this.addColorSubmenu(
+        menu,
+        group.color,
+        (colorId) => this.editor?.setColorForSelection(colorId),
+        false
+      );
+
+      menu.addSeparator();
+
+      const groupFont = this.editor?.getGroupFont(group.id) ?? {};
       menu.addItem((item) => {
         item
-          .setTitle("Color: Default (None)")
-          .setIcon("rotate-ccw")
+          .setTitle(groupFont.bold ? "Bold: On (Ctrl+B) ✓" : "Bold: Off (Ctrl+B)")
+          .setIcon("bold")
           .onClick(() => {
-            this.editor?.setColorForSelection(undefined);
+            this.editor?.toggleBoldForSelection();
           });
       });
 
-      for (const preset of CANVAS_COLOR_PRESETS) {
-        menu.addItem((item) => {
-          item
-            .setTitle(`Color: ${preset.label} (${preset.id})`)
-            .setIcon("palette")
-            .onClick(() => {
-              this.editor?.setColorForSelection(preset.id);
-            });
-        });
-      }
+      menu.addItem((item) => {
+        item
+          .setTitle(groupFont.italic ? "Italic: On (Ctrl+I) ✓" : "Italic: Off (Ctrl+I)")
+          .setIcon("italic")
+          .onClick(() => {
+            this.editor?.toggleItalicForSelection();
+          });
+      });
+
+      this.addFontSizeSubmenu(
+        menu,
+        groupFont.fontSize,
+        12,
+        (delta) => this.editor?.adjustFontSizeForSelection(delta),
+        (size) => this.editor?.setFontSizeForSelection(size),
+        () => this.editor?.resetFontForSelection()
+      );
 
       menu.addSeparator();
 
@@ -1009,6 +1286,22 @@ export class UmlCanvasView extends TextFileView {
                 y: Math.round(canvasPoint.y - 40),
               },
               title: "New Node",
+            });
+          });
+      });
+
+      menu.addItem((item) => {
+        item
+          .setTitle("Add group box here")
+          .setIcon("boxes")
+          .onClick(() => {
+            this.editor?.addGroup({
+              position: {
+                x: Math.round(canvasPoint.x - 150),
+                y: Math.round(canvasPoint.y - 100),
+              },
+              size: { width: 300, height: 200 },
+              name: "New Group",
             });
           });
       });
@@ -1217,11 +1510,17 @@ export class UmlCanvasView extends TextFileView {
       };
     }
 
+    const initialText = options?.text ?? "Sticky Note";
+    const initialW = options?.size?.width ?? 180;
+    const initialH = options?.size?.height ?? 140;
+    const wrapped = wrapTextToLines(initialText, Math.max(40, initialW - 24), 13 * 0.58);
+    const neededH = Math.max(initialH, 26 + 13 + Math.max(1, wrapped.length) * Math.round(13 * 1.38) + 12);
+
     const stickyNode = this.editor.addNode({
       kind: "generic.stickyNote",
-      title: options?.text ?? "Sticky Note",
+      title: initialText,
       position: targetPoint,
-      size: options?.size ?? { width: 180, height: 140 },
+      size: { width: initialW, height: neededH },
       style: {
         color: options?.color ?? "3",
       },
@@ -1448,7 +1747,7 @@ export class UmlCanvasView extends TextFileView {
   }
 
   async onClose(): Promise<void> {
-    this.clear();
     await super.onClose();
+    this.clear();
   }
 }

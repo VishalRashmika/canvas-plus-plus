@@ -103,6 +103,12 @@ export class JsonCanvasSerializer {
         position: group.position,
         size: group.size,
         locked: group.locked,
+        fontSize: group.fontSize,
+        bold: group.bold,
+        italic: group.italic,
+        fontWeight: group.fontWeight,
+        fontStyle: group.fontStyle,
+        style: group.style,
       })),
       editPermissions: {
         default: diagram.editPermissions?.default ?? "both",
@@ -135,20 +141,30 @@ export class JsonCanvasSerializer {
 
     const rawRecord = parsed as Record<string, unknown>;
 
-    if (typeof rawRecord.schemaVersion !== "number") {
-      throw new InvalidDiagramJsonError("Missing required field 'schemaVersion'");
+    const rawSchemaVersion = rawRecord.schemaVersion;
+    let schemaVersionNum: number;
+    if (typeof rawSchemaVersion === "number") {
+      schemaVersionNum = rawSchemaVersion;
+    } else if (typeof rawSchemaVersion === "string" && !isNaN(parseInt(rawSchemaVersion, 10))) {
+      schemaVersionNum = parseInt(rawSchemaVersion, 10);
+    } else {
+      schemaVersionNum = CURRENT_SCHEMA_VERSION;
     }
 
     let record = rawRecord;
-    if (rawRecord.schemaVersion < CURRENT_SCHEMA_VERSION) {
-      record = this.migrator.migrate(rawRecord, CURRENT_SCHEMA_VERSION);
-    } else if (rawRecord.schemaVersion > CURRENT_SCHEMA_VERSION) {
-      throw new UnsupportedSchemaVersionError(rawRecord.schemaVersion);
+    if (schemaVersionNum < CURRENT_SCHEMA_VERSION) {
+      record = this.migrator.migrate(
+        { ...rawRecord, schemaVersion: schemaVersionNum },
+        CURRENT_SCHEMA_VERSION
+      );
+    } else if (schemaVersionNum > 2) {
+      throw new UnsupportedSchemaVersionError(schemaVersionNum);
     }
 
-    if (typeof record.id !== "string" || record.id.trim() === "") {
-      throw new InvalidDiagramJsonError("Missing or invalid required field 'id'");
-    }
+    const id =
+      typeof record.id === "string" && record.id.trim() !== ""
+        ? record.id
+        : `diag-${Date.now()}`;
 
     const diagramType =
       typeof record.diagramType === "string" && record.diagramType.trim() !== ""
@@ -350,6 +366,18 @@ export class JsonCanvasSerializer {
                       }
                     : undefined,
                 locked: gr.locked === true,
+                fontSize: typeof gr.fontSize === "number" ? gr.fontSize : undefined,
+                bold: typeof gr.bold === "boolean" ? gr.bold : undefined,
+                italic: typeof gr.italic === "boolean" ? gr.italic : undefined,
+                fontWeight:
+                  typeof gr.fontWeight === "string" || typeof gr.fontWeight === "number"
+                    ? gr.fontWeight
+                    : undefined,
+                fontStyle:
+                  gr.fontStyle === "italic" || gr.fontStyle === "normal"
+                    ? gr.fontStyle
+                    : undefined,
+                style: gr.style && typeof gr.style === "object" ? (gr.style as any) : undefined,
               })
             );
           }
@@ -388,7 +416,7 @@ export class JsonCanvasSerializer {
     }
 
     return createDiagram({
-      id: record.id,
+      id: id as string,
       diagramType,
       title,
       nodes,

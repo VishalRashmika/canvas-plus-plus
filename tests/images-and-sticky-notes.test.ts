@@ -666,6 +666,169 @@ describe("Import Images and Sticky Notes Tests", () => {
       expect(jsonCanvas).toContain("SVG Exported Thought");
       expect(jsonCanvas).toContain('"color": "3"');
     });
+
+    it("should word-wrap long text lines and clip cleanly so text never overflows sticky note boundaries", () => {
+      const longText = "This is a very long note text written on a sticky note to test that it automatically wraps words properly and never overflows outside the paper boundaries";
+      const sticky = editor.addNode({
+        kind: "generic.stickyNote",
+        title: longText,
+        position: { x: 50, y: 50 },
+        size: { width: 180, height: 140 },
+      });
+
+      const container = new MockElement("div") as any;
+      const renderer = new SvgSceneRenderer(container, editor);
+      renderer.render();
+
+      const nodeGroup = container.querySelector(`[data-node-id="${sticky.id}"]`);
+      expect(nodeGroup).not.toBeNull();
+
+      // Check clipPath exists
+      const clipPath = nodeGroup.querySelector("clipPath");
+      expect(clipPath).not.toBeNull();
+      const clipRect = clipPath.querySelector("rect");
+      expect(clipRect).not.toBeNull();
+      expect(clipRect.attributes.width).toBe("180");
+      expect(clipRect.attributes.height).toBe("140");
+
+      // Check text elements were wrapped into multiple lines
+      const textEls = nodeGroup.querySelectorAll(".umlcanvas-sticky-text");
+      expect(textEls.length).toBeGreaterThan(1);
+
+      // Verify that no individual line exceeds the full note width
+      for (const el of textEls) {
+        expect(el.textContent.length).toBeLessThan(longText.length);
+      }
+    });
+
+    it("should auto-expand sticky note height when committing multiline text exceeding current height", () => {
+      const sticky = editor.addNode({
+        kind: "generic.stickyNote",
+        title: "Short initial",
+        position: { x: 50, y: 50 },
+        size: { width: 180, height: 100 },
+      });
+
+      const container = new MockElement("div") as any;
+      const renderer = new SvgSceneRenderer(container, editor);
+      renderer.render();
+
+      renderer.startInlineEditor(sticky);
+      expect(renderer.activeInlineEditor).not.toBeNull();
+
+      // Set lots of multiline text
+      renderer.activeInlineEditor!.value = "Line 1\nLine 2\nLine 3\nLine 4\nLine 5\nLine 6\nLine 7\nLine 8";
+      renderer.commitInlineEditor();
+
+      expect(sticky.size.height).toBeGreaterThan(100);
+    });
+
+    it("should not expand inline editor width beyond sticky note boundaries when font size is increased", () => {
+      const sticky = editor.addNode({
+        kind: "generic.stickyNote",
+        title: "Initial",
+        position: { x: 50, y: 50 },
+        size: { width: 180, height: 140 },
+      });
+
+      editor.selectNode(sticky.id, false);
+      editor.setFontSizeForSelection(28);
+
+      const longLineText = "This is a very long line of text that should wrap inside sticky note rather than extending horizontally";
+      const bounds = renderer.getNodeInPlaceEditorBounds(sticky, longLineText);
+
+      // Width MUST be clamped to sticky.size.width - 20 (160px), never overflowing
+      expect(bounds.width).toBe(160);
+      expect(bounds.x).toBe(60);
+      expect(bounds.width).toBeLessThanOrEqual(sticky.size.width);
+    });
+
+    it("should dynamically auto-expand sticky note height on typing so editor and text never overflow boundaries", () => {
+      const sticky = editor.addNode({
+        kind: "generic.stickyNote",
+        title: "Short",
+        position: { x: 50, y: 50 },
+        size: { width: 180, height: 120 },
+      });
+
+      const containerEl = new MockElement("div") as any;
+      const testRenderer = new SvgSceneRenderer(containerEl, editor);
+      testRenderer.render();
+
+      testRenderer.startInlineEditor(sticky);
+      const activeEd = testRenderer.activeInlineEditor as unknown as MockElement;
+      expect(activeEd).not.toBeNull();
+
+      // Simulate typing many lines of text
+      activeEd.value = "Line 1\nLine 2\nLine 3\nLine 4\nLine 5\nLine 6\nLine 7\nLine 8";
+      activeEd.dispatch("input");
+
+      // Sticky note height must have grown to contain the text
+      expect(sticky.size.height).toBeGreaterThan(120);
+
+      // Editor height should fit comfortably within the note
+      const bounds = testRenderer.getNodeInPlaceEditorBounds(sticky, activeEd.value);
+      expect(bounds.height).toBe(sticky.size.height - 32);
+
+      testRenderer.commitInlineEditor();
+    });
+
+    it("should auto-expand sticky note height when UpdateNodeLabelCommand updates text", () => {
+      const sticky = editor.addNode({
+        kind: "generic.stickyNote",
+        title: "Short",
+        position: { x: 50, y: 50 },
+        size: { width: 180, height: 100 },
+      });
+
+      editor.updateNodeLabel(
+        sticky.id,
+        "Line 1\nLine 2\nLine 3\nLine 4\nLine 5\nLine 6\nLine 7\nLine 8"
+      );
+
+      expect(sticky.size.height).toBeGreaterThan(100);
+
+      // Verify undo restores previous size
+      editor.undo();
+      expect(sticky.size.height).toBe(100);
+      expect(sticky.labels[0].text).toBe("Short");
+    });
+
+    it("should auto-expand sticky note height when SetFontCommand increases font size", () => {
+      const sticky = editor.addNode({
+        kind: "generic.stickyNote",
+        title: "Sticky note thought with multiple words that will wrap",
+        position: { x: 50, y: 50 },
+        size: { width: 180, height: 100 },
+      });
+
+      editor.selectNode(sticky.id, false);
+      editor.setFontSizeForSelection(32);
+
+      expect(sticky.size.height).toBeGreaterThan(100);
+
+      // Verify undo restores previous size
+      editor.undo();
+      expect(sticky.size.height).toBe(100);
+    });
+
+    it("should wrap lines and stay within boundaries in exported SVG for sticky notes", () => {
+      const sticky = editor.addNode({
+        kind: "generic.stickyNote",
+        title: "A long thought that definitely requires wrapping when exported to SVG so it stays inside paper",
+        position: { x: 100, y: 100 },
+        size: { width: 180, height: 140 },
+      });
+
+      const svg = defaultSvgExporter.exportToSvg(editor.diagram);
+      expect(svg).toContain("umlcanvas-sticky-body");
+      expect(svg).toContain("umlcanvas-sticky-text");
+
+      // Verify multiple <text> lines were produced for wrapped content
+      const matches = svg.match(/class="umlcanvas-sticky-text"/g);
+      expect(matches).not.toBeNull();
+      expect(matches!.length).toBeGreaterThan(1);
+    });
   });
 
   describe("Toolbar Integration", () => {

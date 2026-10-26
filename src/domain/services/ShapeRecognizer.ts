@@ -15,6 +15,7 @@ export interface Stroke {
 
 export type RecognizedShapeKind =
   | "rectangle"
+  | "square"
   | "diamond"
   | "ellipse"
   | "circle"
@@ -86,7 +87,9 @@ export class ShapeRecognizer {
     const endToEndDist = Math.hypot(end.x - start.x, end.y - start.y);
     const closureRatio = endToEndDist / totalLength;
 
-    const isClosed = endToEndDist < 35 || closureRatio < 0.22;
+    const isClosed =
+      (closureRatio < 0.25 && endToEndDist < Math.max(50, 0.35 * Math.hypot(width, height))) ||
+      (endToEndDist < 25 && closureRatio < 0.40);
 
     if (!isClosed) {
       return this.recognizeOpenStroke(points, bounds, totalLength, endToEndDist);
@@ -117,9 +120,9 @@ export class ShapeRecognizer {
       };
     }
 
-    // Straight line evaluation
-    if (straightness >= 0.82) {
-      const confidence = Math.min(1.0, straightness);
+    // Straight line evaluation (support natural handdrawn lines with slight curves/wobble)
+    if (straightness >= 0.50) {
+      const confidence = Math.max(0.70, Math.min(1.0, straightness));
       return {
         shape: "line",
         confidence,
@@ -131,7 +134,7 @@ export class ShapeRecognizer {
 
     return {
       shape: "none",
-      confidence: 0.2,
+      confidence: Math.max(0.2, straightness),
       bounds,
       startPoint: { x: start.x, y: start.y },
       endPoint: { x: end.x, y: end.y },
@@ -241,74 +244,80 @@ export class ShapeRecognizer {
     const cy = by + bh / 2;
     const rx = bw / 2;
     const ry = bh / 2;
+    const aspectRatio = bw / bh;
+    const diag = Math.hypot(bw, bh);
 
-    // 1. Ellipse Radial Distance Fit
-    // For an ellipse: ((x - cx) / rx)^2 + ((y - cy) / ry)^2 should be close to 1
-    let sumNormalizedDist = 0;
-    const normalizedDists: number[] = [];
-
-    for (const p of points) {
-      const d = Math.hypot((p.x - cx) / rx, (p.y - cy) / ry);
-      normalizedDists.push(d);
-      sumNormalizedDist += d;
-    }
-
-    const meanDist = sumNormalizedDist / points.length;
-    let variance = 0;
-    for (const d of normalizedDists) {
-      variance += (d - meanDist) * (d - meanDist);
-    }
-    const stdDev = Math.sqrt(variance / points.length);
-
-    // 2. Shoelace Area Ratio
+    // Shoelace Area Ratio
     const polygonArea = this.calculateShoelaceArea(points);
     const boxArea = bw * bh;
     const areaRatio = polygonArea / Math.max(1, boxArea);
 
-    // 3. Simplified corner detection via Ramer-Douglas-Peucker
-    const epsilon = Math.max(bw, bh) * 0.05;
-    const simplified = this.rdpSimplify(points, epsilon);
-    const cornerCount = simplified.length - 1;
+    // Multi-norm error calculations & geometric indicators
+    let rectErrSum = 0;
+    let ellipseErrSum = 0;
+    let diamondErrSum = 0;
+    let boxEdgeDistSum = 0;
+    const ellipseDists: number[] = [];
+    let maxHypot = 0;
 
-    // Determine whether corners match diamond midpoints or rectangle corners
-    let rectCornerDistSum = 0;
-    let diamondCornerDistSum = 0;
-
-    const rectCorners: Point[] = [
+    const corners: Point[] = [
       { x: bx, y: by },
       { x: bx + bw, y: by },
       { x: bx + bw, y: by + bh },
       { x: bx, y: by + bh },
     ];
+    const cornerDists = corners.map(
+      (c) => Math.min(...points.map((p) => Math.hypot(p.x - c.x, p.y - c.y))) / diag
+    );
+    const avgCornerDist = cornerDists.reduce((a, b) => a + b, 0) / 4;
+    const minCornerDist = Math.min(...cornerDists);
+    const cornersReached = cornerDists.filter((d) => d < 0.11).length;
 
-    const diamondCorners: Point[] = [
-      { x: cx, y: by },
-      { x: bx + bw, y: cy },
-      { x: cx, y: by + bh },
-      { x: bx, y: cy },
-    ];
+    for (const p of points) {
+      const u = Math.abs(p.x - cx) / rx;
+      const v = Math.abs(p.y - cy) / ry;
 
-    for (const rc of rectCorners) {
-      let minDist = Infinity;
-      for (const p of points) {
-        minDist = Math.min(minDist, Math.hypot(p.x - rc.x, p.y - rc.y));
+      // L_inf norm: distance to rectangle perimeter
+      const dRect = Math.max(u, v);
+      rectErrSum += Math.abs(dRect - 1);
+
+      // L_2 norm: distance to ellipse/circle perimeter
+      const dEllipse = Math.hypot(u, v);
+      ellipseErrSum += Math.abs(dEllipse - 1);
+      ellipseDists.push(dEllipse);
+      if (dEllipse > maxHypot) {
+        maxHypot = dEllipse;
       }
-      rectCornerDistSum += minDist;
+
+      // L_1 norm: distance to diamond perimeter
+      const dDiamond = u + v;
+      diamondErrSum += Math.abs(dDiamond - 1);
+
+      // Distance to 4 bounding box edges
+      const distToSides =
+        Math.min(
+          Math.abs(p.x - bx),
+          Math.abs(p.x - (bx + bw)),
+          Math.abs(p.y - by),
+          Math.abs(p.y - (by + bh))
+        ) / Math.min(bw, bh);
+      boxEdgeDistSum += distToSides;
     }
 
-    for (const dc of diamondCorners) {
-      let minDist = Infinity;
-      for (const p of points) {
-        minDist = Math.min(minDist, Math.hypot(p.x - dc.x, p.y - dc.y));
-      }
-      diamondCornerDistSum += minDist;
+    const n = points.length;
+    const rectErr = rectErrSum / n;
+    const ellipseErr = ellipseErrSum / n;
+    const diamondErr = diamondErrSum / n;
+    const boxEdgeDistAvg = boxEdgeDistSum / n;
+
+    const meanEllipseDist = ellipseDists.reduce((a, b) => a + b, 0) / n;
+    let ellipseVariance = 0;
+    for (const d of ellipseDists) {
+      ellipseVariance += (d - meanEllipseDist) * (d - meanEllipseDist);
     }
+    const stdDevEllipse = Math.sqrt(ellipseVariance / n);
 
-    const diag = Math.hypot(bw, bh);
-    const normRectDist = rectCornerDistSum / (4 * diag);
-    const normDiamondDist = diamondCornerDistSum / (4 * diag);
-
-    // 4. Triangle perimeter fit
+    // Triangle perimeter fit
     const candidateTriangles: [Point, Point, Point][] = [
       // Upright
       [{ x: cx, y: by }, { x: bx + bw, y: by + bh }, { x: bx, y: by + bh }],
@@ -320,33 +329,25 @@ export class ShapeRecognizer {
       [{ x: bx, y: cy }, { x: bx + bw, y: by }, { x: bx + bw, y: by + bh }],
     ];
 
-    if (cornerCount === 3 && simplified.length >= 4) {
-      candidateTriangles.push([simplified[0], simplified[1], simplified[2]]);
-    }
-
     let bestTriangleNormDist = Infinity;
     for (const [t1, t2, t3] of candidateTriangles) {
       let distSum = 0;
       for (const p of points) {
         distSum += this.distToTriangle(p, t1, t2, t3);
       }
-      const normDist = distSum / (points.length * diag);
+      const normDist = distSum / (n * diag);
       if (normDist < bestTriangleNormDist) {
         bestTriangleNormDist = normDist;
       }
     }
 
-    const aspectRatio = bw / bh;
-
-    // Classification Logic:
-
-    // A. Triangle: 3 corners or good triangle fit, area ratio roughly 0.28-0.68
+    // 1. Triangle
     if (
       areaRatio >= 0.28 &&
-      areaRatio <= 0.68 &&
+      areaRatio <= 0.65 &&
       bestTriangleNormDist < 0.14 &&
-      bestTriangleNormDist < normDiamondDist &&
-      bestTriangleNormDist < normRectDist
+      bestTriangleNormDist < diamondErr &&
+      bestTriangleNormDist < rectErr
     ) {
       const confidence = Math.max(
         0.75,
@@ -355,65 +356,91 @@ export class ShapeRecognizer {
       return { shape: "triangle", confidence, bounds };
     }
 
-    // B. Diamond: area ratio around 0.42 - 0.68, diamond midpoints matched better than corners/triangle
-    if (
-      areaRatio < 0.68 &&
-      normDiamondDist < normRectDist &&
-      normDiamondDist <= bestTriangleNormDist &&
-      normDiamondDist < 0.22
-    ) {
+    // 2. Diamond:
+    // A diamond has area ratio around 0.40 - 0.58, minimal diamondErr, corners of bounding box are empty,
+    // and points never reach into the corner quadrants (maxHypot < 1.15).
+    const isDiamond =
+      areaRatio <= 0.58 &&
+      areaRatio >= 0.35 &&
+      diamondErr < 0.18 &&
+      diamondErr < ellipseErr &&
+      diamondErr < rectErr &&
+      maxHypot < 1.15 &&
+      avgCornerDist >= 0.18 &&
+      cornersReached === 0;
+
+    if (isDiamond) {
       const confidence = Math.max(
-        0.7,
-        Math.min(0.96, 1.0 - Math.abs(areaRatio - 0.5) - normDiamondDist)
+        0.75,
+        Math.min(0.98, 1.0 - Math.abs(areaRatio - 0.5) - diamondErr)
       );
       return { shape: "diamond", confidence, bounds };
     }
 
-    // C. Circle / Ellipse: low standard deviation from ellipse radial equation and area ratio ~0.78
-    if (stdDev < 0.16 && areaRatio >= 0.65 && areaRatio <= 0.88) {
-      const isCircle = aspectRatio >= 0.72 && aspectRatio <= 1.38;
+    // 3. Circle / Ellipse:
+    // Low ellipse radial deviation, low ellipseErr, maxHypot < 1.18 (points cannot exceed radius),
+    // corners are not filled (avgCornerDist >= 0.12), and points curve away from bounding box edges.
+    const isSquareAspect = aspectRatio >= 0.75 && aspectRatio <= 1.33;
+    const isEllipse =
+      !isDiamond &&
+      stdDevEllipse < 0.14 &&
+      ellipseErr < 0.15 &&
+      ellipseErr < rectErr &&
+      maxHypot < 1.18 &&
+      areaRatio >= 0.60 &&
+      areaRatio <= 0.88 &&
+      cornersReached < 2 &&
+      avgCornerDist >= 0.10;
+
+    if (isEllipse) {
+      const isCircle = isSquareAspect;
       const aspectDiff = Math.abs(aspectRatio - 1.0);
       const confidence = Math.max(
         0.75,
         Math.min(
           0.98,
-          1.0 - stdDev * 2 - Math.abs(areaRatio - 0.785) - (isCircle ? aspectDiff * 0.08 : 0)
+          1.0 - stdDevEllipse * 2 - Math.abs(areaRatio - 0.785) - (isCircle ? aspectDiff * 0.08 : 0)
         )
       );
       return { shape: isCircle ? "circle" : "ellipse", confidence, bounds };
     }
 
-    // D. Rectangle: area ratio >= 0.70, rect corners matched well
-    if (areaRatio >= 0.70 && normRectDist < 0.20 && normRectDist <= normDiamondDist) {
+    // 4. Rectangle / Square:
+    // Handdrawn boxes and squares occupy the bounding box perimeter (high area ratio >= 0.65,
+    // corner reach in multiple quadrants, maxHypot reaching >= 1.18 at corners, or low boxEdgeDistAvg).
+    const isSquare = isSquareAspect;
+    const isRectangular =
+      !isDiamond &&
+      !isEllipse &&
+      (areaRatio >= 0.65 ||
+        cornersReached >= 2 ||
+        maxHypot >= 1.18 ||
+        rectErr <= ellipseErr ||
+        boxEdgeDistAvg <= 0.08 ||
+        rectErr < 0.25);
+
+    if (isRectangular) {
       const confidence = Math.max(
         0.75,
-        Math.min(0.98, 1.0 - normRectDist * 2)
+        Math.min(0.98, 1.0 - Math.min(rectErr, boxEdgeDistAvg) * 1.5)
       );
-      return { shape: "rectangle", confidence, bounds };
+      return { shape: isSquare ? "square" : "rectangle", confidence, bounds };
     }
 
-    // Secondary checks based on corner count & fits
-    if (cornerCount === 3 && bestTriangleNormDist < 0.18) {
-      return { shape: "triangle", confidence: 0.75, bounds };
+    // Fallbacks
+    if (bestTriangleNormDist < rectErr && bestTriangleNormDist < diamondErr) {
+      return { shape: "triangle", confidence: 0.70, bounds };
     }
 
-    if (cornerCount >= 4 && cornerCount <= 6) {
-      if (normDiamondDist < normRectDist && normDiamondDist < bestTriangleNormDist) {
-        return { shape: "diamond", confidence: 0.72, bounds };
-      }
-      return { shape: "rectangle", confidence: 0.75, bounds };
+    if (diamondErr < rectErr && diamondErr < ellipseErr && areaRatio <= 0.58 && avgCornerDist >= 0.18) {
+      return { shape: "diamond", confidence: 0.70, bounds };
     }
 
-    if (stdDev < 0.22) {
-      const isCircle = aspectRatio >= 0.72 && aspectRatio <= 1.38;
-      return { shape: isCircle ? "circle" : "ellipse", confidence: 0.68, bounds };
+    if (stdDevEllipse < 0.14 && ellipseErr < rectErr && maxHypot < 1.18) {
+      return { shape: isSquareAspect ? "circle" : "ellipse", confidence: 0.70, bounds };
     }
 
-    if (bestTriangleNormDist < normDiamondDist && bestTriangleNormDist < normRectDist) {
-      return { shape: "triangle", confidence: 0.68, bounds };
-    }
-
-    return { shape: "rectangle", confidence: 0.65, bounds };
+    return { shape: isSquare ? "square" : "rectangle", confidence: 0.75, bounds };
   }
 
   private distToSegment(p: Point, v: Point, w: Point): number {

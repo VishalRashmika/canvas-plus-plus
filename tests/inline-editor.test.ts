@@ -3,6 +3,7 @@ import { createDiagram } from "../src/domain/entities/Diagram";
 import { SvgSceneRenderer } from "../src/presentation/renderer/SvgSceneRenderer";
 import { DiagramNode } from "../src/domain/entities/DiagramNode";
 import { Group } from "../src/domain/entities/Group";
+import { defaultSvgExporter } from "../src/infrastructure/export/SvgExporter";
 
 // Mock DOM element for headless Node / Jest environment
 class MockElement {
@@ -167,6 +168,8 @@ class MockElement {
   }
   set textContent(val: string) {
     this._textContent = val;
+    this.children.forEach((c) => (c.parentElement = null));
+    this.children = [];
   }
 
   querySelector(selector: string): MockElement | null {
@@ -728,6 +731,154 @@ describe("Native Obsidian Canvas Inline Node Name Editing", () => {
       });
 
       expect(renderer.activeInlineEditor).toBeNull();
+    });
+  });
+
+  describe("Larger Font Handling and Multiline Editing in Nodes", () => {
+    it("should calculate bounds height that scales with larger font sizes without clipping", () => {
+      // Default font size (13px)
+      const boundsDefault = renderer.getNodeInPlaceEditorBounds(rectNode);
+      expect(boundsDefault.height).toBe(26);
+
+      // 24px font: lineHeight = 32, contentHeight = 40
+      editor.setNodeFont(rectNode.id, { fontSize: 24 });
+      const bounds24 = renderer.getNodeInPlaceEditorBounds(rectNode);
+      expect(bounds24.height).toBe(40);
+      expect(bounds24.height).toBeGreaterThan(24);
+
+      // 32px font: lineHeight = 43, contentHeight = 51
+      editor.setNodeFont(rectNode.id, { fontSize: 32 });
+      const bounds32 = renderer.getNodeInPlaceEditorBounds(rectNode);
+      expect(bounds32.height).toBe(51);
+
+      // 48px font: lineHeight = 65, contentHeight = 73
+      editor.setNodeFont(rectNode.id, { fontSize: 48 });
+      const bounds48 = renderer.getNodeInPlaceEditorBounds(rectNode);
+      expect(bounds48.height).toBe(73);
+    });
+
+    it("should apply scaled font size, line-height, and min-height to inline editor textarea", () => {
+      editor.setNodeFont(rectNode.id, { fontSize: 28 });
+      renderer.startInlineEditor(rectNode);
+
+      const activeEditor = renderer.activeInlineEditor as unknown as MockElement;
+      expect(activeEditor).not.toBeNull();
+      expect(activeEditor.style.fontSize).toBe("28px");
+      expect(activeEditor.style.lineHeight).toBe("38px"); // Math.round(28 * 1.35) = 38
+      expect(activeEditor.style.height).toBe("46px"); // 38 + 8 = 46
+
+      renderer.cancelInlineEditor();
+    });
+
+    it("should dynamically scale inline editor bounds and height when editing multiline text", () => {
+      editor.setNodeFont(rectNode.id, { fontSize: 20 });
+      // Single line height: Math.round(20 * 1.35) + 8 = 35
+      const singleBounds = renderer.getNodeInPlaceEditorBounds(rectNode, "Single line");
+      expect(singleBounds.height).toBe(35);
+
+      // 3 lines height: 3 * 27 + 8 = 89
+      const multiBounds = renderer.getNodeInPlaceEditorBounds(
+        rectNode,
+        "Line 1\nLine 2\nLine 3"
+      );
+      expect(multiBounds.height).toBe(89);
+
+      // Start inline editor
+      renderer.startInlineEditor(rectNode);
+      const activeEditor = renderer.activeInlineEditor as unknown as MockElement;
+
+      // Simulate typing multiple lines and dispatching input event
+      activeEditor.value = "Line 1\nLine 2\nLine 3\nLine 4";
+      activeEditor.dispatch("input");
+
+      // Verify that the editor height was updated to accommodate 4 lines
+      const expectedHeight = 4 * Math.round(20 * 1.35) + 8;
+      expect(activeEditor.style.height).toBe(`${expectedHeight}px`);
+
+      renderer.cancelInlineEditor();
+    });
+
+    it("should auto-expand node height on commit if multiline text or larger font exceeds node dimensions", () => {
+      const initialHeight = 50;
+      rectNode.size = { width: 140, height: initialHeight };
+      editor.setNodeFont(rectNode.id, { fontSize: 24 }); // lineHeight = 32
+
+      renderer.startInlineEditor(rectNode);
+      const activeEditor = renderer.activeInlineEditor as unknown as MockElement;
+      activeEditor.value = "Heading\nSubheading\nLine 3\nLine 4";
+
+      // Commit with Enter
+      activeEditor.dispatch("keydown", { key: "Enter", shiftKey: false });
+
+      // Node text should preserve all line breaks
+      expect(rectNode.labels[0].text).toBe("Heading\nSubheading\nLine 3\nLine 4");
+      // Node height should have auto-expanded to fit all 4 lines plus padding
+      expect(rectNode.size.height).toBeGreaterThan(initialHeight);
+      expect(rectNode.size.height).toBeGreaterThanOrEqual(4 * 32 + 28);
+    });
+
+    it("should render multiline text as <tspan> elements preserving line breaks in SVG scene", () => {
+      rectNode.labels[0].text = "First Line\nSecond Line\nThird Line";
+      renderer.render();
+
+      const nodeEl = container.querySelector(`[data-node-id="${rectNode.id}"]`);
+      expect(nodeEl).not.toBeNull();
+
+      const titleEl = nodeEl?.querySelector(".umlcanvas-node-title");
+      expect(titleEl).not.toBeNull();
+
+      const tspans = titleEl?.querySelectorAll("tspan") ?? [];
+      expect(tspans.length).toBe(3);
+      expect(tspans[0].textContent).toBe("First Line");
+      expect(tspans[0].getAttribute("x")).toBe(String(rectNode.size.width / 2));
+      expect(tspans[0].getAttribute("y")).not.toBeNull();
+
+      expect(tspans[1].textContent).toBe("Second Line");
+      expect(tspans[1].getAttribute("x")).toBe(String(rectNode.size.width / 2));
+      expect(tspans[1].getAttribute("y")).not.toBeNull();
+
+      expect(tspans[2].textContent).toBe("Third Line");
+      expect(tspans[2].getAttribute("x")).toBe(String(rectNode.size.width / 2));
+      expect(tspans[2].getAttribute("y")).not.toBeNull();
+    });
+
+    it("should render multiline UML class names with <tspan> elements", () => {
+      classNode.labels[0].text = "PaymentService\n<<External>>";
+      renderer.render();
+
+      const nodeEl = container.querySelector(`[data-node-id="${classNode.id}"]`);
+      expect(nodeEl).not.toBeNull();
+
+      const titleEl = nodeEl?.querySelector(".umlcanvas-class-title");
+      expect(titleEl).not.toBeNull();
+
+      const tspans = titleEl?.querySelectorAll("tspan") ?? [];
+      expect(tspans.length).toBe(2);
+      expect(tspans[0].textContent).toBe("PaymentService");
+      expect(tspans[1].textContent).toBe("<<External>>");
+    });
+
+    it("should preserve empty lines in multiline text so vertical rhythm is maintained", () => {
+      rectNode.labels[0].text = "First Line\n\nThird Line";
+      renderer.render();
+
+      const nodeEl = container.querySelector(`[data-node-id="${rectNode.id}"]`);
+      const titleEl = nodeEl?.querySelector(".umlcanvas-node-title");
+      const tspans = titleEl?.querySelectorAll("tspan") ?? [];
+
+      expect(tspans.length).toBe(3);
+      expect(tspans[0].textContent).toBe("First Line");
+      expect(tspans[1].textContent).toBe(" "); // Non-empty whitespace fallback
+      expect(tspans[2].textContent).toBe("Third Line");
+    });
+
+    it("should render multiline <tspan> elements in exported SVG", () => {
+      rectNode.labels[0].text = "Export Line 1\nExport Line 2";
+      const svg = defaultSvgExporter.exportToSvg(editor.diagram);
+
+      expect(svg).toContain("<tspan");
+      expect(svg).toContain("Export Line 1");
+      expect(svg).toContain("Export Line 2");
     });
   });
 });

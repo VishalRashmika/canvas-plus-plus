@@ -8,21 +8,21 @@ export interface CanvasColorPreset {
 }
 
 export const CANVAS_LIGHT_COLOR_PRESETS: Record<CanvasColorPresetId, string> = {
-  "1": "#c92a3e", // Pastel Rose (crisp & high-contrast on off-white)
-  "2": "#c45e00", // Pastel Amber
-  "3": "#a17000", // Pastel Gold (crisp amber-gold on off-white)
-  "4": "#12883f", // Pastel Sage
-  "5": "#0a8288", // Pastel Ocean Teal
-  "6": "#6340c7", // Pastel Lavender Violet
+  "1": "#ff758f", // Light Coral Rose
+  "2": "#ffa94d", // Light Peach Orange
+  "3": "#ffd43b", // Light Butter Yellow
+  "4": "#69db7c", // Light Mint Green
+  "5": "#38d9a9", // Light Ocean Teal / Sky
+  "6": "#b197fc", // Light Lavender Violet
 };
 
 export const CANVAS_DARK_COLOR_PRESETS: Record<CanvasColorPresetId, string> = {
-  "1": "#fb464c", // Luminous Red
-  "2": "#e9973f", // Luminous Orange
-  "3": "#e0de71", // Luminous Yellow
-  "4": "#44cf6e", // Luminous Green
-  "5": "#53dfdd", // Luminous Cyan
-  "6": "#a882ff", // Luminous Purple
+  "1": "#ff859b", // Light Luminous Coral
+  "2": "#ffb366", // Light Luminous Peach
+  "3": "#ffe066", // Light Luminous Yellow
+  "4": "#7ee787", // Light Luminous Mint
+  "5": "#67e8f9", // Light Luminous Cyan
+  "6": "#c4a5ff", // Light Luminous Lavender
 };
 
 /**
@@ -30,12 +30,12 @@ export const CANVAS_DARK_COLOR_PRESETS: Record<CanvasColorPresetId, string> = {
  * Mapped to native Obsidian Canvas CSS variables: --canvas-color-1 through --canvas-color-6.
  */
 export const CANVAS_COLOR_PRESETS: CanvasColorPreset[] = [
-  { id: "1", label: "Red", hex: "#fb464c", cssVar: "var(--canvas-color-1, #fb464c)" },
-  { id: "2", label: "Orange", hex: "#e9973f", cssVar: "var(--canvas-color-2, #e9973f)" },
-  { id: "3", label: "Yellow", hex: "#e0de71", cssVar: "var(--canvas-color-3, #e0de71)" },
-  { id: "4", label: "Green", hex: "#44cf6e", cssVar: "var(--canvas-color-4, #44cf6e)" },
-  { id: "5", label: "Cyan", hex: "#53dfdd", cssVar: "var(--canvas-color-5, #53dfdd)" },
-  { id: "6", label: "Purple", hex: "#a882ff", cssVar: "var(--canvas-color-6, #a882ff)" },
+  { id: "1", label: "Red", hex: "#ff758f", cssVar: "var(--canvas-color-1, #ff758f)" },
+  { id: "2", label: "Orange", hex: "#ffa94d", cssVar: "var(--canvas-color-2, #ffa94d)" },
+  { id: "3", label: "Yellow", hex: "#ffd43b", cssVar: "var(--canvas-color-3, #ffd43b)" },
+  { id: "4", label: "Green", hex: "#69db7c", cssVar: "var(--canvas-color-4, #69db7c)" },
+  { id: "5", label: "Cyan", hex: "#38d9a9", cssVar: "var(--canvas-color-5, #38d9a9)" },
+  { id: "6", label: "Purple", hex: "#b197fc", cssVar: "var(--canvas-color-6, #b197fc)" },
 ];
 
 export function isCanvasColorPreset(color?: string): color is CanvasColorPresetId {

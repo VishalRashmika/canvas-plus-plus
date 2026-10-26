@@ -11,6 +11,12 @@ export interface NodeStyle {
   strokeWidth?: number;
   cornerRadius?: number;
   color?: string;
+  fontSize?: number;
+  bold?: boolean;
+  italic?: boolean;
+  fontWeight?: string | number;
+  fontStyle?: "normal" | "italic";
+  fontFamily?: string;
 }
 
 /**

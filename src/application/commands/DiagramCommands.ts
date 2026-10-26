@@ -1,7 +1,7 @@
 import { Diagram } from "../../domain/entities/Diagram";
 import { DiagramNode } from "../../domain/entities/DiagramNode";
-import { DiagramEdge } from "../../domain/entities/DiagramEdge";
-import { Label } from "../../domain/entities/Label";
+import { DiagramEdge, EdgeStyle } from "../../domain/entities/DiagramEdge";
+import { Label, TextStyle } from "../../domain/entities/Label";
 import { Layer } from "../../domain/entities/Layer";
 import { Group, createGroup } from "../../domain/entities/Group";
 import { Port } from "../../domain/entities/Port";
@@ -18,9 +18,12 @@ import {
 } from "../../domain/services/SequenceLayoutEngine";
 import { ChipInterfaceDefinition } from "../../domain/entities/ChipInterfaceDefinition";
 import { defaultChipService } from "../../domain/services/ChipService";
+import { getNodeFontStyle } from "../../presentation/theme/Typography";
+import { wrapTextToLines } from "../../domain/services/TextMeasurement";
 
 export class AddNodeCommand implements Command {
   readonly description = "Add node";
+  private addedToGroupId?: string;
 
   constructor(
     private readonly diagram: Diagram,
@@ -31,12 +34,40 @@ export class AddNodeCommand implements Command {
     if (!this.diagram.nodes.some((n) => n.id === this.node.id)) {
       this.diagram.nodes.push(this.node);
     }
+
+    // Check if newly added node is placed inside an existing expanded group
+    const nodeCenter = center(rect(this.node.position, this.node.size));
+    let targetGroup: Group | null = null;
+    let minArea = Infinity;
+
+    for (const group of this.diagram.groups) {
+      if (group.collapsed || group.locked) continue;
+      const bounds = computeGroupBounds(this.diagram, group);
+      if (contains(bounds, nodeCenter) || contains(bounds, this.node.position)) {
+        const area = bounds.size.width * bounds.size.height;
+        if (area < minArea) {
+          minArea = area;
+          targetGroup = group;
+        }
+      }
+    }
+
+    if (targetGroup && !targetGroup.nodeIds.includes(this.node.id)) {
+      targetGroup.nodeIds.push(this.node.id);
+      this.addedToGroupId = targetGroup.id;
+    }
   }
 
   undo(): void {
     const idx = this.diagram.nodes.findIndex((n) => n.id === this.node.id);
     if (idx !== -1) {
       this.diagram.nodes.splice(idx, 1);
+    }
+    if (this.addedToGroupId) {
+      const group = this.diagram.groups.find((g) => g.id === this.addedToGroupId);
+      if (group) {
+        group.nodeIds = group.nodeIds.filter((id) => id !== this.node.id);
+      }
     }
   }
 }
@@ -129,7 +160,7 @@ export function computeGroupBounds(
     minX = Math.min(minX, pos.x);
     minY = Math.min(minY, pos.y);
     maxX = Math.max(maxX, pos.x + node.size.width);
-    maxY = Math.max(maxY, node.position.y + node.size.height);
+    maxY = Math.max(maxY, pos.y + node.size.height);
   }
 
   if (!isFinite(minX)) {
@@ -147,6 +178,7 @@ export function computeGroupBounds(
 export class MoveNodesCommand implements Command {
   readonly description = "Move nodes";
   private removedGroupMemberships: { groupId: string; nodeId: string }[] = [];
+  private addedGroupMemberships: { groupId: string; nodeId: string }[] = [];
 
   constructor(
     private readonly diagram: Diagram,
@@ -168,27 +200,56 @@ export class MoveNodesCommand implements Command {
       }
     }
 
-    // 3. Remove nodes moved outside their group boundary
+    // 3. Update group memberships
     this.removedGroupMemberships = [];
+    this.addedGroupMemberships = [];
+
     for (const move of this.moves) {
       const node = this.diagram.nodes.find((n) => n.id === move.nodeId);
       if (!node) continue;
 
       const nodeCenter = center(rect(node.position, node.size));
 
-      for (const group of this.diagram.groups) {
-        if (!group.nodeIds.includes(node.id)) continue;
+      // Find target group containing this node (choose smallest area if nested)
+      let targetGroup: Group | null = null;
+      let minArea = Infinity;
 
+      for (const group of this.diagram.groups) {
+        if (group.collapsed || group.locked) continue;
         const bounds = groupBoundsMap.get(group.id);
         if (!bounds) continue;
 
-        if (!contains(bounds, nodeCenter)) {
-          group.nodeIds = group.nodeIds.filter((id) => id !== node.id);
-          this.removedGroupMemberships.push({
-            groupId: group.id,
-            nodeId: node.id,
-          });
+        if (contains(bounds, nodeCenter) || contains(bounds, node.position)) {
+          const area = bounds.size.width * bounds.size.height;
+          if (area < minArea) {
+            minArea = area;
+            targetGroup = group;
+          }
         }
+      }
+
+      // Check current memberships: remove from groups if no longer inside or if moved to a different targetGroup
+      for (const group of this.diagram.groups) {
+        if (group.nodeIds.includes(node.id)) {
+          const bounds = groupBoundsMap.get(group.id);
+          const stillInside = bounds && (contains(bounds, nodeCenter) || contains(bounds, node.position));
+          if (!stillInside || (targetGroup && targetGroup.id !== group.id)) {
+            group.nodeIds = group.nodeIds.filter((id) => id !== node.id);
+            this.removedGroupMemberships.push({
+              groupId: group.id,
+              nodeId: node.id,
+            });
+          }
+        }
+      }
+
+      // Add to targetGroup if found and not already present
+      if (targetGroup && !targetGroup.nodeIds.includes(node.id)) {
+        targetGroup.nodeIds.push(node.id);
+        this.addedGroupMemberships.push({
+          groupId: targetGroup.id,
+          nodeId: node.id,
+        });
       }
     }
   }
@@ -209,12 +270,20 @@ export class MoveNodesCommand implements Command {
         group.nodeIds.push(nodeId);
       }
     }
+
+    for (const { groupId, nodeId } of this.addedGroupMemberships) {
+      const group = this.diagram.groups.find((g) => g.id === groupId);
+      if (group) {
+        group.nodeIds = group.nodeIds.filter((id) => id !== nodeId);
+      }
+    }
   }
 }
 
 export interface NodeGeometry {
   position: Point;
   size: Size;
+  customData?: Record<string, unknown>;
 }
 
 export class ResizeNodeCommand implements Command {
@@ -232,6 +301,9 @@ export class ResizeNodeCommand implements Command {
     if (node) {
       node.position = { ...this.newGeometry.position };
       node.size = { ...this.newGeometry.size };
+      if (this.newGeometry.customData) {
+        node.customData = JSON.parse(JSON.stringify(this.newGeometry.customData));
+      }
     }
   }
 
@@ -240,6 +312,9 @@ export class ResizeNodeCommand implements Command {
     if (node) {
       node.position = { ...this.oldGeometry.position };
       node.size = { ...this.oldGeometry.size };
+      if (this.oldGeometry.customData) {
+        node.customData = JSON.parse(JSON.stringify(this.oldGeometry.customData));
+      }
     }
   }
 }
@@ -296,6 +371,7 @@ export class UpdateNodeLabelCommand implements Command {
 
   private oldLabels: Label[] = [];
   private newLabels: Label[] = [];
+  private oldSize?: Size;
 
   constructor(
     private readonly diagram: Diagram,
@@ -309,6 +385,7 @@ export class UpdateNodeLabelCommand implements Command {
     if (!node) return;
 
     this.oldLabels = node.labels.map((l) => ({ ...l }));
+    this.oldSize = { ...node.size };
 
     const updatedLabels = [...node.labels];
     if (updatedLabels[this.labelIndex]) {
@@ -327,12 +404,32 @@ export class UpdateNodeLabelCommand implements Command {
 
     node.labels = updatedLabels;
     this.newLabels = updatedLabels;
+
+    if (node.kind === "generic.stickyNote" || node.kind === "generic.note") {
+      const nodeFont = getNodeFontStyle(node);
+      const fontSize = nodeFont.fontSize ?? (node.kind === "generic.note" ? 11 : 13);
+      const boldMultiplier = nodeFont.bold ? 1.1 : 1.0;
+      const charWidth = Math.max(5, fontSize * 0.58 * boldMultiplier);
+      const availableW = Math.max(40, node.size.width - (node.kind === "generic.stickyNote" ? 24 : 20));
+      const wrapped = wrapTextToLines(this.newText, availableW, charWidth);
+      const topOffset = node.kind === "generic.stickyNote" ? (26 + fontSize) : (14 + fontSize);
+      const neededH = topOffset + Math.max(1, wrapped.length) * Math.round(fontSize * 1.38) + 12;
+      if (neededH > node.size.height) {
+        node.size = {
+          width: node.size.width,
+          height: Math.round(neededH),
+        };
+      }
+    }
   }
 
   undo(): void {
     const node = this.diagram.nodes.find((n) => n.id === this.nodeId);
     if (node) {
       node.labels = this.oldLabels.map((l) => ({ ...l }));
+      if (this.oldSize) {
+        node.size = { ...this.oldSize };
+      }
     }
   }
 }
@@ -434,6 +531,7 @@ export class MoveGroupCommand implements Command {
   readonly description = "Move group";
   private oldNodePositions: Map<string, Point> = new Map();
   private oldGroupPosition?: Point;
+  private autoAddedNodeIds: string[] = [];
 
   constructor(
     private readonly diagram: Diagram,
@@ -442,6 +540,30 @@ export class MoveGroupCommand implements Command {
   ) {
     const group = this.diagram.groups.find((g) => g.id === this.groupId);
     if (group) {
+      // Auto-include any nodes located within group boundary that are not yet in nodeIds
+      if (group.position && group.size) {
+        const groupBounds = rect(group.position, group.size);
+        for (const node of this.diagram.nodes) {
+          const nodeCenter = center(rect(node.position, node.size));
+          if (contains(groupBounds, nodeCenter) || contains(groupBounds, node.position)) {
+            if (!group.nodeIds.includes(node.id)) {
+              const otherSmallerGroup = this.diagram.groups.find(
+                (og) =>
+                  og.id !== group.id &&
+                  og.position &&
+                  og.size &&
+                  (contains(rect(og.position, og.size), nodeCenter) || contains(rect(og.position, og.size), node.position)) &&
+                  og.size.width * og.size.height < group.size!.width * group.size!.height
+              );
+              if (!otherSmallerGroup) {
+                group.nodeIds.push(node.id);
+                this.autoAddedNodeIds.push(node.id);
+              }
+            }
+          }
+        }
+      }
+
       this.oldGroupPosition = group.position ? { ...group.position } : undefined;
       for (const nid of group.nodeIds) {
         const node = this.diagram.nodes.find((n) => n.id === nid);
@@ -455,6 +577,12 @@ export class MoveGroupCommand implements Command {
   execute(): void {
     const group = this.diagram.groups.find((g) => g.id === this.groupId);
     if (!group) return;
+
+    for (const nid of this.autoAddedNodeIds) {
+      if (!group.nodeIds.includes(nid)) {
+        group.nodeIds.push(nid);
+      }
+    }
 
     if (group.position) {
       group.position = {
@@ -478,6 +606,9 @@ export class MoveGroupCommand implements Command {
     const group = this.diagram.groups.find((g) => g.id === this.groupId);
     if (group) {
       group.position = this.oldGroupPosition ? { ...this.oldGroupPosition } : undefined;
+      if (this.autoAddedNodeIds.length > 0) {
+        group.nodeIds = group.nodeIds.filter((id) => !this.autoAddedNodeIds.includes(id));
+      }
     }
 
     for (const [nid, oldPos] of this.oldNodePositions) {
@@ -493,24 +624,47 @@ export class ResizeGroupCommand implements Command {
   readonly description = "Resize group";
   private oldPosition?: Point;
   private oldSize?: Size;
+  private oldNodeIds?: string[];
 
   constructor(
     private readonly group: Group,
     private readonly newPosition: Point,
-    private readonly newSize: Size
+    private readonly newSize: Size,
+    private readonly diagram?: Diagram
   ) {
     this.oldPosition = group.position ? { ...group.position } : undefined;
     this.oldSize = group.size ? { ...group.size } : undefined;
+    this.oldNodeIds = [...group.nodeIds];
   }
 
   execute(): void {
     this.group.position = { ...this.newPosition };
     this.group.size = { ...this.newSize };
+    if (this.diagram) {
+      const groupBounds = rect(this.newPosition, this.newSize);
+      this.group.nodeIds = this.group.nodeIds.filter((nid) => {
+        const n = this.diagram!.nodes.find((node) => node.id === nid);
+        if (!n) return false;
+        const nCenter = center(rect(n.position, n.size));
+        return contains(groupBounds, nCenter) || contains(groupBounds, n.position);
+      });
+      for (const n of this.diagram.nodes) {
+        const nCenter = center(rect(n.position, n.size));
+        if (contains(groupBounds, nCenter) || contains(groupBounds, n.position)) {
+          if (!this.group.nodeIds.includes(n.id)) {
+            this.group.nodeIds.push(n.id);
+          }
+        }
+      }
+    }
   }
 
   undo(): void {
     this.group.position = this.oldPosition ? { ...this.oldPosition } : undefined;
     this.group.size = this.oldSize ? { ...this.oldSize } : undefined;
+    if (this.oldNodeIds) {
+      this.group.nodeIds = [...this.oldNodeIds];
+    }
   }
 }
 
@@ -1323,6 +1477,386 @@ export class SetColorCommand implements Command {
   }
 }
 
+export interface FontStylePatch {
+  fontSize?: number;
+  bold?: boolean;
+  italic?: boolean;
+  fontWeight?: string | number;
+  fontStyle?: "normal" | "italic";
+  fontFamily?: string;
+  reset?: boolean;
+}
+
+export interface FontTargetItems {
+  nodes?: DiagramNode[];
+  edges?: DiagramEdge[];
+  groups?: Group[];
+}
+
+interface ItemFontSnapshot {
+  fontSize?: number;
+  bold?: boolean;
+  italic?: boolean;
+  fontWeight?: string | number;
+  fontStyle?: "normal" | "italic";
+  fontFamily?: string;
+  labelStyle?: TextStyle;
+  labelStyles?: Array<TextStyle | undefined>;
+  size?: Size;
+}
+
+export class SetFontCommand implements Command {
+  readonly description = "Set font style";
+  private previousNodeFonts: Map<string, ItemFontSnapshot> = new Map();
+  private previousEdgeFonts: Map<string, ItemFontSnapshot> = new Map();
+  private previousGroupFonts: Map<string, ItemFontSnapshot> = new Map();
+
+  constructor(
+    private readonly targets: FontTargetItems,
+    private readonly patch: FontStylePatch
+  ) {
+    if (targets.nodes) {
+      for (const node of targets.nodes) {
+        this.previousNodeFonts.set(node.id, {
+          fontSize: node.style?.fontSize,
+          bold: node.style?.bold,
+          italic: node.style?.italic,
+          fontWeight: node.style?.fontWeight,
+          fontStyle: node.style?.fontStyle,
+          fontFamily: node.style?.fontFamily,
+          labelStyle: node.labels?.[0]?.style ? { ...node.labels[0].style } : undefined,
+          labelStyles: node.labels?.map((l) => (l.style ? { ...l.style } : undefined)),
+          size: { ...node.size },
+        });
+      }
+    }
+    if (targets.edges) {
+      for (const edge of targets.edges) {
+        this.previousEdgeFonts.set(edge.id, {
+          fontSize: edge.style?.fontSize,
+          bold: edge.style?.bold,
+          italic: edge.style?.italic,
+          fontWeight: edge.style?.fontWeight,
+          fontStyle: edge.style?.fontStyle,
+          fontFamily: edge.style?.fontFamily,
+          labelStyle: edge.labels?.[0]?.style ? { ...edge.labels[0].style } : undefined,
+          labelStyles: edge.labels?.map((l) => (l.style ? { ...l.style } : undefined)),
+        });
+      }
+    }
+    if (targets.groups) {
+      for (const group of targets.groups) {
+        const g = group as any;
+        this.previousGroupFonts.set(group.id, {
+          fontSize: g.fontSize ?? g.style?.fontSize,
+          bold: g.bold ?? g.style?.bold,
+          italic: g.italic ?? g.style?.italic,
+          fontWeight: g.fontWeight ?? g.style?.fontWeight,
+          fontStyle: g.fontStyle ?? g.style?.fontStyle,
+          fontFamily: g.fontFamily ?? g.style?.fontFamily,
+          labelStyle: g.style ? { ...g.style } : undefined,
+        });
+      }
+    }
+  }
+
+  execute(): void {
+    if (this.targets.nodes) {
+      for (const node of this.targets.nodes) {
+        if (!node.style) {
+          node.style = {};
+        }
+        if (this.patch.reset) {
+          delete node.style.fontSize;
+          delete node.style.bold;
+          delete node.style.italic;
+          delete node.style.fontWeight;
+          delete node.style.fontStyle;
+          delete node.style.fontFamily;
+          for (const label of node.labels ?? []) {
+            if (label.style) {
+              delete label.style.fontSize;
+              delete label.style.bold;
+              delete label.style.italic;
+              delete label.style.fontWeight;
+              delete label.style.fontStyle;
+              delete label.style.fontFamily;
+            }
+          }
+        } else {
+          if (this.patch.fontSize !== undefined) {
+            node.style.fontSize = this.patch.fontSize;
+            for (const label of node.labels ?? []) {
+              if (!label.style) label.style = {};
+              label.style.fontSize = this.patch.fontSize;
+            }
+          }
+          if (this.patch.bold !== undefined) {
+            node.style.bold = this.patch.bold;
+            node.style.fontWeight = this.patch.bold ? "bold" : "normal";
+            for (const label of node.labels ?? []) {
+              if (!label.style) label.style = {};
+              label.style.bold = this.patch.bold;
+              label.style.fontWeight = this.patch.bold ? "bold" : "normal";
+            }
+          }
+          if (this.patch.italic !== undefined) {
+            node.style.italic = this.patch.italic;
+            node.style.fontStyle = this.patch.italic ? "italic" : "normal";
+            for (const label of node.labels ?? []) {
+              if (!label.style) label.style = {};
+              label.style.italic = this.patch.italic;
+              label.style.fontStyle = this.patch.italic ? "italic" : "normal";
+            }
+          }
+          if (this.patch.fontWeight !== undefined) {
+            node.style.fontWeight = this.patch.fontWeight;
+            node.style.bold = this.patch.fontWeight === "bold" || this.patch.fontWeight === 700;
+            for (const label of node.labels ?? []) {
+              if (!label.style) label.style = {};
+              label.style.fontWeight = this.patch.fontWeight;
+              label.style.bold = this.patch.fontWeight === "bold" || this.patch.fontWeight === 700;
+            }
+          }
+          if (this.patch.fontStyle !== undefined) {
+            node.style.fontStyle = this.patch.fontStyle;
+            node.style.italic = this.patch.fontStyle === "italic";
+            for (const label of node.labels ?? []) {
+              if (!label.style) label.style = {};
+              label.style.fontStyle = this.patch.fontStyle;
+              label.style.italic = this.patch.fontStyle === "italic";
+            }
+          }
+          if (this.patch.fontFamily !== undefined) {
+            node.style.fontFamily = this.patch.fontFamily;
+            for (const label of node.labels ?? []) {
+              if (!label.style) label.style = {};
+              label.style.fontFamily = this.patch.fontFamily;
+            }
+          }
+        }
+
+        if (node.kind === "generic.stickyNote" || node.kind === "generic.note") {
+          const text = node.labels?.[0]?.text ?? "";
+          if (text) {
+            const nodeFont = getNodeFontStyle(node);
+            const fontSize = nodeFont.fontSize ?? (node.kind === "generic.note" ? 11 : 13);
+            const boldMultiplier = nodeFont.bold ? 1.1 : 1.0;
+            const charWidth = Math.max(5, fontSize * 0.58 * boldMultiplier);
+            const availableW = Math.max(40, node.size.width - (node.kind === "generic.stickyNote" ? 24 : 20));
+            const wrapped = wrapTextToLines(text, availableW, charWidth);
+            const topOffset = node.kind === "generic.stickyNote" ? (26 + fontSize) : (14 + fontSize);
+            const neededH = topOffset + Math.max(1, wrapped.length) * Math.round(fontSize * 1.38) + 12;
+            if (neededH > node.size.height) {
+              node.size = {
+                width: node.size.width,
+                height: Math.round(neededH),
+              };
+            }
+          }
+        }
+      }
+    }
+
+    if (this.targets.edges) {
+      for (const edge of this.targets.edges) {
+        if (!edge.style) {
+          edge.style = {};
+        }
+        if (this.patch.reset) {
+          delete edge.style.fontSize;
+          delete edge.style.bold;
+          delete edge.style.italic;
+          delete edge.style.fontWeight;
+          delete edge.style.fontStyle;
+          delete edge.style.fontFamily;
+          for (const label of edge.labels ?? []) {
+            if (label.style) {
+              delete label.style.fontSize;
+              delete label.style.bold;
+              delete label.style.italic;
+              delete label.style.fontWeight;
+              delete label.style.fontStyle;
+              delete label.style.fontFamily;
+            }
+          }
+        } else {
+          if (this.patch.fontSize !== undefined) {
+            edge.style.fontSize = this.patch.fontSize;
+            for (const label of edge.labels ?? []) {
+              if (!label.style) label.style = {};
+              label.style.fontSize = this.patch.fontSize;
+            }
+          }
+          if (this.patch.bold !== undefined) {
+            edge.style.bold = this.patch.bold;
+            edge.style.fontWeight = this.patch.bold ? "bold" : "normal";
+            for (const label of edge.labels ?? []) {
+              if (!label.style) label.style = {};
+              label.style.bold = this.patch.bold;
+              label.style.fontWeight = this.patch.bold ? "bold" : "normal";
+            }
+          }
+          if (this.patch.italic !== undefined) {
+            edge.style.italic = this.patch.italic;
+            edge.style.fontStyle = this.patch.italic ? "italic" : "normal";
+            for (const label of edge.labels ?? []) {
+              if (!label.style) label.style = {};
+              label.style.italic = this.patch.italic;
+              label.style.fontStyle = this.patch.italic ? "italic" : "normal";
+            }
+          }
+          if (this.patch.fontWeight !== undefined) {
+            edge.style.fontWeight = this.patch.fontWeight;
+            edge.style.bold = this.patch.fontWeight === "bold" || this.patch.fontWeight === 700;
+            for (const label of edge.labels ?? []) {
+              if (!label.style) label.style = {};
+              label.style.fontWeight = this.patch.fontWeight;
+              label.style.bold = this.patch.fontWeight === "bold" || this.patch.fontWeight === 700;
+            }
+          }
+          if (this.patch.fontStyle !== undefined) {
+            edge.style.fontStyle = this.patch.fontStyle;
+            edge.style.italic = this.patch.fontStyle === "italic";
+            for (const label of edge.labels ?? []) {
+              if (!label.style) label.style = {};
+              label.style.fontStyle = this.patch.fontStyle;
+              label.style.italic = this.patch.fontStyle === "italic";
+            }
+          }
+          if (this.patch.fontFamily !== undefined) {
+            edge.style.fontFamily = this.patch.fontFamily;
+            for (const label of edge.labels ?? []) {
+              if (!label.style) label.style = {};
+              label.style.fontFamily = this.patch.fontFamily;
+            }
+          }
+        }
+      }
+    }
+
+    if (this.targets.groups) {
+      for (const group of this.targets.groups) {
+        const g = group as any;
+        if (this.patch.reset) {
+          delete g.fontSize;
+          delete g.bold;
+          delete g.italic;
+          delete g.fontWeight;
+          delete g.fontStyle;
+          delete g.fontFamily;
+          if (g.style) {
+            delete g.style.fontSize;
+            delete g.style.bold;
+            delete g.style.italic;
+            delete g.style.fontFamily;
+          }
+        } else {
+          if (this.patch.fontSize !== undefined) {
+            g.fontSize = this.patch.fontSize;
+            if (!g.style) g.style = {};
+            g.style.fontSize = this.patch.fontSize;
+          }
+          if (this.patch.bold !== undefined) {
+            g.bold = this.patch.bold;
+            g.fontWeight = this.patch.bold ? "bold" : "normal";
+            if (!g.style) g.style = {};
+            g.style.bold = this.patch.bold;
+          }
+          if (this.patch.italic !== undefined) {
+            g.italic = this.patch.italic;
+            g.fontStyle = this.patch.italic ? "italic" : "normal";
+            if (!g.style) g.style = {};
+            g.style.italic = this.patch.italic;
+          }
+          if (this.patch.fontWeight !== undefined) {
+            g.fontWeight = this.patch.fontWeight;
+            g.bold = this.patch.fontWeight === "bold" || this.patch.fontWeight === 700;
+          }
+          if (this.patch.fontStyle !== undefined) {
+            g.fontStyle = this.patch.fontStyle;
+            g.italic = this.patch.fontStyle === "italic";
+          }
+          if (this.patch.fontFamily !== undefined) {
+            g.fontFamily = this.patch.fontFamily;
+            if (!g.style) g.style = {};
+            g.style.fontFamily = this.patch.fontFamily;
+          }
+        }
+      }
+    }
+  }
+
+  undo(): void {
+    if (this.targets.nodes) {
+      for (const node of this.targets.nodes) {
+        const prev = this.previousNodeFonts.get(node.id);
+        if (!node.style) node.style = {};
+        if (!prev) continue;
+        if (prev.fontSize !== undefined) node.style.fontSize = prev.fontSize; else delete node.style.fontSize;
+        if (prev.bold !== undefined) node.style.bold = prev.bold; else delete node.style.bold;
+        if (prev.italic !== undefined) node.style.italic = prev.italic; else delete node.style.italic;
+        if (prev.fontWeight !== undefined) node.style.fontWeight = prev.fontWeight; else delete node.style.fontWeight;
+        if (prev.fontStyle !== undefined) node.style.fontStyle = prev.fontStyle; else delete node.style.fontStyle;
+        if (prev.fontFamily !== undefined) node.style.fontFamily = prev.fontFamily; else delete node.style.fontFamily;
+        if (prev.labelStyles && node.labels) {
+          for (let i = 0; i < node.labels.length; i++) {
+            const ls = prev.labelStyles[i];
+            if (ls) node.labels[i].style = { ...ls };
+            else if (node.labels[i].style) delete node.labels[i].style;
+          }
+        } else if (node.labels?.[0]) {
+          if (prev.labelStyle) node.labels[0].style = { ...prev.labelStyle };
+          else if (node.labels[0].style) delete node.labels[0].style;
+        }
+        if (prev.size) {
+          node.size = { ...prev.size };
+        }
+      }
+    }
+
+    if (this.targets.edges) {
+      for (const edge of this.targets.edges) {
+        const prev = this.previousEdgeFonts.get(edge.id);
+        if (!edge.style) edge.style = {};
+        if (!prev) continue;
+        if (prev.fontSize !== undefined) edge.style.fontSize = prev.fontSize; else delete edge.style.fontSize;
+        if (prev.bold !== undefined) edge.style.bold = prev.bold; else delete edge.style.bold;
+        if (prev.italic !== undefined) edge.style.italic = prev.italic; else delete edge.style.italic;
+        if (prev.fontWeight !== undefined) edge.style.fontWeight = prev.fontWeight; else delete edge.style.fontWeight;
+        if (prev.fontStyle !== undefined) edge.style.fontStyle = prev.fontStyle; else delete edge.style.fontStyle;
+        if (prev.fontFamily !== undefined) edge.style.fontFamily = prev.fontFamily; else delete edge.style.fontFamily;
+        if (prev.labelStyles && edge.labels) {
+          for (let i = 0; i < edge.labels.length; i++) {
+            const ls = prev.labelStyles[i];
+            if (ls) edge.labels[i].style = { ...ls };
+            else if (edge.labels[i].style) delete edge.labels[i].style;
+          }
+        } else if (edge.labels?.[0]) {
+          if (prev.labelStyle) edge.labels[0].style = { ...prev.labelStyle };
+          else if (edge.labels[0].style) delete edge.labels[0].style;
+        }
+      }
+    }
+
+    if (this.targets.groups) {
+      for (const group of this.targets.groups) {
+        const prev = this.previousGroupFonts.get(group.id);
+        const g = group as any;
+        if (!prev) continue;
+        if (prev.fontSize !== undefined) g.fontSize = prev.fontSize; else delete g.fontSize;
+        if (prev.bold !== undefined) g.bold = prev.bold; else delete g.bold;
+        if (prev.italic !== undefined) g.italic = prev.italic; else delete g.italic;
+        if (prev.fontWeight !== undefined) g.fontWeight = prev.fontWeight; else delete g.fontWeight;
+        if (prev.fontStyle !== undefined) g.fontStyle = prev.fontStyle; else delete g.fontStyle;
+        if (prev.fontFamily !== undefined) g.fontFamily = prev.fontFamily; else delete g.fontFamily;
+        if (prev.labelStyle) g.style = { ...prev.labelStyle };
+        else if (g.style) delete g.style;
+      }
+    }
+  }
+}
+
 export class UpdateChipNodeCommand implements Command {
   readonly description = "Update chip interface";
 
@@ -1489,5 +2023,75 @@ export class PropagateChipInterfaceCommand implements Command {
   }
 }
 
+export class UpdateEdgeKindCommand implements Command {
+  readonly description = "Change connector style";
 
+  private prevKind: string;
+  private prevStyle?: EdgeStyle;
+
+  constructor(
+    private readonly diagram: Diagram,
+    private readonly edgeId: string,
+    private readonly newKind: string,
+    private readonly newStyle?: Partial<EdgeStyle>
+  ) {
+    const edge = this.diagram.edges.find((e) => e.id === this.edgeId);
+    this.prevKind = edge?.kind ?? "uml.association";
+    this.prevStyle = edge?.style ? { ...edge.style } : undefined;
+  }
+
+  execute(): void {
+    const edge = this.diagram.edges.find((e) => e.id === this.edgeId);
+    if (edge) {
+      edge.kind = this.newKind;
+      if (this.newStyle) {
+        edge.style = { ...(edge.style ?? {}), ...this.newStyle };
+      }
+    }
+  }
+
+  undo(): void {
+    const edge = this.diagram.edges.find((e) => e.id === this.edgeId);
+    if (edge) {
+      edge.kind = this.prevKind;
+      edge.style = this.prevStyle ? { ...this.prevStyle } : undefined;
+    }
+  }
+}
+
+export class UpdateEdgeStyleCommand implements Command {
+  readonly description = "Update line style";
+
+  private prevStyle?: EdgeStyle;
+  private prevKind?: string;
+
+  constructor(
+    private readonly diagram: Diagram,
+    private readonly edgeId: string,
+    private readonly styleUpdates: Partial<EdgeStyle>,
+    private readonly newKind?: string
+  ) {
+    const edge = this.diagram.edges.find((e) => e.id === this.edgeId);
+    this.prevStyle = edge?.style ? { ...edge.style } : undefined;
+    this.prevKind = edge?.kind;
+  }
+
+  execute(): void {
+    const edge = this.diagram.edges.find((e) => e.id === this.edgeId);
+    if (!edge) return;
+    edge.style = { ...(edge.style ?? {}), ...this.styleUpdates };
+    if (this.newKind) {
+      edge.kind = this.newKind;
+    }
+  }
+
+  undo(): void {
+    const edge = this.diagram.edges.find((e) => e.id === this.edgeId);
+    if (!edge) return;
+    edge.style = this.prevStyle ? { ...this.prevStyle } : undefined;
+    if (this.prevKind) {
+      edge.kind = this.prevKind;
+    }
+  }
+}
 

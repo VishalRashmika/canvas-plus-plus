@@ -10,7 +10,59 @@ import {
   getCirclePerimeterIntersection,
   getTrianglePerimeterIntersection,
 } from "./ConnectorGeometry";
-import { estimateMarkdownContentHeight } from "../../domain/services/TextMeasurement";
+import {
+  estimateMarkdownContentHeight,
+  wrapTextToLines,
+} from "../../domain/services/TextMeasurement";
+import { applyFontToSvgElement, getNodeFontStyle, FontStyleConfig } from "../theme/Typography";
+
+export interface AppendMultilineTextOptions {
+  className?: string;
+  textAnchor?: "middle" | "start" | "end";
+  dominantBaseline?: string;
+}
+
+export function appendMultilineText(
+  parentGroup: SVGElement,
+  title: string,
+  cx: number,
+  cy: number,
+  nodeFont: FontStyleConfig,
+  svgNS = "http://www.w3.org/2000/svg",
+  options?: AppendMultilineTextOptions
+): SVGElement {
+  const text = document.createElementNS(svgNS, "text") as SVGElement;
+  text.setAttribute("x", String(cx));
+  text.setAttribute("y", String(cy));
+  const anchor = options?.textAnchor ?? "middle";
+  text.setAttribute("text-anchor", anchor);
+  text.setAttribute("class", options?.className ?? "umlcanvas-node-title");
+  applyFontToSvgElement(text, nodeFont);
+
+  const lines = (title ?? "").split(/\r?\n/);
+  if (lines.length <= 1) {
+    text.setAttribute("dominant-baseline", options?.dominantBaseline ?? "central");
+    text.textContent = title ?? "";
+  } else {
+    text.setAttribute("dominant-baseline", options?.dominantBaseline ?? "central");
+    const baseFontSize = nodeFont.fontSize ?? 13;
+    const lineHeight = Math.round(baseFontSize * 1.35);
+    const startY = cy - ((lines.length - 1) * lineHeight) / 2;
+    lines.forEach((lineText, idx) => {
+      const tspan = document.createElementNS(svgNS, "tspan");
+      tspan.setAttribute("x", String(cx));
+      tspan.setAttribute("y", String(startY + idx * lineHeight));
+      tspan.setAttribute("dominant-baseline", options?.dominantBaseline ?? "central");
+      tspan.setAttribute("text-anchor", anchor);
+      tspan.textContent = lineText || " ";
+      applyFontToSvgElement(tspan as any, nodeFont);
+      text.appendChild(tspan);
+    });
+  }
+
+  parentGroup.appendChild(text);
+  return text;
+}
 
 export interface RenderContext {
   isSelected: boolean;
@@ -225,14 +277,14 @@ export class ShapeRegistry {
         // Label
         const title = node.labels[0]?.text ?? "";
         if (title) {
-          const text = document.createElementNS(svgNS, "text");
-          text.setAttribute("x", String(node.size.width / 2));
-          text.setAttribute("y", String(node.size.height / 2));
-          text.setAttribute("dominant-baseline", "central");
-          text.setAttribute("text-anchor", "middle");
-          text.setAttribute("class", "umlcanvas-node-title");
-          text.textContent = title;
-          group.appendChild(text);
+          appendMultilineText(
+            group,
+            title,
+            node.size.width / 2,
+            node.size.height / 2,
+            getNodeFontStyle(node),
+            svgNS
+          );
         }
 
         return group;
@@ -300,6 +352,7 @@ export class ShapeRegistry {
         );
         const headerHeight = hasStereo || hasTagged ? 46 : 32;
 
+        const nodeFont = getNodeFontStyle(node);
         let currentY = 12;
         if (hasStereo) {
           const stereoText = document.createElementNS(svgNS, "text");
@@ -309,6 +362,12 @@ export class ShapeRegistry {
           stereoText.setAttribute("text-anchor", "middle");
           stereoText.setAttribute("class", "umlcanvas-node-stereotype");
           stereoText.textContent = `«${effectiveStereo}»`;
+          const stFontSize = nodeFont.fontSize ? Math.max(8, Math.round(nodeFont.fontSize * 0.77)) : undefined;
+          applyFontToSvgElement(stereoText, {
+            ...nodeFont,
+            fontSize: stFontSize,
+            italic: nodeFont.italic !== undefined ? nodeFont.italic : true,
+          });
           group.appendChild(stereoText);
           currentY += 14;
         }
@@ -324,43 +383,57 @@ export class ShapeRegistry {
           taggedText.setAttribute("text-anchor", "middle");
           taggedText.setAttribute("class", "umlcanvas-node-tagged-values");
           taggedText.textContent = `{ ${taggedStr} }`;
+          const taggedFontSize = nodeFont.fontSize ? Math.max(8, Math.round(nodeFont.fontSize * 0.7)) : undefined;
+          applyFontToSvgElement(taggedText, { ...nodeFont, fontSize: taggedFontSize });
           group.appendChild(taggedText);
           currentY += 12;
         }
 
         // Class Name
         const title = node.labels[0]?.text ?? "";
+        const baseFontSize = nodeFont.fontSize ?? 13;
+        const lineHeight = Math.round(baseFontSize * 1.35);
+        const lines = title.split(/\r?\n/);
+        const titleBlockHeight = Math.max(1, lines.length) * lineHeight;
+        let actualHeaderHeight = hasStereo || hasTagged ? 46 : 32;
+        if (lines.length > 1 || baseFontSize > 14) {
+          actualHeaderHeight = Math.max(actualHeaderHeight, currentY + titleBlockHeight + 10);
+        }
+        const titleCenterY = lines.length > 1 ? currentY + (titleBlockHeight - lineHeight) / 2 : currentY;
+
         if (title) {
-          const titleText = document.createElementNS(svgNS, "text");
-          titleText.setAttribute("x", String(node.size.width / 2));
-          titleText.setAttribute("y", String(currentY));
-          titleText.setAttribute("dominant-baseline", "central");
-          titleText.setAttribute("text-anchor", "middle");
-          titleText.setAttribute(
-            "class",
-            node.stereotype === "interface" || node.stereotype === "abstract"
-              ? "umlcanvas-node-title umlcanvas-class-title umlcanvas-italic"
-              : "umlcanvas-node-title umlcanvas-class-title"
+          appendMultilineText(
+            group,
+            title,
+            node.size.width / 2,
+            titleCenterY,
+            nodeFont,
+            svgNS,
+            {
+              className:
+                node.stereotype === "interface" || node.stereotype === "abstract"
+                  ? "umlcanvas-node-title umlcanvas-class-title umlcanvas-italic"
+                  : "umlcanvas-node-title umlcanvas-class-title",
+            }
           );
-          titleText.textContent = title;
-          group.appendChild(titleText);
         }
 
         // Header divider line
-        if (node.size.height > headerHeight) {
+        if (node.size.height > actualHeaderHeight) {
           const line = document.createElementNS(svgNS, "line");
           line.setAttribute("x1", "0");
-          line.setAttribute("y1", String(headerHeight));
+          line.setAttribute("y1", String(actualHeaderHeight));
           line.setAttribute("x2", String(node.size.width));
-          line.setAttribute("y2", String(headerHeight));
+          line.setAttribute("y2", String(actualHeaderHeight));
           line.setAttribute("class", "umlcanvas-compartment-divider");
           group.appendChild(line);
         }
 
         // Compartments rendering (F-032)
         if (node.compartments && node.compartments.length > 0) {
-          let compY = headerHeight;
-          const lineHeight = 18;
+          let compY = actualHeaderHeight;
+          const compFontSize = nodeFont.fontSize ? Math.max(9, Math.round(nodeFont.fontSize * 0.85)) : undefined;
+          const compLineHeight = compFontSize ? Math.round(compFontSize * 1.5) : 18;
 
           for (let cIdx = 0; cIdx < node.compartments.length; cIdx++) {
             const comp = node.compartments[cIdx];
@@ -376,13 +449,14 @@ export class ShapeRegistry {
             }
 
             for (const item of comp.items) {
-              compY += lineHeight;
+              compY += compLineHeight;
               if (compY > node.size.height) break;
 
               const itemText = document.createElementNS(svgNS, "text");
               itemText.setAttribute("x", "10");
               itemText.setAttribute("y", String(compY - 5));
               itemText.setAttribute("class", "umlcanvas-compartment-item");
+              applyFontToSvgElement(itemText, { ...nodeFont, fontSize: compFontSize });
 
               // Visibility marker span
               const visSpan = document.createElementNS(svgNS, "tspan");
@@ -451,31 +525,46 @@ export class ShapeRegistry {
         // Header text (instance: Class, underlined per UML spec)
         const headerY = 22;
         const titleText = node.labels[0]?.text ?? "instance: Class";
-        const text = document.createElementNS(svgNS, "text");
-        text.setAttribute("x", String(node.size.width / 2));
-        text.setAttribute("y", String(headerY));
-        text.setAttribute("text-anchor", "middle");
-        text.setAttribute("class", "umlcanvas-node-title umlcanvas-object-title");
-        text.textContent = titleText;
-        group.appendChild(text);
+        const nodeFont = getNodeFontStyle(node);
+        const baseFontSize = nodeFont.fontSize ?? 13;
+        const lineHeight = Math.round(baseFontSize * 1.35);
+        const lines = titleText.split(/\r?\n/);
+        const titleBlockHeight = Math.max(1, lines.length) * lineHeight;
+        const actualHeaderHeight = lines.length > 1 || baseFontSize > 14
+          ? Math.max(32, headerY + titleBlockHeight + 6)
+          : 32;
+        const titleCenterY = lines.length > 1 ? headerY + (titleBlockHeight - lineHeight) / 2 : headerY;
+
+        appendMultilineText(
+          group,
+          titleText,
+          node.size.width / 2,
+          titleCenterY,
+          nodeFont,
+          svgNS,
+          {
+            className: "umlcanvas-node-title umlcanvas-object-title",
+          }
+        );
 
         // Header divider
         const divLine = document.createElementNS(svgNS, "line");
         divLine.setAttribute("x1", "0");
-        divLine.setAttribute("y1", "32");
+        divLine.setAttribute("y1", String(actualHeaderHeight));
         divLine.setAttribute("x2", String(node.size.width));
-        divLine.setAttribute("y2", "32");
+        divLine.setAttribute("y2", String(actualHeaderHeight));
         divLine.setAttribute("class", "umlcanvas-compartment-divider");
         group.appendChild(divLine);
 
         // Slots / attributes
-        let currentY = 32;
-        const lineHeight = 18;
+        let currentY = actualHeaderHeight;
+        const compFontSize = nodeFont.fontSize ? Math.max(9, Math.round(nodeFont.fontSize * 0.85)) : undefined;
+        const compLineHeight = compFontSize ? Math.round(compFontSize * 1.5) : 18;
 
         if (node.compartments && node.compartments.length > 0) {
           for (const comp of node.compartments) {
             for (const item of comp.items) {
-              currentY += lineHeight;
+              currentY += compLineHeight;
               if (currentY > node.size.height) break;
 
               const itemText = document.createElementNS(svgNS, "text");
@@ -483,6 +572,7 @@ export class ShapeRegistry {
               itemText.setAttribute("y", String(currentY - 4));
               itemText.setAttribute("class", "umlcanvas-compartment-item");
               itemText.textContent = item.text;
+              applyFontToSvgElement(itemText, { ...nodeFont, fontSize: compFontSize });
               group.appendChild(itemText);
             }
           }
@@ -582,13 +672,17 @@ export class ShapeRegistry {
 
         // Actor Name label below glyph
         const label = node.labels[0]?.text ?? "Actor";
-        const text = document.createElementNS(svgNS, "text");
-        text.setAttribute("x", String(cx));
-        text.setAttribute("y", "86");
-        text.setAttribute("text-anchor", "middle");
-        text.setAttribute("class", "umlcanvas-actor-label");
-        text.textContent = label;
-        group.appendChild(text);
+        appendMultilineText(
+          group,
+          label,
+          cx,
+          86,
+          getNodeFontStyle(node),
+          svgNS,
+          {
+            className: "umlcanvas-actor-label",
+          }
+        );
 
         return group;
       },
@@ -641,18 +735,17 @@ export class ShapeRegistry {
 
         // Centered title text
         const title = node.labels[0]?.text ?? "Use Case";
-        const lines = title.split("\n");
-        const startY = ry - ((lines.length - 1) * 16) / 2 + 4;
-
-        for (let i = 0; i < lines.length; i++) {
-          const text = document.createElementNS(svgNS, "text");
-          text.setAttribute("x", String(rx));
-          text.setAttribute("y", String(startY + i * 16));
-          text.setAttribute("text-anchor", "middle");
-          text.setAttribute("class", "umlcanvas-node-title umlcanvas-usecase-title");
-          text.textContent = lines[i];
-          group.appendChild(text);
-        }
+        appendMultilineText(
+          group,
+          title,
+          rx,
+          ry,
+          getNodeFontStyle(node),
+          svgNS,
+          {
+            className: "umlcanvas-node-title umlcanvas-usecase-title",
+          }
+        );
 
         return group;
       },
@@ -703,12 +796,18 @@ export class ShapeRegistry {
         group.appendChild(rect);
 
         const title = node.labels[0]?.text ?? "System Boundary";
-        const text = document.createElementNS(svgNS, "text");
-        text.setAttribute("x", "14");
-        text.setAttribute("y", "22");
-        text.setAttribute("class", "umlcanvas-system-boundary-title");
-        text.textContent = title;
-        group.appendChild(text);
+        appendMultilineText(
+          group,
+          title,
+          14,
+          22,
+          getNodeFontStyle(node),
+          svgNS,
+          {
+            className: "umlcanvas-system-boundary-title",
+            textAnchor: "start",
+          }
+        );
 
         return group;
       },
@@ -770,16 +869,45 @@ export class ShapeRegistry {
         foldPath.setAttribute("class", "umlcanvas-note-fold");
         group.appendChild(foldPath);
 
+        // ClipPath to guarantee note text never overflows paper boundaries
+        const clipId = `umlcanvas-clip-note-${node.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+        const defs = document.createElementNS(svgNS, "defs");
+        const clipPath = document.createElementNS(svgNS, "clipPath");
+        clipPath.setAttribute("id", clipId);
+        const clipPathEl = document.createElementNS(svgNS, "path");
+        clipPathEl.setAttribute(
+          "d",
+          `M 0 0 L ${w - fold} 0 L ${w} ${fold} L ${w} ${h} L 0 ${h} Z`
+        );
+        clipPath.appendChild(clipPathEl);
+        defs.appendChild(clipPath);
+        group.appendChild(defs);
+
+        const textGroup = document.createElementNS(svgNS, "g");
+        textGroup.setAttribute("clip-path", `url(#${clipId})`);
+
         const textContent = node.labels[0]?.text ?? "Note";
-        const lines = textContent.split("\n");
+        const nodeFont = getNodeFontStyle(node);
+        const fontSize = nodeFont.fontSize ?? 11;
+        const lineSpacing = Math.round(fontSize * 1.38);
+        const availableW = Math.max(40, w - 20);
+        const charWidth = Math.max(5, fontSize * 0.58);
+        const lines = wrapTextToLines(textContent, availableW, charWidth);
+        let lineY = 14 + fontSize;
+        const maxLineY = h - 6;
+
         for (let i = 0; i < lines.length; i++) {
+          if (lineY > maxLineY) break;
           const text = document.createElementNS(svgNS, "text");
           text.setAttribute("x", "10");
-          text.setAttribute("y", String(22 + i * 16));
+          text.setAttribute("y", String(lineY));
           text.setAttribute("class", "umlcanvas-note-text");
-          text.textContent = lines[i];
-          group.appendChild(text);
+          text.textContent = lines[i] || " ";
+          applyFontToSvgElement(text, nodeFont);
+          textGroup.appendChild(text);
+          lineY += lineSpacing;
         }
+        group.appendChild(textGroup);
 
         return group;
       },
@@ -849,19 +977,46 @@ export class ShapeRegistry {
         strip.setAttribute("class", "umlcanvas-sticky-strip");
         group.appendChild(strip);
 
-        // 3. Multiline text pad lines
+        // 3. Multiline text pad lines with ClipPath ensuring no overflow outside paper
+        const clipId = `umlcanvas-clip-sticky-${node.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+        const defs = document.createElementNS(svgNS, "defs");
+        const clipPath = document.createElementNS(svgNS, "clipPath");
+        clipPath.setAttribute("id", clipId);
+        const clipRect = document.createElementNS(svgNS, "rect");
+        clipRect.setAttribute("x", "0");
+        clipRect.setAttribute("y", "0");
+        clipRect.setAttribute("width", String(w));
+        clipRect.setAttribute("height", String(h));
+        clipRect.setAttribute("rx", "4");
+        clipRect.setAttribute("ry", "4");
+        clipPath.appendChild(clipRect);
+        defs.appendChild(clipPath);
+        group.appendChild(defs);
+
+        const textGroup = document.createElementNS(svgNS, "g");
+        textGroup.setAttribute("clip-path", `url(#${clipId})`);
+
+        const nodeFont = getNodeFontStyle(node);
+        const fontSize = nodeFont.fontSize ?? 13;
+        const lineSpacing = Math.round(fontSize * 1.38);
         const textContent = node.labels[0]?.text ?? "";
+
         if (!textContent) {
           const placeholder = document.createElementNS(svgNS, "text");
           placeholder.setAttribute("x", "12");
-          placeholder.setAttribute("y", "42");
+          placeholder.setAttribute("y", String(28 + fontSize));
           placeholder.setAttribute("class", "umlcanvas-sticky-placeholder");
           placeholder.textContent = "Type a note...";
-          group.appendChild(placeholder);
+          applyFontToSvgElement(placeholder, nodeFont);
+          textGroup.appendChild(placeholder);
         } else {
-          const lines = textContent.split("\n");
-          let lineY = 40;
-          const maxLineY = h - 8;
+          const availableW = Math.max(40, w - 24);
+          const boldMultiplier = nodeFont.bold ? 1.1 : 1.0;
+          const charWidth = Math.max(5, fontSize * 0.58 * boldMultiplier);
+          const lines = wrapTextToLines(textContent, availableW, charWidth);
+          let lineY = 26 + fontSize;
+          const maxLineY = h - 6;
+
           for (let i = 0; i < lines.length; i++) {
             if (lineY > maxLineY) break;
             const textEl = document.createElementNS(svgNS, "text");
@@ -869,10 +1024,12 @@ export class ShapeRegistry {
             textEl.setAttribute("y", String(lineY));
             textEl.setAttribute("class", "umlcanvas-sticky-text");
             textEl.textContent = lines[i] || " ";
-            group.appendChild(textEl);
-            lineY += 18;
+            applyFontToSvgElement(textEl, nodeFont);
+            textGroup.appendChild(textEl);
+            lineY += lineSpacing;
           }
         }
+        group.appendChild(textGroup);
 
         return group;
       },
@@ -1014,16 +1171,19 @@ export class ShapeRegistry {
         // 4. Title inside the frame (Polaroid / photo-frame caption style)
         const title = node.labels[0]?.text ?? "";
         const titleY = h - titleAreaH / 2 + 5;
-        const titleText = document.createElementNS(svgNS, "text");
-        titleText.setAttribute("x", String(w / 2));
-        titleText.setAttribute("y", String(titleY));
-        titleText.setAttribute("text-anchor", "middle");
-        titleText.setAttribute("class", "umlcanvas-node-title umlcanvas-photo-frame-title");
-        titleText.textContent = title || "Add title...";
-        if (!title) {
-          titleText.classList.add("umlcanvas-placeholder-text");
-        }
-        group.appendChild(titleText);
+        appendMultilineText(
+          group,
+          title || "Add title...",
+          w / 2,
+          titleY,
+          getNodeFontStyle(node),
+          svgNS,
+          {
+            className:
+              "umlcanvas-node-title umlcanvas-photo-frame-title" +
+              (!title ? " umlcanvas-placeholder-text" : ""),
+          }
+        );
 
         return group;
       },
@@ -1159,6 +1319,7 @@ export class ShapeRegistry {
         const maxChars = Math.max(8, Math.floor((w - rightMargin) / 7.5));
         titleText.textContent = title.length > maxChars ? `${title.slice(0, maxChars - 2)}…` : title;
         titleText.setAttribute("title", rawTitle);
+        applyFontToSvgElement(titleText, getNodeFontStyle(node));
         group.appendChild(titleText);
 
         // 6a. Clickable Open Icon in Header (↗)
@@ -1464,18 +1625,17 @@ export class ShapeRegistry {
         group.appendChild(rect);
 
         const title = node.labels[0]?.text ?? "Action";
-        const lines = title.split("\n");
-        const startY = node.size.height / 2 - ((lines.length - 1) * 16) / 2 + 4;
-
-        for (let i = 0; i < lines.length; i++) {
-          const text = document.createElementNS(svgNS, "text");
-          text.setAttribute("x", String(node.size.width / 2));
-          text.setAttribute("y", String(startY + i * 16));
-          text.setAttribute("text-anchor", "middle");
-          text.setAttribute("class", "umlcanvas-node-title");
-          text.textContent = lines[i];
-          group.appendChild(text);
-        }
+        appendMultilineText(
+          group,
+          title,
+          node.size.width / 2,
+          node.size.height / 2,
+          getNodeFontStyle(node),
+          svgNS,
+          {
+            className: "umlcanvas-node-title",
+          }
+        );
 
         return group;
       },
@@ -1534,13 +1694,14 @@ export class ShapeRegistry {
 
         const title = node.labels[0]?.text ?? "";
         if (title) {
-          const text = document.createElementNS(svgNS, "text");
-          text.setAttribute("x", String(w / 2));
-          text.setAttribute("y", String(h / 2 + 4));
-          text.setAttribute("text-anchor", "middle");
-          text.setAttribute("class", "umlcanvas-node-title");
-          text.textContent = title;
-          group.appendChild(text);
+          appendMultilineText(
+            group,
+            title,
+            w / 2,
+            h / 2,
+            getNodeFontStyle(node),
+            svgNS
+          );
         }
 
         return group;
@@ -1663,13 +1824,17 @@ export class ShapeRegistry {
         group.appendChild(headerRect);
 
         const title = node.labels[0]?.text ?? "Swimlane";
-        const text = document.createElementNS(svgNS, "text");
-        text.setAttribute("x", String(node.size.width / 2));
-        text.setAttribute("y", "20");
-        text.setAttribute("text-anchor", "middle");
-        text.setAttribute("class", "umlcanvas-group-title");
-        text.textContent = title;
-        group.appendChild(text);
+        appendMultilineText(
+          group,
+          title,
+          node.size.width / 2,
+          20,
+          getNodeFontStyle(node),
+          svgNS,
+          {
+            className: "umlcanvas-group-title",
+          }
+        );
 
         return group;
       },
@@ -1736,16 +1901,33 @@ export class ShapeRegistry {
         group.appendChild(rect);
 
         const title = node.labels[0]?.text ?? "State";
-        const text = document.createElementNS(svgNS, "text");
-        text.setAttribute("x", String(node.size.width / 2));
-        text.setAttribute("y", "20");
-        text.setAttribute("text-anchor", "middle");
-        text.setAttribute("class", "umlcanvas-node-title");
-        text.textContent = title;
-        group.appendChild(text);
+        const nodeFont = getNodeFontStyle(node);
+        const baseFontSize = nodeFont.fontSize ?? 13;
+        const lineHeight = Math.round(baseFontSize * 1.35);
+        const lines = title.split(/\r?\n/);
+        const titleBlockHeight = Math.max(1, lines.length) * lineHeight;
+        const actualHeaderHeight = lines.length > 1 || baseFontSize > 14
+          ? Math.max(32, 20 + titleBlockHeight + 6)
+          : 32;
+        const titleCenterY = lines.length > 1 ? 20 + (titleBlockHeight - lineHeight) / 2 : 20;
 
-        let currentY = 32;
+        appendMultilineText(
+          group,
+          title,
+          node.size.width / 2,
+          titleCenterY,
+          nodeFont,
+          svgNS,
+          {
+            className: "umlcanvas-node-title",
+          }
+        );
+
+        let currentY = actualHeaderHeight;
         if (node.compartments && node.compartments.length > 0) {
+          const compFontSize = nodeFont.fontSize ? Math.max(9, Math.round(nodeFont.fontSize * 0.85)) : undefined;
+          const compLineHeight = compFontSize ? Math.round(compFontSize * 1.5) : 16;
+
           const line = document.createElementNS(svgNS, "line");
           line.setAttribute("x1", "0");
           line.setAttribute("y1", String(currentY));
@@ -1756,7 +1938,7 @@ export class ShapeRegistry {
 
           for (const comp of node.compartments) {
             for (const item of comp.items) {
-              currentY += 16;
+              currentY += compLineHeight;
               const itemText = document.createElementNS(svgNS, "text");
               itemText.setAttribute("x", "12");
               itemText.setAttribute("y", String(currentY));
@@ -1764,6 +1946,7 @@ export class ShapeRegistry {
               itemText.textContent = item.visibility
                 ? `${item.visibility} ${item.text}`
                 : item.text;
+              applyFontToSvgElement(itemText, { ...nodeFont, fontSize: compFontSize });
               group.appendChild(itemText);
             }
           }
@@ -1818,12 +2001,18 @@ export class ShapeRegistry {
         group.appendChild(rect);
 
         const title = node.labels[0]?.text ?? "Composite State";
-        const text = document.createElementNS(svgNS, "text");
-        text.setAttribute("x", "14");
-        text.setAttribute("y", "22");
-        text.setAttribute("class", "umlcanvas-node-title");
-        text.textContent = title;
-        group.appendChild(text);
+        appendMultilineText(
+          group,
+          title,
+          14,
+          22,
+          getNodeFontStyle(node),
+          svgNS,
+          {
+            className: "umlcanvas-node-title",
+            textAnchor: "start",
+          }
+        );
 
         return group;
       },
@@ -1896,13 +2085,17 @@ export class ShapeRegistry {
 
         // Header text
         const title = node.labels[0]?.text ?? "Lifeline";
-        const text = document.createElementNS(svgNS, "text");
-        text.setAttribute("x", String(cx));
-        text.setAttribute("y", String(headerH / 2 + 4));
-        text.setAttribute("text-anchor", "middle");
-        text.setAttribute("class", "umlcanvas-node-title");
-        text.textContent = title;
-        group.appendChild(text);
+        appendMultilineText(
+          group,
+          title,
+          cx,
+          headerH / 2 + 4,
+          getNodeFontStyle(node),
+          svgNS,
+          {
+            className: "umlcanvas-node-title",
+          }
+        );
 
         return group;
       },
@@ -2032,22 +2225,34 @@ export class ShapeRegistry {
         group.appendChild(iconGroup);
 
         // Stereotype
+        const nodeFont = getNodeFontStyle(node);
         const stText = document.createElementNS(svgNS, "text");
         stText.setAttribute("x", String(w / 2));
         stText.setAttribute("y", "26");
         stText.setAttribute("text-anchor", "middle");
         stText.setAttribute("class", "umlcanvas-node-stereotype");
         stText.textContent = `«${node.stereotype || "component"}»`;
+        const stFontSize = nodeFont.fontSize ? Math.max(8, Math.round(nodeFont.fontSize * 0.77)) : undefined;
+        applyFontToSvgElement(stText, {
+          ...nodeFont,
+          fontSize: stFontSize,
+          italic: nodeFont.italic !== undefined ? nodeFont.italic : true,
+        });
         group.appendChild(stText);
 
         // Title
-        const titleText = document.createElementNS(svgNS, "text");
-        titleText.setAttribute("x", String(w / 2));
-        titleText.setAttribute("y", "48");
-        titleText.setAttribute("text-anchor", "middle");
-        titleText.setAttribute("class", "umlcanvas-node-title");
-        titleText.textContent = node.labels[0]?.text ?? "Component";
-        group.appendChild(titleText);
+        const title = node.labels[0]?.text ?? "Component";
+        appendMultilineText(
+          group,
+          title,
+          w / 2,
+          48,
+          nodeFont,
+          svgNS,
+          {
+            className: "umlcanvas-node-title",
+          }
+        );
 
         return group;
       },
@@ -2100,13 +2305,17 @@ export class ShapeRegistry {
 
         const title = node.labels[0]?.text;
         if (title) {
-          const text = document.createElementNS(svgNS, "text");
-          text.setAttribute("x", String(cx));
-          text.setAttribute("y", String(node.size.height + 14));
-          text.setAttribute("text-anchor", "middle");
-          text.setAttribute("class", "umlcanvas-node-title");
-          text.textContent = title;
-          group.appendChild(text);
+          appendMultilineText(
+            group,
+            title,
+            cx,
+            node.size.height + 14,
+            getNodeFontStyle(node),
+            svgNS,
+            {
+              className: "umlcanvas-node-title",
+            }
+          );
         }
 
         return group;
@@ -2162,13 +2371,17 @@ export class ShapeRegistry {
 
         const title = node.labels[0]?.text;
         if (title) {
-          const text = document.createElementNS(svgNS, "text");
-          text.setAttribute("x", String(cx));
-          text.setAttribute("y", String(node.size.height + 14));
-          text.setAttribute("text-anchor", "middle");
-          text.setAttribute("class", "umlcanvas-node-title");
-          text.textContent = title;
-          group.appendChild(text);
+          appendMultilineText(
+            group,
+            title,
+            cx,
+            node.size.height + 14,
+            getNodeFontStyle(node),
+            svgNS,
+            {
+              className: "umlcanvas-node-title",
+            }
+          );
         }
 
         return group;
@@ -2213,13 +2426,17 @@ export class ShapeRegistry {
 
         const title = node.labels[0]?.text;
         if (title) {
-          const text = document.createElementNS(svgNS, "text");
-          text.setAttribute("x", String(node.size.width / 2));
-          text.setAttribute("y", String(node.size.height + 12));
-          text.setAttribute("text-anchor", "middle");
-          text.setAttribute("class", "umlcanvas-port-label");
-          text.textContent = title;
-          group.appendChild(text);
+          appendMultilineText(
+            group,
+            title,
+            node.size.width / 2,
+            node.size.height + 12,
+            getNodeFontStyle(node),
+            svgNS,
+            {
+              className: "umlcanvas-port-label",
+            }
+          );
         }
 
         return group;
@@ -2297,6 +2514,7 @@ export class ShapeRegistry {
         group.appendChild(frontFace);
 
         // Stereotype
+        const nodeFont = getNodeFontStyle(node);
         const st = node.stereotype || defStereotype;
         const stText = document.createElementNS(svgNS, "text");
         stText.setAttribute("x", String((w - d) / 2));
@@ -2304,17 +2522,27 @@ export class ShapeRegistry {
         stText.setAttribute("text-anchor", "middle");
         stText.setAttribute("class", "umlcanvas-node-stereotype");
         stText.textContent = `«${st}»`;
+        const stFontSize = nodeFont.fontSize ? Math.max(8, Math.round(nodeFont.fontSize * 0.77)) : undefined;
+        applyFontToSvgElement(stText, {
+          ...nodeFont,
+          fontSize: stFontSize,
+          italic: nodeFont.italic !== undefined ? nodeFont.italic : true,
+        });
         group.appendChild(stText);
 
         // Title
         const title = node.labels[0]?.text ?? "Node";
-        const titleText = document.createElementNS(svgNS, "text");
-        titleText.setAttribute("x", String((w - d) / 2));
-        titleText.setAttribute("y", String(d + 42));
-        titleText.setAttribute("text-anchor", "middle");
-        titleText.setAttribute("class", "umlcanvas-node-title");
-        titleText.textContent = title;
-        group.appendChild(titleText);
+        appendMultilineText(
+          group,
+          title,
+          (w - d) / 2,
+          d + 42,
+          nodeFont,
+          svgNS,
+          {
+            className: "umlcanvas-node-title",
+          }
+        );
 
         return group;
       },
@@ -2392,22 +2620,34 @@ export class ShapeRegistry {
         group.appendChild(iconGroup);
 
         // Stereotype
+        const nodeFont = getNodeFontStyle(node);
         const stText = document.createElementNS(svgNS, "text");
         stText.setAttribute("x", String(w / 2));
         stText.setAttribute("y", "24");
         stText.setAttribute("text-anchor", "middle");
         stText.setAttribute("class", "umlcanvas-node-stereotype");
         stText.textContent = `«${node.stereotype || "artifact"}»`;
+        const stFontSize = nodeFont.fontSize ? Math.max(8, Math.round(nodeFont.fontSize * 0.77)) : undefined;
+        applyFontToSvgElement(stText, {
+          ...nodeFont,
+          fontSize: stFontSize,
+          italic: nodeFont.italic !== undefined ? nodeFont.italic : true,
+        });
         group.appendChild(stText);
 
         // Title
-        const titleText = document.createElementNS(svgNS, "text");
-        titleText.setAttribute("x", String(w / 2));
-        titleText.setAttribute("y", "46");
-        titleText.setAttribute("text-anchor", "middle");
-        titleText.setAttribute("class", "umlcanvas-node-title");
-        titleText.textContent = node.labels[0]?.text ?? "Artifact";
-        group.appendChild(titleText);
+        const title = node.labels[0]?.text ?? "Artifact";
+        appendMultilineText(
+          group,
+          title,
+          w / 2,
+          46,
+          nodeFont,
+          svgNS,
+          {
+            className: "umlcanvas-node-title",
+          }
+        );
 
         return group;
       },
@@ -2472,13 +2712,17 @@ export class ShapeRegistry {
         group.appendChild(divLine);
 
         // Header text (Classifier name)
-        const headerText = document.createElementNS(svgNS, "text");
-        headerText.setAttribute("x", String(headerW / 2));
-        headerText.setAttribute("y", String(h / 2 + 4));
-        headerText.setAttribute("text-anchor", "middle");
-        headerText.setAttribute("class", "umlcanvas-node-title");
-        headerText.textContent = node.labels[0]?.text ?? "Classifier";
-        group.appendChild(headerText);
+        const headerText = appendMultilineText(
+          group,
+          node.labels[0]?.text ?? "Classifier",
+          headerW / 2,
+          h / 2 + 4,
+          getNodeFontStyle(node),
+          svgNS,
+          {
+            className: "umlcanvas-node-title",
+          }
+        );
 
         // Timeline guide lines (dashed horizontal)
         const g1 = document.createElementNS(svgNS, "line");
@@ -2546,13 +2790,17 @@ export class ShapeRegistry {
         group.appendChild(rect);
 
         const title = node.labels[0]?.text ?? "State";
-        const text = document.createElementNS(svgNS, "text");
-        text.setAttribute("x", String(w / 2));
-        text.setAttribute("y", String(h / 2 + 4));
-        text.setAttribute("text-anchor", "middle");
-        text.setAttribute("class", "umlcanvas-timing-segment-text");
-        text.textContent = title;
-        group.appendChild(text);
+        appendMultilineText(
+          group,
+          title,
+          w / 2,
+          h / 2 + 4,
+          getNodeFontStyle(node),
+          svgNS,
+          {
+            className: "umlcanvas-timing-segment-text",
+          }
+        );
 
         return group;
       },
@@ -2617,19 +2865,27 @@ export class ShapeRegistry {
 
         // Centered chip title
         const title = node.labels[0]?.text ?? "Chip";
-        const titleText = document.createElementNS(svgNS, "text");
-        titleText.setAttribute("x", String(w / 2));
-        titleText.setAttribute("y", String(h / 2 + 4));
-        titleText.setAttribute("text-anchor", "middle");
-        titleText.setAttribute("class", "umlcanvas-chip-title");
-        titleText.textContent = title;
-        group.appendChild(titleText);
+        const nodeFont = getNodeFontStyle(node);
+        appendMultilineText(
+          group,
+          title,
+          w / 2,
+          h / 2 + 4,
+          nodeFont,
+          svgNS,
+          {
+            className: "umlcanvas-chip-title",
+          }
+        );
+
+        const pinFontSize = nodeFont.fontSize ? Math.max(7, Math.round(nodeFont.fontSize * 0.7)) : undefined;
 
         // Render port pin stubs and pin labels
         for (const port of node.ports) {
           const pinLine = document.createElementNS(svgNS, "line");
           const pinText = document.createElementNS(svgNS, "text");
           pinText.setAttribute("class", "umlcanvas-chip-port-label");
+          applyFontToSvgElement(pinText, { ...nodeFont, fontSize: pinFontSize });
 
           const portLabel = port.dataType ? `${port.name} [${port.dataType}]` : port.name;
 
@@ -2782,13 +3038,17 @@ export class ShapeRegistry {
 
         const title = node.labels[0]?.text;
         if (title) {
-          const text = document.createElementNS(svgNS, "text");
-          text.setAttribute("x", String(w / 2));
-          text.setAttribute("y", String(tabH + 24));
-          text.setAttribute("text-anchor", "middle");
-          text.setAttribute("class", "umlcanvas-node-title");
-          text.textContent = title;
-          group.appendChild(text);
+          appendMultilineText(
+            group,
+            title,
+            w / 2,
+            tabH + 24,
+            getNodeFontStyle(node),
+            svgNS,
+            {
+              className: "umlcanvas-node-title",
+            }
+          );
         }
 
         return group;
@@ -2837,13 +3097,17 @@ export class ShapeRegistry {
 
         const title = node.labels[0]?.text;
         if (title) {
-          const text = document.createElementNS(svgNS, "text");
-          text.setAttribute("x", String(node.size.width / 2));
-          text.setAttribute("y", "22");
-          text.setAttribute("text-anchor", "middle");
-          text.setAttribute("class", "umlcanvas-node-title");
-          text.textContent = title;
-          group.appendChild(text);
+          appendMultilineText(
+            group,
+            title,
+            node.size.width / 2,
+            22,
+            getNodeFontStyle(node),
+            svgNS,
+            {
+              className: "umlcanvas-node-title",
+            }
+          );
         }
 
         return group;
@@ -2884,13 +3148,17 @@ export class ShapeRegistry {
 
         const title = node.labels[0]?.text;
         if (title) {
-          const text = document.createElementNS(svgNS, "text");
-          text.setAttribute("x", String(node.size.width / 2));
-          text.setAttribute("y", String(node.size.height / 2 + 5));
-          text.setAttribute("text-anchor", "middle");
-          text.setAttribute("class", "umlcanvas-node-title");
-          text.textContent = title;
-          group.appendChild(text);
+          appendMultilineText(
+            group,
+            title,
+            node.size.width / 2,
+            node.size.height / 2 + 5,
+            getNodeFontStyle(node),
+            svgNS,
+            {
+              className: "umlcanvas-node-title",
+            }
+          );
         }
 
         return group;
@@ -2941,22 +3209,31 @@ export class ShapeRegistry {
         tabPath.setAttribute("class", "umlcanvas-interaction-tab");
         group.appendChild(tabPath);
 
+        const nodeFont = getNodeFontStyle(node);
         const tabText = document.createElementNS(svgNS, "text");
         tabText.setAttribute("x", String(tabW / 2));
         tabText.setAttribute("y", "15");
         tabText.setAttribute("text-anchor", "middle");
         tabText.setAttribute("class", "umlcanvas-interaction-tab-text");
         tabText.textContent = "sd";
+        const tabFontSize = nodeFont.fontSize ? Math.max(8, Math.round(nodeFont.fontSize * 0.77)) : undefined;
+        applyFontToSvgElement(tabText, { ...nodeFont, fontSize: tabFontSize });
         group.appendChild(tabText);
 
         const title = node.labels[0]?.text;
         if (title) {
-          const text = document.createElementNS(svgNS, "text");
-          text.setAttribute("x", String(tabW + 16));
-          text.setAttribute("y", "16");
-          text.setAttribute("class", "umlcanvas-node-title");
-          text.textContent = title;
-          group.appendChild(text);
+          appendMultilineText(
+            group,
+            title,
+            tabW + 16,
+            16,
+            nodeFont,
+            svgNS,
+            {
+              className: "umlcanvas-node-title",
+              textAnchor: "start",
+            }
+          );
         }
 
         if (node.childDiagramId) {
@@ -3017,22 +3294,29 @@ export class ShapeRegistry {
         );
         group.appendChild(rect);
 
+        const nodeFont = getNodeFontStyle(node);
         const refText = document.createElementNS(svgNS, "text");
         refText.setAttribute("x", "8");
         refText.setAttribute("y", "18");
         refText.setAttribute("class", "umlcanvas-node-st");
         refText.textContent = "ref";
+        const refFontSize = nodeFont.fontSize ? Math.max(8, Math.round(nodeFont.fontSize * 0.77)) : undefined;
+        applyFontToSvgElement(refText, { ...nodeFont, fontSize: refFontSize });
         group.appendChild(refText);
 
         const title = node.labels[0]?.text;
         if (title) {
-          const text = document.createElementNS(svgNS, "text");
-          text.setAttribute("x", String(node.size.width / 2));
-          text.setAttribute("y", String(node.size.height / 2 + 5));
-          text.setAttribute("text-anchor", "middle");
-          text.setAttribute("class", "umlcanvas-node-title");
-          text.textContent = title;
-          group.appendChild(text);
+          appendMultilineText(
+            group,
+            title,
+            node.size.width / 2,
+            node.size.height / 2 + 5,
+            nodeFont,
+            svgNS,
+            {
+              className: "umlcanvas-node-title",
+            }
+          );
         }
 
         return group;
@@ -3202,13 +3486,17 @@ export class ShapeRegistry {
         group.appendChild(bar);
 
         const title = node.labels[0]?.text || "VCC";
-        const text = document.createElementNS(svgNS, "text");
-        text.setAttribute("x", String(cx));
-        text.setAttribute("y", "10");
-        text.setAttribute("text-anchor", "middle");
-        text.setAttribute("class", "umlcanvas-schematic-label");
-        text.textContent = title;
-        group.appendChild(text);
+        appendMultilineText(
+          group,
+          title,
+          cx,
+          10,
+          getNodeFontStyle(node),
+          svgNS,
+          {
+            className: "umlcanvas-schematic-label",
+          }
+        );
 
         return group;
       },
@@ -3258,15 +3546,7 @@ export class ShapeRegistry {
       defaultSize: { width: 100, height: 60 },
       getPorts(node: DiagramNode): Port[] {
         if (node.ports && node.ports.length > 0) return node.ports;
-        const sides: Side[] = ["top", "right", "bottom", "left"];
-        return sides.map((side) => ({
-          id: `${node.id}-port-${side}`,
-          ownerNodeId: node.id,
-          name: side,
-          side,
-          offset: 0.5,
-          direction: "inout",
-        }));
+        return [];
       },
       getBoundaryPoint(node: DiagramNode, targetPoint: Point): Point {
         return getRectPerimeterIntersection(
@@ -3280,6 +3560,18 @@ export class ShapeRegistry {
         group.setAttribute("class", "umlcanvas-shape-freehand");
 
         const pathData = (node.customData?.pathData as string) || "";
+
+        // Generous stroke hitbox along the path for easy selecting and moving without blocking empty canvas inside bounding box
+        const hitbox = document.createElementNS(svgNS, "path");
+        hitbox.setAttribute("d", pathData);
+        hitbox.setAttribute("fill", "none");
+        hitbox.setAttribute("stroke", "transparent");
+        hitbox.setAttribute("stroke-width", "16");
+        hitbox.setAttribute("stroke-linecap", "round");
+        hitbox.setAttribute("stroke-linejoin", "round");
+        hitbox.setAttribute("class", "umlcanvas-freehand-hitbox");
+        group.appendChild(hitbox);
+
         const path = document.createElementNS(svgNS, "path");
         path.setAttribute("d", pathData);
         path.setAttribute(
@@ -3289,8 +3581,9 @@ export class ShapeRegistry {
             : "umlcanvas-freehand-path"
         );
         path.setAttribute("fill", "none");
-        path.setAttribute("stroke", "currentColor");
-        path.setAttribute("stroke-width", "2");
+        const strokeColor = node.style?.strokeColor || node.style?.color || "currentColor";
+        path.setAttribute("stroke", strokeColor);
+        path.setAttribute("stroke-width", String(node.style?.strokeWidth || 2));
         path.setAttribute("stroke-linecap", "round");
         path.setAttribute("stroke-linejoin", "round");
         group.appendChild(path);
@@ -3349,14 +3642,14 @@ export class ShapeRegistry {
 
         const title = node.labels[0]?.text ?? "";
         if (title) {
-          const text = document.createElementNS(svgNS, "text");
-          text.setAttribute("x", String(cx));
-          text.setAttribute("y", String(cy + 4));
-          text.setAttribute("dominant-baseline", "central");
-          text.setAttribute("text-anchor", "middle");
-          text.setAttribute("class", "umlcanvas-node-title");
-          text.textContent = title;
-          group.appendChild(text);
+          appendMultilineText(
+            group,
+            title,
+            cx,
+            cy,
+            getNodeFontStyle(node),
+            svgNS
+          );
         }
 
         return group;
@@ -3413,14 +3706,14 @@ export class ShapeRegistry {
 
         const title = node.labels[0]?.text ?? "";
         if (title) {
-          const text = document.createElementNS(svgNS, "text");
-          text.setAttribute("x", String(rx));
-          text.setAttribute("y", String(ry + 4));
-          text.setAttribute("dominant-baseline", "central");
-          text.setAttribute("text-anchor", "middle");
-          text.setAttribute("class", "umlcanvas-node-title");
-          text.textContent = title;
-          group.appendChild(text);
+          appendMultilineText(
+            group,
+            title,
+            rx,
+            ry,
+            getNodeFontStyle(node),
+            svgNS
+          );
         }
 
         return group;
@@ -3475,14 +3768,14 @@ export class ShapeRegistry {
 
         const title = node.labels[0]?.text ?? "";
         if (title) {
-          const text = document.createElementNS(svgNS, "text");
-          text.setAttribute("x", String(w / 2));
-          text.setAttribute("y", String((h * 2) / 3 + 4));
-          text.setAttribute("dominant-baseline", "central");
-          text.setAttribute("text-anchor", "middle");
-          text.setAttribute("class", "umlcanvas-node-title");
-          text.textContent = title;
-          group.appendChild(text);
+          appendMultilineText(
+            group,
+            title,
+            w / 2,
+            (h * 2) / 3,
+            getNodeFontStyle(node),
+            svgNS
+          );
         }
 
         return group;

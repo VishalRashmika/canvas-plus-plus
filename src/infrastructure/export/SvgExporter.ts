@@ -4,6 +4,13 @@ import { DiagramEdge } from "../../domain/entities/DiagramEdge";
 import { defaultEdgeStyleRegistry } from "../../presentation/renderer/EdgeStyleRegistry";
 import { defaultRoutingService } from "../../domain/services/RoutingService";
 import { resolveCanvasColorHex, resolveCanvasBgColor } from "../../domain/value-objects/CanvasColor";
+import { wrapTextToLines } from "../../domain/services/TextMeasurement";
+import {
+  getNodeFontStyle,
+  getEdgeFontStyle,
+  getGroupFontStyle,
+  FontStyleConfig,
+} from "../../presentation/theme/Typography";
 
 export interface SvgExportOptions {
   padding?: number;
@@ -29,6 +36,101 @@ export function escapeXml(unsafe: string): string {
 }
 
 export class SvgExporter {
+  private getFontAttributes(font: FontStyleConfig): string {
+    const parts: string[] = [];
+    const styleParts: string[] = [];
+
+    if (font.fontSize !== undefined) {
+      parts.push(`font-size="${font.fontSize}"`);
+      styleParts.push(`font-size: ${font.fontSize}px`);
+    }
+    if (font.fontWeight !== undefined) {
+      parts.push(`font-weight="${font.fontWeight}"`);
+      styleParts.push(`font-weight: ${font.fontWeight}`);
+    }
+    if (font.fontStyle !== undefined) {
+      parts.push(`font-style="${font.fontStyle}"`);
+      styleParts.push(`font-style: ${font.fontStyle}`);
+    }
+
+    if (parts.length === 0) return "";
+    return ` ${parts.join(" ")} style="${styleParts.join("; ")}"`;
+  }
+
+  private normalizeMarkerId(markerId?: string): string | undefined {
+    if (!markerId || markerId === "none") return undefined;
+    if (markerId.startsWith("uml-marker-")) return markerId;
+    switch (markerId) {
+      case "arrow-open":
+      case "open-arrow":
+        return "uml-marker-open-arrow";
+      case "arrow-filled":
+      case "arrow":
+      case "arrow-head":
+        return "uml-marker-arrow-head";
+      case "triangle-hollow":
+      case "triangle":
+      case "hollow-triangle":
+        return "uml-marker-triangle-hollow";
+      case "triangle-filled":
+      case "filled-triangle":
+        return "uml-marker-triangle-filled";
+      case "diamond-hollow":
+      case "diamond":
+      case "hollow-diamond":
+        return "uml-marker-diamond-hollow";
+      case "diamond-filled":
+      case "filled-diamond":
+        return "uml-marker-diamond-filled";
+      case "circle-hollow":
+      case "circle":
+      case "hollow-circle":
+        return "uml-marker-circle-hollow";
+      case "circle-filled":
+      case "filled-circle":
+      case "dot":
+        return "uml-marker-circle-filled";
+      case "stop":
+      case "timing-stop":
+        return "uml-marker-timing-stop";
+      default:
+        return markerId;
+    }
+  }
+
+  private resolveStrokeDasharray(
+    edgeStyle?: DiagramEdge["style"],
+    styleDef?: { strokeDasharray?: string }
+  ): string | undefined {
+    if (edgeStyle?.strokeDasharray !== undefined && edgeStyle.strokeDasharray !== "") {
+      if (edgeStyle.strokeDasharray === "solid" || edgeStyle.strokeDasharray === "none") {
+        return undefined;
+      }
+      return edgeStyle.strokeDasharray;
+    }
+
+    if (edgeStyle?.lineType !== undefined) {
+      switch (edgeStyle.lineType) {
+        case "solid":
+          return undefined;
+        case "dashed":
+          return "6 4";
+        case "dotted":
+          return "2 3";
+        case "dash-dot":
+          return "8 3 2 3";
+        case "long-dash":
+          return "12 4";
+      }
+    }
+
+    if (edgeStyle?.dashed !== undefined) {
+      return edgeStyle.dashed ? "6 4" : undefined;
+    }
+
+    return styleDef?.strokeDasharray;
+  }
+
   /**
    * Generates a completely standalone SVG string from a Diagram aggregate (F-024).
    * Includes exact viewBox bounding box, self-contained styles, markers, and shapes.
@@ -78,6 +180,9 @@ export class SvgExporter {
     svg += `    <marker id="uml-marker-arrow-filled" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">\n`;
     svg += `      <path d="M 0 1 L 10 5 L 0 9 z" fill="${strokeColor}" />\n`;
     svg += `    </marker>\n`;
+    svg += `    <marker id="uml-marker-arrow-head" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">\n`;
+    svg += `      <path d="M 0 1 L 10 5 L 0 9 z" fill="${strokeColor}" />\n`;
+    svg += `    </marker>\n`;
 
     svg += `    <marker id="uml-marker-open-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">\n`;
     svg += `      <path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="${strokeColor}" stroke-width="1.5" />\n`;
@@ -87,11 +192,11 @@ export class SvgExporter {
     svg += `      <path d="M 0 1 L 10 5 L 0 9 Z" fill="${nodeBg}" stroke="${strokeColor}" stroke-width="1.5" />\n`;
     svg += `    </marker>\n`;
 
-    svg += `    <marker id="uml-marker-diamond-hollow" viewBox="0 0 12 10" refX="0" refY="5" markerWidth="8" markerHeight="6" orient="auto-start-reverse">\n`;
+    svg += `    <marker id="uml-marker-diamond-hollow" viewBox="0 0 12 10" refX="12" refY="5" markerWidth="8" markerHeight="6" orient="auto-start-reverse">\n`;
     svg += `      <path d="M 0 5 L 6 1 L 12 5 L 6 9 Z" fill="${nodeBg}" stroke="${strokeColor}" stroke-width="1.5" />\n`;
     svg += `    </marker>\n`;
 
-    svg += `    <marker id="uml-marker-diamond-filled" viewBox="0 0 12 10" refX="0" refY="5" markerWidth="8" markerHeight="6" orient="auto-start-reverse">\n`;
+    svg += `    <marker id="uml-marker-diamond-filled" viewBox="0 0 12 10" refX="12" refY="5" markerWidth="8" markerHeight="6" orient="auto-start-reverse">\n`;
     svg += `      <path d="M 0 5 L 6 1 L 12 5 L 6 9 Z" fill="${strokeColor}" stroke="${strokeColor}" />\n`;
     svg += `    </marker>\n`;
 
@@ -100,6 +205,12 @@ export class SvgExporter {
     svg += `    </marker>\n`;
     svg += `    <marker id="uml-marker-triangle-filled" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">\n`;
     svg += `      <path d="M 0 1 L 10 5 L 0 9 Z" fill="${strokeColor}" stroke="${strokeColor}" />\n`;
+    svg += `    </marker>\n`;
+    svg += `    <marker id="uml-marker-circle-hollow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">\n`;
+    svg += `      <path d="M 1 5 A 4 4 0 1 1 9 5 A 4 4 0 1 1 1 5 Z" fill="${nodeBg}" stroke="${strokeColor}" stroke-width="1.5" />\n`;
+    svg += `    </marker>\n`;
+    svg += `    <marker id="uml-marker-circle-filled" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">\n`;
+    svg += `      <path d="M 1 5 A 4 4 0 1 1 9 5 A 4 4 0 1 1 1 5 Z" fill="${strokeColor}" stroke="${strokeColor}" />\n`;
     svg += `    </marker>\n`;
 
     // Dynamic colored markers for edges with custom or preset colors
@@ -116,13 +227,16 @@ export class SvgExporter {
       usedColorKeys.add(key);
 
       coloredMarkerDefs.push(`    <marker id="uml-marker-arrow-filled--color-${key}" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">\n      <path d="M 0 1 L 10 5 L 0 9 z" fill="${edgeCol}" stroke="${edgeCol}" />\n    </marker>`);
+      coloredMarkerDefs.push(`    <marker id="uml-marker-arrow-head--color-${key}" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">\n      <path d="M 0 1 L 10 5 L 0 9 z" fill="${edgeCol}" stroke="${edgeCol}" />\n    </marker>`);
       coloredMarkerDefs.push(`    <marker id="umlcanvas-arrow-end--color-${key}" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">\n      <path d="M 0 1 L 10 5 L 0 9 z" fill="${edgeCol}" stroke="${edgeCol}" />\n    </marker>`);
       coloredMarkerDefs.push(`    <marker id="uml-marker-open-arrow--color-${key}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">\n      <path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="${edgeCol}" stroke-width="1.5" />\n    </marker>`);
       coloredMarkerDefs.push(`    <marker id="uml-marker-triangle-hollow--color-${key}" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">\n      <path d="M 0 1 L 10 5 L 0 9 Z" fill="${nodeBg}" stroke="${edgeCol}" stroke-width="1.5" />\n    </marker>`);
-      coloredMarkerDefs.push(`    <marker id="uml-marker-diamond-hollow--color-${key}" viewBox="0 0 12 10" refX="0" refY="5" markerWidth="8" markerHeight="6" orient="auto-start-reverse">\n      <path d="M 0 5 L 6 1 L 12 5 L 6 9 Z" fill="${nodeBg}" stroke="${edgeCol}" stroke-width="1.5" />\n    </marker>`);
-      coloredMarkerDefs.push(`    <marker id="uml-marker-diamond-filled--color-${key}" viewBox="0 0 12 10" refX="0" refY="5" markerWidth="8" markerHeight="6" orient="auto-start-reverse">\n      <path d="M 0 5 L 6 1 L 12 5 L 6 9 Z" fill="${edgeCol}" stroke="${edgeCol}" />\n    </marker>`);
+      coloredMarkerDefs.push(`    <marker id="uml-marker-diamond-hollow--color-${key}" viewBox="0 0 12 10" refX="12" refY="5" markerWidth="8" markerHeight="6" orient="auto-start-reverse">\n      <path d="M 0 5 L 6 1 L 12 5 L 6 9 Z" fill="${nodeBg}" stroke="${edgeCol}" stroke-width="1.5" />\n    </marker>`);
+      coloredMarkerDefs.push(`    <marker id="uml-marker-diamond-filled--color-${key}" viewBox="0 0 12 10" refX="12" refY="5" markerWidth="8" markerHeight="6" orient="auto-start-reverse">\n      <path d="M 0 5 L 6 1 L 12 5 L 6 9 Z" fill="${edgeCol}" stroke="${edgeCol}" />\n    </marker>`);
       coloredMarkerDefs.push(`    <marker id="uml-marker-timing-stop--color-${key}" viewBox="0 0 2 10" refX="1" refY="5" markerWidth="3" markerHeight="10" orient="auto-start-reverse">\n      <line x1="1" y1="0" x2="1" y2="10" stroke="${edgeCol}" stroke-width="2" />\n    </marker>`);
       coloredMarkerDefs.push(`    <marker id="uml-marker-triangle-filled--color-${key}" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">\n      <path d="M 0 1 L 10 5 L 0 9 Z" fill="${edgeCol}" stroke="${edgeCol}" />\n    </marker>`);
+      coloredMarkerDefs.push(`    <marker id="uml-marker-circle-hollow--color-${key}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">\n      <path d="M 1 5 A 4 4 0 1 1 9 5 A 4 4 0 1 1 1 5 Z" fill="${nodeBg}" stroke="${edgeCol}" stroke-width="1.5" />\n    </marker>`);
+      coloredMarkerDefs.push(`    <marker id="uml-marker-circle-filled--color-${key}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">\n      <path d="M 1 5 A 4 4 0 1 1 9 5 A 4 4 0 1 1 1 5 Z" fill="${edgeCol}" stroke="${edgeCol}" />\n    </marker>`);
     }
 
     if (coloredMarkerDefs.length > 0) {
@@ -172,10 +286,13 @@ export class SvgExporter {
         ? (resolveCanvasBgColor(group.color, isDark ? 0.15 : 0.06, theme) ?? "rgba(120, 120, 120, 0.05)")
         : "rgba(120, 120, 120, 0.05)";
 
+      const groupFont = getGroupFontStyle(group);
+      const groupFontAttrs = this.getFontAttributes(groupFont);
+
       svg += `  <g class="umlcanvas-group"${group.color ? ` data-color="${group.color}"` : ""}>\n`;
       svg += `    <rect x="${gx}" y="${gy}" width="${gw}" height="${gh}" rx="6" ry="6" class="group-body" stroke="${groupStroke}" fill="${groupFill}" />\n`;
       if (group.name) {
-        svg += `    <text x="${gx + 10}" y="${gy + 18}" class="group-title" fill="${groupStroke}">${escapeXml(group.name)}</text>\n`;
+        svg += `    <text x="${gx + 10}" y="${gy + 18}" class="group-title" fill="${groupStroke}"${groupFontAttrs}>${escapeXml(group.name)}</text>\n`;
       }
       svg += `  </g>\n`;
     }
@@ -321,7 +438,8 @@ export class SvgExporter {
 
     const styleDef = defaultEdgeStyleRegistry.get(edge.kind);
     const strokeW = edge.style?.strokeWidth ?? styleDef.strokeWidth ?? 2;
-    const dash = styleDef.strokeDasharray ? ` stroke-dasharray="${styleDef.strokeDasharray}"` : "";
+    const resolvedDash = this.resolveStrokeDasharray(edge.style, styleDef);
+    const dash = resolvedDash ? ` stroke-dasharray="${resolvedDash}"` : "";
 
     const finalStrokeColor =
       resolveCanvasColorHex(edge.style?.color, theme) ??
@@ -333,16 +451,30 @@ export class SvgExporter {
       ? (edge.style?.color ?? edge.style?.strokeColor)!.replace(/[^a-zA-Z0-9_-]/g, "_")
       : undefined;
 
-    const markerEndId = styleDef.markerEndId
+    const rawMarkerEnd =
+      edge.style?.markerEnd !== undefined
+        ? edge.style.markerEnd === "none" || !edge.style.markerEnd
+          ? undefined
+          : this.normalizeMarkerId(edge.style.markerEnd)
+        : styleDef.markerEndId;
+
+    const rawMarkerStart =
+      edge.style?.markerStart !== undefined
+        ? edge.style.markerStart === "none" || !edge.style.markerStart
+          ? undefined
+          : this.normalizeMarkerId(edge.style.markerStart)
+        : styleDef.markerStartId;
+
+    const markerEndId = rawMarkerEnd
       ? colorKey
-        ? `${styleDef.markerEndId}--color-${colorKey}`
-        : styleDef.markerEndId
+        ? `${rawMarkerEnd}--color-${colorKey}`
+        : rawMarkerEnd
       : undefined;
 
-    const markerStartId = styleDef.markerStartId
+    const markerStartId = rawMarkerStart
       ? colorKey
-        ? `${styleDef.markerStartId}--color-${colorKey}`
-        : styleDef.markerStartId
+        ? `${rawMarkerStart}--color-${colorKey}`
+        : rawMarkerStart
       : undefined;
 
     const markerEnd = markerEndId ? ` marker-end="url(#${markerEndId})"` : "";
@@ -351,16 +483,21 @@ export class SvgExporter {
     let out = `  <g class="umlcanvas-edge"${edge.style?.color ? ` data-color="${edge.style.color}"` : ""}>\n`;
     out += `    <path d="${pathData}" class="edge-path" stroke="${finalStrokeColor}" stroke-width="${strokeW}"${dash}${markerStart}${markerEnd} />\n`;
 
+    const edgeFont = getEdgeFontStyle(edge);
+    const edgeFontAttrs = this.getFontAttributes(edgeFont);
+    const multFontSize = edgeFont.fontSize ? Math.max(8, Math.round(edgeFont.fontSize * 0.85)) : 10;
+    const multFontAttrs = this.getFontAttributes({ ...edgeFont, fontSize: multFontSize });
+
     // Multiplicity source
     if (edge.multiplicitySource && points.length >= 2) {
       const sp = points[0];
-      out += `    <text x="${sp.x + 8}" y="${sp.y - 6}" class="edge-label" font-size="10">${escapeXml(edge.multiplicitySource)}</text>\n`;
+      out += `    <text x="${sp.x + 8}" y="${sp.y - 6}" class="edge-label"${multFontAttrs}>${escapeXml(edge.multiplicitySource)}</text>\n`;
     }
 
     // Multiplicity target
     if (edge.multiplicityTarget && points.length >= 2) {
       const ep = points[points.length - 1];
-      out += `    <text x="${ep.x + 8}" y="${ep.y - 6}" class="edge-label" font-size="10">${escapeXml(edge.multiplicityTarget)}</text>\n`;
+      out += `    <text x="${ep.x + 8}" y="${ep.y - 6}" class="edge-label"${multFontAttrs}>${escapeXml(edge.multiplicityTarget)}</text>\n`;
     }
 
     // Edge label (midpoint)
@@ -368,10 +505,33 @@ export class SvgExporter {
       const midIdx = Math.floor(points.length / 2);
       const midPoint = points[midIdx];
       const labelText = edge.labels.map((l) => l.text).join(", ");
-      out += `    <text x="${midPoint.x}" y="${midPoint.y - 8}" text-anchor="middle" class="edge-label">${escapeXml(labelText)}</text>\n`;
+      out += `    <text x="${midPoint.x}" y="${midPoint.y - 8}" text-anchor="middle" class="edge-label"${edgeFontAttrs}>${escapeXml(labelText)}</text>\n`;
     }
 
     out += `  </g>\n`;
+    return out;
+  }
+
+  private renderMultilineText(
+    cx: number,
+    cy: number,
+    title: string,
+    fontAttrs: string,
+    textAnchor = "middle",
+    className = "node-title",
+    fontSize = 13
+  ): string {
+    const lines = (title ?? "").split(/\r?\n/);
+    if (lines.length <= 1) {
+      return `    <text x="${cx}" y="${cy}" text-anchor="${textAnchor}" class="${className}"${fontAttrs}>${escapeXml(title)}</text>\n`;
+    }
+    const lineHeight = Math.round(fontSize * 1.35);
+    const startY = cy - ((lines.length - 1) * lineHeight) / 2;
+    let out = `    <text x="${cx}" y="${cy}" text-anchor="${textAnchor}" class="${className}"${fontAttrs}>\n`;
+    lines.forEach((lineText, idx) => {
+      out += `      <tspan x="${cx}" y="${startY + idx * lineHeight}" text-anchor="${textAnchor}">${escapeXml(lineText || " ")}</tspan>\n`;
+    });
+    out += `    </text>\n`;
     return out;
   }
 
@@ -389,6 +549,15 @@ export class SvgExporter {
 
     const hasCustomColor = Boolean(node.style?.color || node.style?.strokeColor || node.style?.fillColor);
     const bodyAttrs = hasCustomColor ? ` stroke="${strokeColor}" fill="${nodeBg}"` : "";
+    const nodeFont = getNodeFontStyle(node);
+    const fontAttrs = this.getFontAttributes(nodeFont);
+    const baseFontSize = nodeFont.fontSize ?? 13;
+    const stFontSize = nodeFont.fontSize ? Math.max(8, Math.round(nodeFont.fontSize * 0.77)) : undefined;
+    const stFontAttrs = this.getFontAttributes({
+      ...nodeFont,
+      fontSize: stFontSize,
+      fontStyle: nodeFont.fontStyle ?? "italic",
+    });
 
     let out = `  <g class="umlcanvas-node"${node.style?.color ? ` data-color="${node.style.color}"` : ""} transform="translate(${x}, ${y})">\n`;
 
@@ -399,7 +568,7 @@ export class SvgExporter {
         const r = Math.min(w, h) / 2;
         out += `    <circle cx="${cx}" cy="${cy}" r="${r}" class="node-body"${bodyAttrs} />\n`;
         if (title) {
-          out += `    <text x="${cx}" y="${cy + 4}" text-anchor="middle" class="node-title">${escapeXml(title)}</text>\n`;
+          out += this.renderMultilineText(cx, cy + 4, title, fontAttrs, "middle", "node-title", baseFontSize);
         }
         break;
       }
@@ -409,7 +578,7 @@ export class SvgExporter {
         const ry = h / 2;
         out += `    <ellipse cx="${rx}" cy="${ry}" rx="${rx}" ry="${ry}" class="node-body"${bodyAttrs} />\n`;
         if (title) {
-          out += `    <text x="${rx}" y="${ry + 4}" text-anchor="middle" class="node-title">${escapeXml(title)}</text>\n`;
+          out += this.renderMultilineText(rx, ry + 4, title, fontAttrs, "middle", "node-title", baseFontSize);
         }
         break;
       }
@@ -417,7 +586,7 @@ export class SvgExporter {
       case "generic.triangle": {
         out += `    <polygon points="${w / 2},0 ${w},${h} 0,${h}" class="node-body"${bodyAttrs} />\n`;
         if (title) {
-          out += `    <text x="${w / 2}" y="${(h * 2) / 3 + 4}" text-anchor="middle" class="node-title">${escapeXml(title)}</text>\n`;
+          out += this.renderMultilineText(w / 2, (h * 2) / 3 + 4, title, fontAttrs, "middle", "node-title", baseFontSize);
         }
         break;
       }
@@ -427,7 +596,7 @@ export class SvgExporter {
       case "state.choice": {
         out += `    <polygon points="${w / 2},0 ${w},${h / 2} ${w / 2},${h} 0,${h / 2}" class="node-body"${bodyAttrs} />\n`;
         if (title) {
-          out += `    <text x="${w / 2}" y="${h / 2 + 4}" text-anchor="middle" class="node-title">${escapeXml(title)}</text>\n`;
+          out += this.renderMultilineText(w / 2, h / 2 + 4, title, fontAttrs, "middle", "node-title", baseFontSize);
         }
         break;
       }
@@ -436,7 +605,7 @@ export class SvgExporter {
         const rx = w / 2;
         const ry = h / 2;
         out += `    <ellipse cx="${rx}" cy="${ry}" rx="${rx}" ry="${ry}" class="node-body"${bodyAttrs} />\n`;
-        out += `    <text x="${rx}" y="${ry + 4}" text-anchor="middle" class="node-title">${escapeXml(title)}</text>\n`;
+        out += this.renderMultilineText(rx, ry + 4, title, fontAttrs, "middle", "node-title", baseFontSize);
         break;
       }
 
@@ -447,7 +616,7 @@ export class SvgExporter {
         out += `    <line x1="${cx - 18}" y1="32" x2="${cx + 18}" y2="32" stroke="${strokeColor}" stroke-width="1.5" />\n`;
         out += `    <line x1="${cx}" y1="46" x2="${cx - 14}" y2="68" stroke="${strokeColor}" stroke-width="1.5" />\n`;
         out += `    <line x1="${cx}" y1="46" x2="${cx + 14}" y2="68" stroke="${strokeColor}" stroke-width="1.5" />\n`;
-        out += `    <text x="${cx}" y="${h - 4}" text-anchor="middle" class="node-title">${escapeXml(title)}</text>\n`;
+        out += this.renderMultilineText(cx, h - 4, title, fontAttrs, "middle", "node-title", baseFontSize);
         break;
       }
 
@@ -459,8 +628,8 @@ export class SvgExporter {
         out += `    <rect x="${ix}" y="${iy}" width="16" height="18" fill="${nodeBg}" stroke="${strokeColor}" stroke-width="1" />\n`;
         out += `    <rect x="${ix - 4}" y="${iy + 3}" width="7" height="4" fill="${nodeBg}" stroke="${strokeColor}" stroke-width="1" />\n`;
         out += `    <rect x="${ix - 4}" y="${iy + 11}" width="7" height="4" fill="${nodeBg}" stroke="${strokeColor}" stroke-width="1" />\n`;
-        out += `    <text x="${w / 2}" y="24" text-anchor="middle" class="node-st">«${escapeXml(node.stereotype || "component")}»</text>\n`;
-        out += `    <text x="${w / 2}" y="48" text-anchor="middle" class="node-title">${escapeXml(title)}</text>\n`;
+        out += `    <text x="${w / 2}" y="24" text-anchor="middle" class="node-st"${stFontAttrs}>«${escapeXml(node.stereotype || "component")}»</text>\n`;
+        out += this.renderMultilineText(w / 2, 48, title, fontAttrs, "middle", "node-title", baseFontSize);
         break;
       }
 
@@ -469,7 +638,7 @@ export class SvgExporter {
         const cy = h / 2;
         const r = Math.min(cx, cy) - 2;
         out += `    <circle cx="${cx}" cy="${cy}" r="${r}" class="node-body" stroke-width="2" />\n`;
-        out += `    <text x="${cx}" y="${h + 14}" text-anchor="middle" class="node-title">${escapeXml(title)}</text>\n`;
+        out += this.renderMultilineText(cx, h + 14, title, fontAttrs, "middle", "node-title", baseFontSize);
         break;
       }
 
@@ -478,7 +647,7 @@ export class SvgExporter {
         const cy = h / 2;
         const r = Math.min(cx, cy) - 2;
         out += `    <path d="M ${cx},${cy - r} A ${r},${r} 0 0,0 ${cx},${cy + r}" fill="none" stroke="${strokeColor}" stroke-width="2" />\n`;
-        out += `    <text x="${cx}" y="${h + 14}" text-anchor="middle" class="node-title">${escapeXml(title)}</text>\n`;
+        out += this.renderMultilineText(cx, h + 14, title, fontAttrs, "middle", "node-title", baseFontSize);
         break;
       }
 
@@ -490,8 +659,8 @@ export class SvgExporter {
         out += `    <polygon points="${w - d},${d} ${w},0 ${w},${h - d} ${w - d},${h}" fill="${nodeBg}" stroke="${strokeColor}" stroke-width="1.5" />\n`;
         out += `    <rect x="0" y="${d}" width="${w - d}" height="${h - d}" class="node-body" />\n`;
         const st = node.stereotype || (node.kind === "uml.device" ? "device" : "node");
-        out += `    <text x="${(w - d) / 2}" y="${d + 20}" text-anchor="middle" class="node-st">«${escapeXml(st)}»</text>\n`;
-        out += `    <text x="${(w - d) / 2}" y="${d + 42}" text-anchor="middle" class="node-title">${escapeXml(title)}</text>\n`;
+        out += `    <text x="${(w - d) / 2}" y="${d + 20}" text-anchor="middle" class="node-st"${stFontAttrs}>«${escapeXml(st)}»</text>\n`;
+        out += this.renderMultilineText((w - d) / 2, d + 42, title, fontAttrs, "middle", "node-title", baseFontSize);
         break;
       }
 
@@ -501,8 +670,8 @@ export class SvgExporter {
         const docY = 8;
         out += `    <path d="M ${docX},${docY} L ${docX + 10},${docY} L ${docX + 16},${docY + 6} L ${docX + 16},${docY + 20} L ${docX},${docY + 20} Z" fill="${nodeBg}" stroke="${strokeColor}" stroke-width="1" />\n`;
         out += `    <path d="M ${docX + 10},${docY} L ${docX + 10},${docY + 6} L ${docX + 16},${docY + 6}" fill="none" stroke="${strokeColor}" stroke-width="1" />\n`;
-        out += `    <text x="${w / 2}" y="24" text-anchor="middle" class="node-st">«${escapeXml(node.stereotype || "artifact")}»</text>\n`;
-        out += `    <text x="${w / 2}" y="46" text-anchor="middle" class="node-title">${escapeXml(title)}</text>\n`;
+        out += `    <text x="${w / 2}" y="24" text-anchor="middle" class="node-st"${stFontAttrs}>«${escapeXml(node.stereotype || "artifact")}»</text>\n`;
+        out += this.renderMultilineText(w / 2, 46, title, fontAttrs, "middle", "node-title", baseFontSize);
         break;
       }
 
@@ -510,7 +679,7 @@ export class SvgExporter {
         const headerW = 110;
         out += `    <rect x="0" y="0" width="${w}" height="${h}" rx="2" class="node-body" />\n`;
         out += `    <line x1="${headerW}" y1="0" x2="${headerW}" y2="${h}" class="comp-divider" />\n`;
-        out += `    <text x="${headerW / 2}" y="${h / 2 + 4}" text-anchor="middle" class="node-title">${escapeXml(title)}</text>\n`;
+        out += this.renderMultilineText(headerW / 2, h / 2 + 4, title, fontAttrs, "middle", "node-title", baseFontSize);
         out += `    <line x1="${headerW}" y1="${h * 0.33}" x2="${w}" y2="${h * 0.33}" stroke="${strokeColor}" stroke-dasharray="4 4" stroke-width="1" />\n`;
         out += `    <line x1="${headerW}" y1="${h * 0.67}" x2="${w}" y2="${h * 0.67}" stroke="${strokeColor}" stroke-dasharray="4 4" stroke-width="1" />\n`;
         break;
@@ -518,25 +687,28 @@ export class SvgExporter {
 
       case "timing.stateSegment": {
         out += `    <rect x="0" y="0" width="${w}" height="${h}" rx="3" class="node-body" fill="rgba(120, 100, 255, 0.2)" />\n`;
-        out += `    <text x="${w / 2}" y="${h / 2 + 4}" text-anchor="middle" class="node-title">${escapeXml(title)}</text>\n`;
+        out += this.renderMultilineText(w / 2, h / 2 + 4, title, fontAttrs, "middle", "node-title", baseFontSize);
         break;
       }
 
       case "schematic.chip": {
         out += `    <rect x="0" y="0" width="${w}" height="${h}" rx="4" class="node-body" stroke-width="2" />\n`;
         out += `    <path d="M ${w / 2 - 8},0 A 8,8 0 0,0 ${w / 2 + 8},0" fill="${nodeBg}" stroke="${strokeColor}" stroke-width="1.5" />\n`;
-        out += `    <text x="${w / 2}" y="${h / 2 + 4}" text-anchor="middle" class="node-title">${escapeXml(title)}</text>\n`;
+        out += this.renderMultilineText(w / 2, h / 2 + 4, title, fontAttrs, "middle", "node-title", baseFontSize);
+
+        const pinFontSize = nodeFont.fontSize ? Math.max(7, Math.round(nodeFont.fontSize * 0.7)) : 9;
+        const pinFontAttrs = this.getFontAttributes({ ...nodeFont, fontSize: pinFontSize });
 
         for (const port of node.ports) {
           const portLabel = port.dataType ? `${port.name} [${port.dataType}]` : port.name;
           if (port.side === "left") {
             const py = Math.round(h * port.offset);
             out += `    <line x1="-6" y1="${py}" x2="0" y2="${py}" stroke="${strokeColor}" stroke-width="2" />\n`;
-            out += `    <text x="6" y="${py + 3.5}" class="comp-item" font-size="9">▶ ${escapeXml(portLabel)}</text>\n`;
+            out += `    <text x="6" y="${py + 3.5}" class="comp-item"${pinFontAttrs}>▶ ${escapeXml(portLabel)}</text>\n`;
           } else if (port.side === "right") {
             const py = Math.round(h * port.offset);
             out += `    <line x1="${w}" y1="${py}" x2="${w + 6}" y2="${py}" stroke="${strokeColor}" stroke-width="2" />\n`;
-            out += `    <text x="${w - 6}" y="${py + 3.5}" text-anchor="end" class="comp-item" font-size="9">${escapeXml(portLabel)} ▶</text>\n`;
+            out += `    <text x="${w - 6}" y="${py + 3.5}" text-anchor="end" class="comp-item"${pinFontAttrs}>${escapeXml(portLabel)} ▶</text>\n`;
           }
         }
 
@@ -552,30 +724,32 @@ export class SvgExporter {
         const tabH = 22;
         out += `    <rect x="0" y="0" width="${tabW}" height="${tabH}" fill="${nodeBg}" stroke="${strokeColor}" stroke-width="1.5" />\n`;
         out += `    <rect x="0" y="${tabH}" width="${w}" height="${h - tabH}" class="node-body" />\n`;
-        out += `    <text x="${w / 2}" y="${tabH + 24}" text-anchor="middle" class="node-title">${escapeXml(title)}</text>\n`;
+        out += `    <text x="${w / 2}" y="${tabH + 24}" text-anchor="middle" class="node-title"${fontAttrs}>${escapeXml(title)}</text>\n`;
         break;
       }
 
       case "uml.compositeClassifier": {
         out += `    <rect x="0" y="0" width="${w}" height="${h}" rx="8" class="node-body" />\n`;
         out += `    <line x1="0" y1="34" x2="${w}" y2="34" class="comp-divider" />\n`;
-        out += `    <text x="${w / 2}" y="22" text-anchor="middle" class="node-title">${escapeXml(title)}</text>\n`;
+        out += `    <text x="${w / 2}" y="22" text-anchor="middle" class="node-title"${fontAttrs}>${escapeXml(title)}</text>\n`;
         break;
       }
 
       case "uml.part": {
         out += `    <rect x="0" y="0" width="${w}" height="${h}" rx="2" class="node-body" />\n`;
-        out += `    <text x="${w / 2}" y="${h / 2 + 5}" text-anchor="middle" class="node-title">${escapeXml(title)}</text>\n`;
+        out += `    <text x="${w / 2}" y="${h / 2 + 5}" text-anchor="middle" class="node-title"${fontAttrs}>${escapeXml(title)}</text>\n`;
         break;
       }
 
       case "interaction.frame": {
         const tabW = Math.min(80, w * 0.4);
         const tabH = 22;
+        const tabFontSize = nodeFont.fontSize ? Math.max(8, Math.round(nodeFont.fontSize * 0.77)) : 10;
+        const tabFontAttrs = this.getFontAttributes({ ...nodeFont, fontSize: tabFontSize, fontWeight: nodeFont.fontWeight ?? "bold" });
         out += `    <rect x="0" y="0" width="${w}" height="${h}" rx="2" class="node-body" />\n`;
         out += `    <path d="M 0,0 L ${tabW},0 L ${tabW + 8},${tabH / 2} L ${tabW},${tabH} L 0,${tabH} Z" fill="${nodeBg}" stroke="${strokeColor}" stroke-width="1.5" />\n`;
-        out += `    <text x="${tabW / 2}" y="15" text-anchor="middle" font-size="10" font-weight="bold" fill="${strokeColor}">sd</text>\n`;
-        out += `    <text x="${tabW + 16}" y="16" class="node-title">${escapeXml(title)}</text>\n`;
+        out += `    <text x="${tabW / 2}" y="15" text-anchor="middle" fill="${strokeColor}"${tabFontAttrs}>sd</text>\n`;
+        out += this.renderMultilineText(tabW + 16, 16, title, fontAttrs, "start", "node-title", baseFontSize);
         if (node.childDiagramId) {
           out += `    <rect x="${w - 22}" y="6" width="16" height="16" rx="3" fill="${nodeBg}" stroke="${accentColor}" stroke-width="1" />\n`;
           out += `    <text x="${w - 14}" y="18" text-anchor="middle" fill="${accentColor}" font-size="11">⤢</text>\n`;
@@ -584,9 +758,11 @@ export class SvgExporter {
       }
 
       case "interaction.occurrence": {
+        const refFontSize = nodeFont.fontSize ? Math.max(8, Math.round(nodeFont.fontSize * 0.77)) : undefined;
+        const refFontAttrs = this.getFontAttributes({ ...nodeFont, fontSize: refFontSize });
         out += `    <rect x="0" y="0" width="${w}" height="${h}" rx="4" class="node-body" />\n`;
-        out += `    <text x="8" y="18" class="node-st">ref</text>\n`;
-        out += `    <text x="${w / 2}" y="${h / 2 + 5}" text-anchor="middle" class="node-title">${escapeXml(title)}</text>\n`;
+        out += `    <text x="8" y="18" class="node-st"${refFontAttrs}>ref</text>\n`;
+        out += this.renderMultilineText(w / 2, h / 2 + 5, title, fontAttrs, "middle", "node-title", baseFontSize);
         break;
       }
 
@@ -610,7 +786,7 @@ export class SvgExporter {
         const cx = w / 2;
         out += `    <line x1="${cx}" y1="${h}" x2="${cx}" y2="16" stroke="${strokeColor}" stroke-width="1.5" />\n`;
         out += `    <line x1="${cx - 12}" y1="16" x2="${cx + 12}" y2="16" stroke="${strokeColor}" stroke-width="2" />\n`;
-        out += `    <text x="${cx}" y="10" text-anchor="middle" class="node-title" font-size="10">${escapeXml(title || "VCC")}</text>\n`;
+        out += `    <text x="${cx}" y="10" text-anchor="middle" class="node-title"${fontAttrs}>${escapeXml(title || "VCC")}</text>\n`;
         break;
       }
 
@@ -630,12 +806,18 @@ export class SvgExporter {
         const stickyBg = nodeBg;
         out += `    <rect x="0" y="0" width="${w}" height="${h}" rx="4" class="umlcanvas-sticky-body" fill="${stickyBg}" stroke="${strokeColor}" stroke-width="1.5" />\n`;
         out += `    <path d="M 0 4 A 4 4 0 0 1 4 0 L ${w - 4} 0 A 4 4 0 0 1 ${w} 4 L ${w} ${stripH} L 0 ${stripH} Z" class="umlcanvas-sticky-strip" fill="rgba(0,0,0,0.06)" />\n`;
-        const lines = (title || "").split("\n");
-        let textY = stripH + 18;
+        const nodeFont = getNodeFontStyle(node);
+        const fontSize = nodeFont.fontSize ?? 13;
+        const boldMultiplier = nodeFont.bold ? 1.1 : 1.0;
+        const charWidth = Math.max(5, fontSize * 0.58 * boldMultiplier);
+        const availableW = Math.max(40, w - 24);
+        const lines = wrapTextToLines(title || "", availableW, charWidth);
+        const lineSpacing = Math.round(fontSize * 1.38);
+        let textY = 26 + fontSize;
         for (const line of lines) {
-          if (textY > h - 8) break;
-          out += `    <text x="12" y="${textY}" class="umlcanvas-sticky-text" font-size="13" fill="${strokeColor}">${escapeXml(line)}</text>\n`;
-          textY += 18;
+          if (textY > h - 6) break;
+          out += `    <text x="12" y="${textY}" class="umlcanvas-sticky-text" fill="${strokeColor}"${fontAttrs}>${escapeXml(line || " ")}</text>\n`;
+          textY += lineSpacing;
         }
         break;
       }
@@ -657,7 +839,7 @@ export class SvgExporter {
           out += `    <image x="${pad}" y="${pad}" width="${imgW}" height="${imgH}" preserveAspectRatio="xMidYMid slice" href="${escapeXml(src)}" />\n`;
         }
         if (title) {
-          out += `    <text x="${w / 2}" y="${h - 14}" text-anchor="middle" class="umlcanvas-photo-frame-title" font-size="13" fill="${strokeColor}">${escapeXml(title)}</text>\n`;
+          out += `    <text x="${w / 2}" y="${h - 14}" text-anchor="middle" class="umlcanvas-photo-frame-title" fill="${strokeColor}"${fontAttrs}>${escapeXml(title)}</text>\n`;
         }
         break;
       }
@@ -681,7 +863,7 @@ export class SvgExporter {
         out += `      <polyline points="8.5 2 8.5 5.5 12 5.5" fill="none" stroke="${strokeColor}" stroke-width="1.2" stroke-linejoin="round" />\n`;
         out += `    </g>\n`;
         // Title
-        out += `    <text x="30" y="21" class="node-title">${escapeXml(noteTitle)}</text>\n`;
+        out += `    <text x="30" y="21" class="node-title"${fontAttrs}>${escapeXml(noteTitle)}</text>\n`;
         // Open icon
         out += `    <text x="${w - 20}" y="21" font-size="14" fill="${strokeColor}">↗</text>\n`;
 
@@ -716,20 +898,27 @@ export class SvgExporter {
         out += `    <rect x="0" y="0" width="${w}" height="${h}" rx="2" class="node-body"${bodyAttrs} />\n`;
         let curY = 18;
         if (node.stereotype) {
-          out += `    <text x="${w / 2}" y="${curY}" text-anchor="middle" class="node-st">«${escapeXml(node.stereotype)}»</text>\n`;
+          out += `    <text x="${w / 2}" y="${curY}" text-anchor="middle" class="node-st"${stFontAttrs}>«${escapeXml(node.stereotype)}»</text>\n`;
           curY += 16;
         }
-        out += `    <text x="${w / 2}" y="${curY}" text-anchor="middle" class="node-title">${escapeXml(title)}</text>\n`;
-        curY += 8;
+        const titleLines = (title ?? "").split(/\r?\n/);
+        const titleBlockHeight = Math.max(1, titleLines.length) * Math.round(baseFontSize * 1.35);
+        const titleCenterY = titleLines.length > 1 ? curY + (titleBlockHeight - Math.round(baseFontSize * 1.35)) / 2 : curY;
+        out += this.renderMultilineText(w / 2, titleCenterY, title, fontAttrs, "middle", "node-title", baseFontSize);
+        curY += titleBlockHeight - 10;
 
         if (node.compartments && node.compartments.length > 0) {
+          const compFontSize = nodeFont.fontSize ? Math.max(9, Math.round(nodeFont.fontSize * 0.85)) : undefined;
+          const compFontAttrs = this.getFontAttributes({ ...nodeFont, fontSize: compFontSize });
+          const compLineHeight = compFontSize ? Math.round(compFontSize * 1.5) : 14;
+
           for (const comp of node.compartments) {
             out += `    <line x1="0" y1="${curY}" x2="${w}" y2="${curY}" class="comp-divider" />\n`;
-            curY += 14;
+            curY += compLineHeight;
             for (const item of comp.items) {
               const vis = item.visibility ? `${item.visibility} ` : "";
-              out += `    <text x="8" y="${curY}" class="comp-item">${escapeXml(vis + item.text)}</text>\n`;
-              curY += 14;
+              out += `    <text x="8" y="${curY}" class="comp-item"${compFontAttrs}>${escapeXml(vis + item.text)}</text>\n`;
+              curY += compLineHeight;
             }
           }
         }

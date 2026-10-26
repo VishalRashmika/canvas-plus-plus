@@ -2,11 +2,40 @@ import { Id, ShapeKind, Side, EdgeRouting } from "../types";
 import { Point } from "../value-objects/Point";
 import { Label } from "./Label";
 
+export type LineEndingType =
+  | "none"
+  | "arrow-open"
+  | "arrow-filled"
+  | "triangle-hollow"
+  | "triangle-filled"
+  | "diamond-hollow"
+  | "diamond-filled"
+  | "circle-hollow"
+  | "circle-filled"
+  | "stop";
+
+export type LinePatternType =
+  | "solid"
+  | "dashed"
+  | "dotted"
+  | "dash-dot"
+  | "long-dash";
+
 export interface EdgeStyle {
   strokeColor?: string;
   strokeWidth?: number;
   dashed?: boolean;
   color?: string;
+  fontSize?: number;
+  bold?: boolean;
+  italic?: boolean;
+  fontWeight?: string | number;
+  fontStyle?: "normal" | "italic";
+  fontFamily?: string;
+  lineType?: LinePatternType;
+  strokeDasharray?: string;
+  markerStart?: string;
+  markerEnd?: string;
 }
 
 /**

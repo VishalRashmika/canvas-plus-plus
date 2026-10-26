@@ -7,7 +7,10 @@ export interface TextStyle {
   fontSize?: number;
   bold?: boolean;
   italic?: boolean;
+  fontWeight?: string | number;
+  fontStyle?: "normal" | "italic";
   color?: string;
+  fontFamily?: string;
 }
 
 /**

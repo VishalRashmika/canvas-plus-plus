@@ -1,6 +1,7 @@
 import { Id } from "../types";
 import { Point } from "../value-objects/Point";
 import { Size } from "../value-objects/Rect";
+import { TextStyle } from "./Label";
 
 /** F-010. First-class group container compatible with Obsidian Canvas */
 export interface Group {
@@ -12,6 +13,13 @@ export interface Group {
   position?: Point;
   size?: Size;
   locked?: boolean;
+  fontSize?: number;
+  bold?: boolean;
+  italic?: boolean;
+  fontWeight?: string | number;
+  fontStyle?: "normal" | "italic";
+  fontFamily?: string;
+  style?: TextStyle;
 }
 
 export function createGroup(params: {
@@ -23,6 +31,13 @@ export function createGroup(params: {
   position?: Point;
   size?: Size;
   locked?: boolean;
+  fontSize?: number;
+  bold?: boolean;
+  italic?: boolean;
+  fontWeight?: string | number;
+  fontStyle?: "normal" | "italic";
+  fontFamily?: string;
+  style?: TextStyle;
 }): Group {
   return {
     id: params.id,
@@ -33,5 +48,12 @@ export function createGroup(params: {
     position: params.position,
     size: params.size,
     locked: params.locked ?? false,
+    fontSize: params.fontSize,
+    bold: params.bold,
+    italic: params.italic,
+    fontWeight: params.fontWeight,
+    fontStyle: params.fontStyle,
+    fontFamily: params.fontFamily,
+    style: params.style,
   };
 }

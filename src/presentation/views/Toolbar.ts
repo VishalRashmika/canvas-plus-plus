@@ -4,9 +4,19 @@ import { SvgSceneRenderer } from "../renderer/SvgSceneRenderer";
 import { ViewportTransform } from "../renderer/ViewportMath";
 import { EdgeRouting } from "../../domain/types";
 import {
+  LineEndingType,
+  LinePatternType,
+} from "../../domain/entities/DiagramEdge";
+import {
   CANVAS_COLOR_PRESETS,
   resolveCanvasColor,
 } from "../../domain/value-objects/CanvasColor";
+import {
+  FONT_SIZE_PRESETS,
+  FONT_FAMILY_PRESETS,
+  getNextFontSize,
+} from "../theme/Typography";
+import { defaultEdgeStyleRegistry } from "../renderer/EdgeStyleRegistry";
 
 function renderIcon(parent: HTMLElement, iconId: string): void {
   try {
@@ -30,6 +40,7 @@ export class Toolbar {
 
   // Bottom Floating Toolbar Controls
   private selectBtn!: HTMLButtonElement;
+  private grabBtn!: HTMLButtonElement;
   private drawBtn!: HTMLButtonElement;
   private autoShapeBtn!: HTMLButtonElement;
   private rectBtn!: HTMLButtonElement;
@@ -39,6 +50,7 @@ export class Toolbar {
   private noteBtn!: HTMLButtonElement;
   private vaultNoteBtn?: HTMLButtonElement;
   private imageBtn?: HTMLButtonElement;
+  private groupBoxBtn!: HTMLButtonElement;
   private lineBtn!: HTMLButtonElement;
 
   // Context-sensitive Component Controls
@@ -54,9 +66,14 @@ export class Toolbar {
   private duplicateBtn!: HTMLButtonElement;
   private deleteBtn!: HTMLButtonElement;
   private seqLayoutBtn!: HTMLButtonElement;
+  private edgeStartEndingBtn!: HTMLButtonElement;
+  private edgeLineTypeBtn!: HTMLButtonElement;
+  private edgeEndEndingBtn!: HTMLButtonElement;
   private edgeRoutingBtn!: HTMLButtonElement;
+  private edgeStyleBtn!: HTMLButtonElement;
   private rerouteBtn!: HTMLButtonElement;
   private reverseBtn!: HTMLButtonElement;
+  private currentConnectorAnchor: HTMLElement | null = null;
 
   // Canvas View & Navigation Controls
   private gridBtn!: HTMLButtonElement;
@@ -86,6 +103,25 @@ export class Toolbar {
   private colorPaletteEl: HTMLElement | null = null;
   private onWindowClickBound: ((e: MouseEvent) => void) | null = null;
 
+  // Font Typography Controls (Permanent)
+  private typographyGroup!: HTMLElement;
+  private fontDecBtn!: HTMLButtonElement;
+  private fontSizeBtn!: HTMLButtonElement;
+  private fontIncBtn!: HTMLButtonElement;
+  private boldBtn!: HTMLButtonElement;
+  private italicBtn!: HTMLButtonElement;
+  private fontFamilyBtn!: HTMLButtonElement;
+  private fontSizePopoverEl: HTMLElement | null = null;
+  private fontSizeWinClickBound: ((e: MouseEvent) => void) | null = null;
+
+  // Context Selection Typography Controls (Group 5)
+  private contextFontDecBtn!: HTMLButtonElement;
+  private contextFontSizeBtn!: HTMLButtonElement;
+  private contextFontIncBtn!: HTMLButtonElement;
+  private contextBoldBtn!: HTMLButtonElement;
+  private contextItalicBtn!: HTMLButtonElement;
+  private contextFontFamilyBtn!: HTMLButtonElement;
+
   private freehandEnabled = true;
   private unsubscribe: (() => void) | null = null;
 
@@ -96,6 +132,7 @@ export class Toolbar {
     private readonly onSaveRequested?: () => void,
     private readonly onTogglePalette?: () => void,
     private readonly onExportSvg?: () => void,
+    /** @deprecated Removed export to Obsidian Canvas */
     private readonly onExportCanvas?: () => void,
     private readonly onNavigateBreadcrumb?: (index: number) => void,
     private readonly onToggleMinimap?: () => void,
@@ -112,11 +149,19 @@ export class Toolbar {
     this.mainToolbarEl = this.container.createDiv({
       cls: "umlcanvas-toolbar umlcanvas-main-toolbar",
     });
+    this.mainToolbarEl.addEventListener("mousedown", (e) => {
+      (e as any)._umlHandled = true;
+      e.stopPropagation();
+    });
     this.toolbarEl = this.mainToolbarEl;
 
     // 2. Floating Bottom Toolbar (Excalidraw style)
     this.bottomToolbarEl = this.container.createDiv({
       cls: "umlcanvas-toolbar umlcanvas-floating-bottom-toolbar",
+    });
+    this.bottomToolbarEl.addEventListener("mousedown", (e) => {
+      (e as any)._umlHandled = true;
+      e.stopPropagation();
     });
 
     this.createMainControls();
@@ -132,13 +177,31 @@ export class Toolbar {
   private createGroup(parent: HTMLElement, extraClass?: string): HTMLElement {
     const grp = parent.createDiv({ cls: "umlcanvas-toolbar-group" });
     if (extraClass) {
-      grp.classList.add(...extraClass.split(" "));
+      const classes = extraClass.split(/\s+/).filter(Boolean);
+      if (classes.length > 0) {
+        grp.classList.add(...classes);
+      }
     }
     return grp;
   }
 
   private addDivider(parent: HTMLElement): void {
     parent.createDiv({ cls: "umlcanvas-toolbar-divider" });
+  }
+
+  private positionPopover(
+    popover: HTMLElement,
+    anchorEl: HTMLElement,
+    offsetY = 6,
+    defaultWidth = 240
+  ): void {
+    const btnRect = anchorEl ? anchorEl.getBoundingClientRect() : { left: 10, bottom: 10 };
+    const containerRect = this.container.getBoundingClientRect();
+    const popoverWidth = popover.offsetWidth || defaultWidth;
+    const maxLeft = Math.max(10, containerRect.width - popoverWidth - 10);
+    const left = Math.min(Math.max(10, btnRect.left - containerRect.left), maxLeft);
+    const top = btnRect.bottom - containerRect.top + offsetY;
+    popover.setCssStyles({ left: `${left}px`, top: `${top}px` });
   }
 
   private createButton(
@@ -149,12 +212,15 @@ export class Toolbar {
     extraClass?: string
   ): HTMLButtonElement {
     const btn = createEl("button", {
-      cls: "umlcanvas-toolbar-btn",
+      cls: "umlcanvas-toolbar-btn clickable-icon",
       title,
       attr: { "aria-label": title },
     });
     if (extraClass) {
-      btn.classList.add(extraClass);
+      const classes = extraClass.split(/\s+/).filter(Boolean);
+      if (classes.length > 0) {
+        btn.classList.add(...classes);
+      }
     }
     if (!text && iconId) {
       btn.classList.add("is-icon-only");
@@ -169,7 +235,13 @@ export class Toolbar {
       btn.createSpan({ cls: "umlcanvas-btn-text", text });
     }
 
+    btn.addEventListener("mousedown", (e) => {
+      (e as any)._umlHandled = true;
+      e.stopPropagation();
+    });
+
     btn.addEventListener("click", (e) => {
+      (e as any)._umlHandled = true;
       e.stopPropagation();
       onClick();
     });
@@ -200,6 +272,10 @@ export class Toolbar {
       title,
     });
 
+    if (this.renderer.grabMode && typeof this.renderer.setGrabMode === "function") {
+      this.renderer.setGrabMode(false);
+      this.updateToolMode();
+    }
     if (this.renderer.freehandMode) {
       this.renderer.setFreehandMode(false);
       this.updateToolMode();
@@ -227,6 +303,10 @@ export class Toolbar {
       style: { color },
     });
 
+    if (this.renderer.grabMode && typeof this.renderer.setGrabMode === "function") {
+      this.renderer.setGrabMode(false);
+      this.updateToolMode();
+    }
     if (this.renderer.freehandMode) {
       this.renderer.setFreehandMode(false);
       this.updateToolMode();
@@ -259,10 +339,45 @@ export class Toolbar {
       customData: { src },
     });
 
+    if (this.renderer.grabMode && typeof this.renderer.setGrabMode === "function") {
+      this.renderer.setGrabMode(false);
+      this.updateToolMode();
+    }
     if (this.renderer.freehandMode) {
       this.renderer.setFreehandMode(false);
       this.updateToolMode();
     }
+  }
+
+  public addGroupBoxAtCenter(color?: string, name = "Group"): any {
+    const transform = this.renderer.currentTransform;
+    const centerScreen = {
+      x: this.container.clientWidth / 2,
+      y: this.container.clientHeight / 2,
+    };
+    const canvasX = (centerScreen.x - transform.panX) / transform.zoom;
+    const canvasY = (centerScreen.y - transform.panY) / transform.zoom;
+
+    const size = { width: 320, height: 220 };
+    const group = this.editor.addGroup({
+      name,
+      color,
+      position: {
+        x: Math.round(canvasX - size.width / 2),
+        y: Math.round(canvasY - size.height / 2),
+      },
+      size,
+    });
+
+    if (this.renderer.grabMode && typeof this.renderer.setGrabMode === "function") {
+      this.renderer.setGrabMode(false);
+      this.updateToolMode();
+    }
+    if (this.renderer.freehandMode) {
+      this.renderer.setFreehandMode(false);
+      this.updateToolMode();
+    }
+    return group;
   }
 
   private handleLineButtonClick(): void {
@@ -338,7 +453,7 @@ export class Toolbar {
 
     // Edge Routing Mode Toggle
     this.routingBtn = viewGroup.createEl("button", {
-      cls: "umlcanvas-toolbar-btn",
+      cls: "umlcanvas-toolbar-btn clickable-icon",
       title: "Default Edge Routing: Orthogonal",
       attr: { "aria-label": "Default Edge Routing: Orthogonal" },
     });
@@ -422,7 +537,84 @@ export class Toolbar {
     viewGroup.appendChild(resetZoomBtn);
 
     // ----------------------------------------
-    // Group 4: Context-Sensitive Selection Inspector
+    // Group 4: Typography Controls (Permanent)
+    // ----------------------------------------
+    this.typographyGroup = this.createGroup(
+      this.mainToolbarEl,
+      "umlcanvas-typography-group"
+    );
+
+    // Common Font Size Stepper combo: [ − ] [ 13px ] [ + ]
+    const fontStepper = this.typographyGroup.createDiv({
+      cls: "umlcanvas-font-stepper-combo",
+    });
+
+    // 1. Step Down Button
+    this.fontDecBtn = this.createButton(
+      "Decrease Font Size (-2px) [Ctrl+[]",
+      "−",
+      () => {
+        this.stepFontSize(-1);
+      },
+      undefined,
+      "umlcanvas-font-step-btn umlcanvas-font-dec-btn"
+    );
+    fontStepper.appendChild(this.fontDecBtn);
+
+    // 2. Font Size Display & Menu Button
+    this.fontSizeBtn = this.createButton(
+      "Font Size & Typography (Ctrl+[, Ctrl+])",
+      "13px",
+      () => this.toggleFontSizeMenu(),
+      undefined,
+      "umlcanvas-font-size-btn"
+    );
+    fontStepper.appendChild(this.fontSizeBtn);
+
+    // 3. Step Up Button
+    this.fontIncBtn = this.createButton(
+      "Increase Font Size (+2px) [Ctrl+]]",
+      "+",
+      () => {
+        this.stepFontSize(1);
+      },
+      undefined,
+      "umlcanvas-font-step-btn umlcanvas-font-inc-btn"
+    );
+    fontStepper.appendChild(this.fontIncBtn);
+
+    // Bold Button
+    this.boldBtn = this.createButton(
+      "Bold (Ctrl+B)",
+      "B",
+      () => this.toggleBold(),
+      undefined,
+      "umlcanvas-bold-btn"
+    );
+    this.typographyGroup.appendChild(this.boldBtn);
+
+    // Italic Button
+    this.italicBtn = this.createButton(
+      "Italic (Ctrl+I)",
+      "I",
+      () => this.toggleItalic(),
+      undefined,
+      "umlcanvas-italic-btn"
+    );
+    this.typographyGroup.appendChild(this.italicBtn);
+
+    // Font Family Indicator / Quick Selector
+    this.fontFamilyBtn = this.createButton(
+      "Font Style / Family (Sans, Mono, Handwritten, Serif)",
+      "Sans",
+      () => this.toggleFontSizeMenu(),
+      undefined,
+      "umlcanvas-font-family-btn"
+    );
+    this.typographyGroup.appendChild(this.fontFamilyBtn);
+
+    // ----------------------------------------
+    // Group 5: Context-Sensitive Selection Inspector
     // (Only appears when a component is selected)
     // ----------------------------------------
     this.contextGroup = this.createGroup(
@@ -442,19 +634,85 @@ export class Toolbar {
       "Assign Color to Selection (1-6)",
       "",
       () => this.toggleColorPalette(),
-      "palette"
+      "palette",
+      "umlcanvas-color-btn"
     );
     this.colorIndicatorEl = this.colorBtn.createSpan({
       cls: "umlcanvas-color-indicator",
     });
     this.contextGroup.appendChild(this.colorBtn);
 
+    // Context Typography Controls: [ − ] [ 13px ] [ + ] [ B ] [ I ] [ Sans ]
+    const contextFontStepper = this.contextGroup.createDiv({
+      cls: "umlcanvas-font-stepper-combo umlcanvas-context-font-stepper",
+    });
+
+    this.contextFontDecBtn = this.createButton(
+      "Decrease Font Size (-2px) [Ctrl+[]",
+      "−",
+      () => {
+        this.stepFontSize(-1);
+      },
+      undefined,
+      "umlcanvas-font-step-btn umlcanvas-font-dec-btn"
+    );
+    contextFontStepper.appendChild(this.contextFontDecBtn);
+
+    this.contextFontSizeBtn = this.createButton(
+      "Font Size & Typography (Ctrl+[, Ctrl+])",
+      "13px",
+      () => this.toggleFontSizeMenu(this.contextFontSizeBtn),
+      "type",
+      "umlcanvas-font-size-btn umlcanvas-context-font-size-btn"
+    );
+    contextFontStepper.appendChild(this.contextFontSizeBtn);
+
+    this.contextFontIncBtn = this.createButton(
+      "Increase Font Size (+2px) [Ctrl+]]",
+      "+",
+      () => {
+        this.stepFontSize(1);
+      },
+      undefined,
+      "umlcanvas-font-step-btn umlcanvas-font-inc-btn"
+    );
+    contextFontStepper.appendChild(this.contextFontIncBtn);
+
+    this.contextBoldBtn = this.createButton(
+      "Bold (Ctrl+B)",
+      "B",
+      () => this.toggleBold(),
+      undefined,
+      "umlcanvas-bold-btn umlcanvas-context-bold-btn"
+    );
+    this.contextGroup.appendChild(this.contextBoldBtn);
+
+    this.contextItalicBtn = this.createButton(
+      "Italic (Ctrl+I)",
+      "I",
+      () => this.toggleItalic(),
+      undefined,
+      "umlcanvas-italic-btn umlcanvas-context-italic-btn"
+    );
+    this.contextGroup.appendChild(this.contextItalicBtn);
+
+    this.contextFontFamilyBtn = this.createButton(
+      "Font Style / Family (Sans, Mono, Handwritten, Serif)",
+      "Sans",
+      () => this.toggleFontSizeMenu(this.contextFontFamilyBtn),
+      undefined,
+      "umlcanvas-font-family-btn umlcanvas-context-font-family-btn"
+    );
+    this.contextGroup.appendChild(this.contextFontFamilyBtn);
+
+    this.addDivider(this.contextGroup);
+
     // Label
     this.labelBtn = this.createButton(
-      "Edit Label (Enter / F2)",
+      "Edit Text / Label (Enter / F2)",
       "",
       () => this.editCurrentSelectionLabel(),
-      "type"
+      "edit-3"
     );
     this.contextGroup.appendChild(this.labelBtn);
 
@@ -530,6 +788,42 @@ export class Toolbar {
     );
     this.contextGroup.appendChild(this.seqLayoutBtn);
 
+    // Start Line Ending Button
+    this.edgeStartEndingBtn = this.createButton(
+      "Start Line Ending (click to change)",
+      "Start",
+      () => {
+        this.toggleConnectorMenu(this.edgeStartEndingBtn);
+      },
+      undefined,
+      "umlcanvas-edge-start-btn"
+    );
+    this.contextGroup.appendChild(this.edgeStartEndingBtn);
+
+    // Line Type / Pattern Button
+    this.edgeLineTypeBtn = this.createButton(
+      "Line Type (Solid, Dashed, Dotted...)",
+      "Solid",
+      () => {
+        this.toggleConnectorMenu(this.edgeLineTypeBtn);
+      },
+      undefined,
+      "umlcanvas-edge-linetype-btn"
+    );
+    this.contextGroup.appendChild(this.edgeLineTypeBtn);
+
+    // End Line Ending Button
+    this.edgeEndEndingBtn = this.createButton(
+      "End Line Ending (click to change)",
+      "End",
+      () => {
+        this.toggleConnectorMenu(this.edgeEndEndingBtn);
+      },
+      undefined,
+      "umlcanvas-edge-end-btn"
+    );
+    this.contextGroup.appendChild(this.edgeEndEndingBtn);
+
     // Change Line Routing (Orthogonal / Straight / Curved)
     this.edgeRoutingBtn = this.createButton(
       "Change Line Routing (Orthogonal / Straight / Curved)",
@@ -550,6 +844,18 @@ export class Toolbar {
       "git-branch"
     );
     this.contextGroup.appendChild(this.edgeRoutingBtn);
+
+    // Connector Style Button (UML connector types)
+    this.edgeStyleBtn = this.createButton(
+      "Connector Style (click to change)",
+      "Style",
+      () => {
+        this.toggleConnectorMenu(this.edgeStyleBtn);
+      },
+      "diamond",
+      "umlcanvas-edge-style-btn"
+    );
+    this.contextGroup.appendChild(this.edgeStyleBtn);
 
     // Reroute Line / Reset Bend Points
     this.rerouteBtn = this.createButton(
@@ -595,7 +901,7 @@ export class Toolbar {
   }
 
   private createBottomControls(): void {
-    // Mode Group (Select, Draw, Auto Shape)
+    // Mode Group (Select, Grab, Draw, Auto Shape)
     const modeGroup = this.createGroup(this.bottomToolbarEl);
 
     // Select Tool (V / Esc)
@@ -603,6 +909,9 @@ export class Toolbar {
       "Select & Move (V / Esc)",
       "",
       () => {
+        if (typeof this.renderer.setGrabMode === "function") {
+          this.renderer.setGrabMode(false);
+        }
         this.renderer.setFreehandMode(false);
         this.updateToolMode();
       },
@@ -610,15 +919,38 @@ export class Toolbar {
     );
     modeGroup.appendChild(this.selectBtn);
 
+    // Grab / Hand Tool (H)
+    this.grabBtn = this.createButton(
+      "Grab / Move Canvas (H)",
+      "",
+      () => {
+        const active = !this.renderer.grabMode;
+        if (active && typeof this.renderer.setFreehandMode === "function") {
+          this.renderer.setFreehandMode(false);
+        }
+        if (typeof this.renderer.setGrabMode === "function") {
+          this.renderer.setGrabMode(active);
+        }
+        this.updateToolMode();
+      },
+      "hand"
+    );
+    modeGroup.appendChild(this.grabBtn);
+
     // Draw Tool (P)
     this.drawBtn = this.createButton(
       "Draw / Freehand (P)",
       "",
       () => {
-        const active = !this.renderer.freehandMode;
-        this.renderer.setFreehandMode(active);
-        if (active && this.renderer.isAutoShapeDetection) {
+        if (typeof this.renderer.setGrabMode === "function") {
+          this.renderer.setGrabMode(false);
+        }
+        const isDrawActive = this.renderer.freehandMode && !this.renderer.isAutoShapeDetection;
+        if (isDrawActive) {
+          this.renderer.setFreehandMode(false);
+        } else {
           this.renderer.setAutoShapeDetection(false);
+          this.renderer.setFreehandMode(true);
         }
         this.updateToolMode();
       },
@@ -631,9 +963,14 @@ export class Toolbar {
       "Auto Shape Recognition (Shift+P) - Automatically recognize common shapes",
       "",
       () => {
-        const active = !this.renderer.isAutoShapeDetection;
-        this.renderer.setAutoShapeDetection(active);
-        if (active && !this.renderer.freehandMode) {
+        if (typeof this.renderer.setGrabMode === "function") {
+          this.renderer.setGrabMode(false);
+        }
+        const isAutoShapeActive = this.renderer.freehandMode && this.renderer.isAutoShapeDetection;
+        if (isAutoShapeActive) {
+          this.renderer.setFreehandMode(false);
+        } else {
+          this.renderer.setAutoShapeDetection(true);
           this.renderer.setFreehandMode(true);
         }
         this.updateToolMode();
@@ -677,10 +1014,10 @@ export class Toolbar {
 
     // Diamond
     this.diamondBtn = this.createButton(
-      "Diamond / Decision (D)",
+      "Diamond (D)",
       "",
       () => {
-        this.addShapeAtCenter("generic.diamond", "Decision", {
+        this.addShapeAtCenter("generic.diamond", "Diamond", {
           width: 110,
           height: 90,
         });
@@ -741,6 +1078,17 @@ export class Toolbar {
       );
       shapeGroup.appendChild(this.vaultNoteBtn);
     }
+
+    // Group Box
+    this.groupBoxBtn = this.createButton(
+      "Group Box (G) - Add standalone group box",
+      "",
+      () => {
+        this.addGroupBoxAtCenter();
+      },
+      "boxes"
+    );
+    shapeGroup.appendChild(this.groupBoxBtn);
 
     this.addDivider(this.bottomToolbarEl);
 
@@ -812,6 +1160,60 @@ export class Toolbar {
     const selectedGroupCount = this.editor.selectedGroupIds.length;
     const totalSelected = selectedNodeCount + selectedEdgeCount + selectedGroupCount;
     const hasSelection = totalSelected > 0;
+
+    // Typography state (Always active and synchronized across Group 4 and Group 5)
+    const currentFont = this.editor.getSelectionFont();
+    const isBoldActive = Boolean(currentFont.isBold || currentFont.bold);
+    const isItalicActive = Boolean(currentFont.isItalic || currentFont.italic);
+    const curSize = currentFont.fontSize ?? 13;
+    const matching = FONT_FAMILY_PRESETS.find(
+      (p) => p.fontFamily === currentFont.fontFamily || p.id === currentFont.fontFamily
+    );
+    const famName = matching ? matching.label.split(" ")[0] : "Sans";
+
+    // Permanent controls (Group 4)
+    if (this.boldBtn) {
+      this.boldBtn.classList.toggle("is-active", isBoldActive);
+    }
+    if (this.italicBtn) {
+      this.italicBtn.classList.toggle("is-active", isItalicActive);
+    }
+    if (this.fontSizeBtn) {
+      const textSpan = this.fontSizeBtn.querySelector(".umlcanvas-btn-text");
+      if (textSpan) {
+        textSpan.textContent = `${curSize}px`;
+      }
+      this.fontSizeBtn.title = `Font Size (${curSize}px)`;
+    }
+    if (this.fontFamilyBtn) {
+      const textSpan = this.fontFamilyBtn.querySelector(".umlcanvas-btn-text");
+      if (textSpan) {
+        textSpan.textContent = famName;
+      }
+      this.fontFamilyBtn.title = `Font Family: ${matching?.label ?? "Sans (Default)"}`;
+    }
+
+    // Context selection controls (Group 5)
+    if (this.contextBoldBtn) {
+      this.contextBoldBtn.classList.toggle("is-active", isBoldActive);
+    }
+    if (this.contextItalicBtn) {
+      this.contextItalicBtn.classList.toggle("is-active", isItalicActive);
+    }
+    if (this.contextFontSizeBtn) {
+      const textSpan = this.contextFontSizeBtn.querySelector(".umlcanvas-btn-text");
+      if (textSpan) {
+        textSpan.textContent = `${curSize}px`;
+      }
+      this.contextFontSizeBtn.title = `Font Size & Typography (${curSize}px)`;
+    }
+    if (this.contextFontFamilyBtn) {
+      const textSpan = this.contextFontFamilyBtn.querySelector(".umlcanvas-btn-text");
+      if (textSpan) {
+        textSpan.textContent = famName;
+      }
+      this.contextFontFamilyBtn.title = `Font Family: ${matching?.label ?? "Sans (Default)"}`;
+    }
 
     // Context-sensitive group visibility
     if (!hasSelection) {
@@ -900,12 +1302,54 @@ export class Toolbar {
 
       // Line manipulation buttons (only shown when edges are selected)
       const hasSelectedEdges = selectedEdgeCount > 0;
+      this.edgeStartEndingBtn.disabled = !hasSelectedEdges;
+      this.edgeStartEndingBtn.classList.toggle("is-hidden", !hasSelectedEdges);
+      this.edgeLineTypeBtn.disabled = !hasSelectedEdges;
+      this.edgeLineTypeBtn.classList.toggle("is-hidden", !hasSelectedEdges);
+      this.edgeEndEndingBtn.disabled = !hasSelectedEdges;
+      this.edgeEndEndingBtn.classList.toggle("is-hidden", !hasSelectedEdges);
       this.edgeRoutingBtn.disabled = !hasSelectedEdges;
       this.edgeRoutingBtn.classList.toggle("is-hidden", !hasSelectedEdges);
+      this.edgeStyleBtn.disabled = !hasSelectedEdges;
+      this.edgeStyleBtn.classList.toggle("is-hidden", !hasSelectedEdges);
       this.rerouteBtn.disabled = !hasSelectedEdges;
       this.rerouteBtn.classList.toggle("is-hidden", !hasSelectedEdges);
       this.reverseBtn.disabled = !hasSelectedEdges;
       this.reverseBtn.classList.toggle("is-hidden", !hasSelectedEdges);
+
+      if (hasSelectedEdges) {
+        const firstEdge = selectedEdges[0];
+        const styleDef = firstEdge ? defaultEdgeStyleRegistry.get(firstEdge.kind) : undefined;
+        const styleName = styleDef ? styleDef.displayName : "Style";
+        const textSpan = this.edgeStyleBtn.querySelector(".umlcanvas-btn-text");
+        if (textSpan) {
+          textSpan.textContent = styleName;
+        }
+        this.edgeStyleBtn.title = `Connector Style: ${styleName} (click to change)`;
+
+        const startMarker = firstEdge ? this.editor.getEdgeEffectiveStartMarker(firstEdge) : "none";
+        const endMarker = firstEdge ? this.editor.getEdgeEffectiveEndMarker(firstEdge) : "none";
+        const lineType = firstEdge ? this.editor.getEdgeEffectiveLineType(firstEdge) : "solid";
+
+        const startLabel = this.formatMarkerLabel(startMarker);
+        const endLabel = this.formatMarkerLabel(endMarker);
+        const typeLabel = this.formatLineTypeLabel(lineType);
+
+        const startTextSpan = this.edgeStartEndingBtn.querySelector(".umlcanvas-btn-text");
+        if (startTextSpan) startTextSpan.textContent = `Start: ${startLabel}`;
+        this.edgeStartEndingBtn.title = `Start Line Ending: ${startLabel} (click to change)`;
+
+        const typeTextSpan = this.edgeLineTypeBtn.querySelector(".umlcanvas-btn-text");
+        if (typeTextSpan) typeTextSpan.textContent = typeLabel;
+        this.edgeLineTypeBtn.title = `Line Type: ${typeLabel} (click to change)`;
+
+        const endTextSpan = this.edgeEndEndingBtn.querySelector(".umlcanvas-btn-text");
+        if (endTextSpan) endTextSpan.textContent = `End: ${endLabel}`;
+        this.edgeEndEndingBtn.title = `End Line Ending: ${endLabel} (click to change)`;
+
+        const routingName = firstEdge.routing.charAt(0).toUpperCase() + firstEdge.routing.slice(1);
+        this.edgeRoutingBtn.title = `Change Line Routing: ${routingName} (Orthogonal / Straight / Curved)`;
+      }
     }
 
     // Routing mode text/title
@@ -953,10 +1397,73 @@ export class Toolbar {
     this.updateToolMode();
   }
 
+  private formatMarkerLabel(markerId: string): string {
+    const norm = markerId.replace(/^uml-marker-/, "");
+    switch (norm) {
+      case "none":
+        return "None";
+      case "arrow-open":
+      case "open-arrow":
+        return "Open Arrow";
+      case "arrow-filled":
+      case "arrow":
+      case "arrow-head":
+        return "Filled Arrow";
+      case "triangle-hollow":
+      case "triangle":
+      case "hollow-triangle":
+        return "Hollow Triangle";
+      case "triangle-filled":
+      case "filled-triangle":
+        return "Filled Triangle";
+      case "diamond-hollow":
+      case "diamond":
+      case "hollow-diamond":
+        return "Hollow Diamond";
+      case "diamond-filled":
+      case "filled-diamond":
+        return "Filled Diamond";
+      case "circle-hollow":
+      case "circle":
+      case "hollow-circle":
+        return "Hollow Circle";
+      case "circle-filled":
+      case "filled-circle":
+      case "dot":
+        return "Filled Circle";
+      case "stop":
+      case "timing-stop":
+        return "Stop Bar";
+      default:
+        return norm;
+    }
+  }
+
+  private formatLineTypeLabel(lineType: LinePatternType): string {
+    switch (lineType) {
+      case "solid":
+        return "Solid";
+      case "dashed":
+        return "Dashed";
+      case "dotted":
+        return "Dotted";
+      case "dash-dot":
+        return "Dash-Dot";
+      case "long-dash":
+        return "Long-Dash";
+      default:
+        return "Solid";
+    }
+  }
+
   updateToolMode(): void {
     const isFreehand = this.renderer.freehandMode;
+    const isGrab = Boolean(this.renderer.grabMode);
     if (this.selectBtn) {
-      this.selectBtn.classList.toggle("is-active", !isFreehand);
+      this.selectBtn.classList.toggle("is-active", !isFreehand && !isGrab);
+    }
+    if (this.grabBtn) {
+      this.grabBtn.classList.toggle("is-active", isGrab);
     }
     if (this.drawBtn) {
       if (!this.freehandEnabled) {
@@ -978,7 +1485,7 @@ export class Toolbar {
         this.autoShapeBtn.classList.remove("is-hidden");
         this.autoShapeBtn.classList.toggle(
           "is-active",
-          this.renderer.isAutoShapeDetection
+          isFreehand && this.renderer.isAutoShapeDetection
         );
       }
     }
@@ -1000,6 +1507,7 @@ export class Toolbar {
     this.closeConnectorMenu();
     this.closeColorPalette();
     this.closeAlignMenu();
+    this.closeFontSizeMenu();
   }
 
   // ==========================================
@@ -1074,22 +1582,7 @@ export class Toolbar {
       }
     });
 
-    // 3. Export Plain Obsidian .canvas
-    addItem("Export Obsidian .canvas", "file-code", () => {
-      if (this.onExportCanvas) {
-        this.onExportCanvas();
-      } else {
-        const jsonCanvas = this.editor.exportToJsonCanvas();
-        const blob = new Blob([jsonCanvas], { type: "application/json" });
-        const url = URL.createObjectURL(blob);
-        const a = createEl("a", { href: url });
-        a.download = `${this.editor.diagram.title || "diagram"}.canvas`;
-        a.click();
-        URL.revokeObjectURL(url);
-      }
-    });
-
-    // 4. Export for AI / Markdown
+    // 3. Export for AI / Markdown
     addItem("Export for LLM / Markdown", "sparkles", () => {
       const md = this.editor.exportForRAG();
       if (typeof navigator !== "undefined" && navigator?.clipboard?.writeText) {
@@ -1119,8 +1612,9 @@ export class Toolbar {
     if (this.onToggleTheme) {
       addDivider();
       const isLightNow =
-        this.container.classList.contains("umlcanvas-theme-light") ||
-        this.container.classList.contains("theme-light");
+        (this.container.classList.contains("umlcanvas-theme-light") ||
+          this.container.classList.contains("theme-light")) &&
+        !this.container.classList.contains("umlcanvas-theme-dark");
       addItem(
         isLightNow ? "Switch to Dark Theme" : "Switch to Pastel Light Theme",
         isLightNow ? "moon" : "sun",
@@ -1134,11 +1628,7 @@ export class Toolbar {
     this.fileMenuPopoverEl = popover;
     this.fileBtn.classList.add("is-active");
 
-    const btnRect = this.fileBtn.getBoundingClientRect();
-    const containerRect = this.container.getBoundingClientRect();
-    const left = Math.max(10, btnRect.left - containerRect.left);
-    const top = btnRect.bottom - containerRect.top + 6;
-    popover.setCssStyles({ left: `${left}px`, top: `${top}px` });
+    this.positionPopover(popover, this.fileBtn, 6, 220);
 
     this.fileWinClickBound = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
@@ -1177,36 +1667,214 @@ export class Toolbar {
   // ==========================================
   // Connector Style Popover
   // ==========================================
-  toggleConnectorMenu(): void {
+  // ==========================================
+  // Connector Style Popover
+  // ==========================================
+  toggleConnectorMenu(anchorEl?: HTMLElement): void {
     if (this.connectorPopoverEl) {
       this.closeConnectorMenu();
     } else {
-      this.openConnectorMenu();
+      this.openConnectorMenu(anchorEl);
     }
   }
 
-  openConnectorMenu(): void {
+  openConnectorMenu(anchorEl?: HTMLElement): void {
     if (this.connectorPopoverEl) return;
     this.closeAllPopovers();
 
+    const anchor =
+      anchorEl ??
+      (this.editor.selectedEdgeIds.length > 0 && this.edgeStyleBtn && !this.edgeStyleBtn.classList.contains("is-hidden")
+        ? this.edgeStyleBtn
+        : this.lineBtn);
+    this.currentConnectorAnchor = anchor;
+
     const popover = createDiv({
-      cls: "umlcanvas-menu-dropdown umlcanvas-connector-popover",
+      cls: "umlcanvas-menu-dropdown umlcanvas-connector-popover umlcanvas-line-popover",
     });
-    popover.createDiv({ cls: "umlcanvas-menu-header", text: "Connector Style" });
+    popover.addEventListener("mousedown", (e) => e.stopPropagation());
+    popover.createDiv({ cls: "umlcanvas-menu-header", text: "Line & Connector Settings" });
+
+    const firstSelectedEdge =
+      this.editor.selectedEdgeIds.length > 0
+        ? this.editor.diagram.edges.find((ed) => ed.id === this.editor.selectedEdgeIds[0])
+        : undefined;
+
+    const activeStart = firstSelectedEdge
+      ? this.editor.getEdgeEffectiveStartMarker(firstSelectedEdge)
+      : (this.editor.defaultMarkerStart ?? "none");
+
+    const activeEnd = firstSelectedEdge
+      ? this.editor.getEdgeEffectiveEndMarker(firstSelectedEdge)
+      : (this.editor.defaultMarkerEnd ?? (this.editor.activeEdgeKind ? (defaultEdgeStyleRegistry.get(this.editor.activeEdgeKind).markerEndId ?? "none") : "none"));
+
+    const activeLineType = firstSelectedEdge
+      ? this.editor.getEdgeEffectiveLineType(firstSelectedEdge)
+      : (this.editor.defaultLineType ?? "solid");
+
+    const activeRouting = firstSelectedEdge
+      ? firstSelectedEdge.routing
+      : this.editor.defaultRouting;
+
+    const currentKind = firstSelectedEdge
+      ? firstSelectedEdge.kind
+      : this.editor.activeEdgeKind;
+
+    const markerOptions: Array<{ id: LineEndingType; label: string; iconId: string }> = [
+      { id: "none", label: "None", iconId: "minus" },
+      { id: "arrow-open", label: "Open Arrow", iconId: "arrow-up-right" },
+      { id: "arrow-filled", label: "Filled Arrow", iconId: "arrow-up-right" },
+      { id: "triangle-hollow", label: "Hollow Triangle", iconId: "triangle" },
+      { id: "triangle-filled", label: "Filled Triangle", iconId: "triangle" },
+      { id: "diamond-hollow", label: "Hollow Diamond", iconId: "diamond" },
+      { id: "diamond-filled", label: "Filled Diamond", iconId: "diamond" },
+      { id: "circle-hollow", label: "Hollow Circle", iconId: "circle" },
+      { id: "circle-filled", label: "Filled Circle", iconId: "circle" },
+      { id: "stop", label: "Stop Bar", iconId: "pause" },
+    ];
+
+    const isMarkerMatch = (current: string, target: string) => {
+      const c = current.replace(/^uml-marker-/, "");
+      const t = target.replace(/^uml-marker-/, "");
+      if (c === t) return true;
+      if (t === "none" && (!c || c === "none")) return true;
+      if (t === "arrow-open" && c === "open-arrow") return true;
+      if (t === "open-arrow" && c === "arrow-open") return true;
+      if (t === "arrow-filled" && (c === "arrow-head" || c === "arrow")) return true;
+      if (t === "stop" && c === "timing-stop") return true;
+      if (t === "triangle-hollow" && c === "triangle") return true;
+      if (t === "diamond-hollow" && c === "diamond") return true;
+      if (t === "circle-hollow" && c === "circle") return true;
+      if (t === "circle-filled" && (c === "dot" || c === "filled-circle")) return true;
+      return false;
+    };
+
+    // 1. Start Ending
+    popover.createDiv({ cls: "umlcanvas-line-section-title", text: "Start Ending" });
+    const startGrid = popover.createDiv({ cls: "umlcanvas-line-marker-grid" });
+    for (const opt of markerOptions) {
+      const isSelectedStart = isMarkerMatch(activeStart, opt.id);
+      const btn = startGrid.createEl("button", {
+        cls: `umlcanvas-line-opt-btn umlcanvas-start-marker-opt${isSelectedStart ? " is-active" : ""}`,
+      });
+      const iconSpan = btn.createSpan({ cls: "umlcanvas-line-opt-icon" });
+      renderIcon(iconSpan, opt.iconId);
+      btn.createSpan({ text: opt.label });
+      btn.title = `Start Ending: ${opt.label}`;
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.editor.defaultMarkerStart = opt.id;
+        for (const edgeId of this.editor.selectedEdgeIds) {
+          this.editor.setEdgeMarkerStart(edgeId, opt.id);
+        }
+        this.updateState();
+        startGrid.querySelectorAll(".umlcanvas-start-marker-opt").forEach((b) => b.classList.remove("is-active"));
+        btn.classList.add("is-active");
+      });
+    }
+
+    // 2. Line Type
+    popover.createDiv({ cls: "umlcanvas-line-section-title", text: "Line Type" });
+    const typeRow = popover.createDiv({ cls: "umlcanvas-line-type-row" });
+    const lineTypes: Array<{ id: LinePatternType; label: string }> = [
+      { id: "solid", label: "Solid" },
+      { id: "dashed", label: "Dashed" },
+      { id: "dotted", label: "Dotted" },
+      { id: "dash-dot", label: "Dash-Dot" },
+      { id: "long-dash", label: "Long-Dash" },
+    ];
+    for (const pat of lineTypes) {
+      const isSelectedType = activeLineType === pat.id;
+      const btn = typeRow.createEl("button", {
+        cls: `umlcanvas-line-opt-btn umlcanvas-linetype-opt${isSelectedType ? " is-active" : ""}`,
+      });
+      btn.createSpan({ text: pat.label });
+      btn.title = `Line Type: ${pat.label}`;
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.editor.defaultLineType = pat.id;
+        for (const edgeId of this.editor.selectedEdgeIds) {
+          this.editor.setEdgeLineType(edgeId, pat.id);
+        }
+        this.updateState();
+        typeRow.querySelectorAll(".umlcanvas-linetype-opt").forEach((b) => b.classList.remove("is-active"));
+        btn.classList.add("is-active");
+      });
+    }
+
+    // 3. End Ending
+    popover.createDiv({ cls: "umlcanvas-line-section-title", text: "End Ending" });
+    const endGrid = popover.createDiv({ cls: "umlcanvas-line-marker-grid" });
+    for (const opt of markerOptions) {
+      const isSelectedEnd = isMarkerMatch(activeEnd, opt.id);
+      const btn = endGrid.createEl("button", {
+        cls: `umlcanvas-line-opt-btn umlcanvas-end-marker-opt${isSelectedEnd ? " is-active" : ""}`,
+      });
+      const iconSpan = btn.createSpan({ cls: "umlcanvas-line-opt-icon" });
+      renderIcon(iconSpan, opt.iconId);
+      btn.createSpan({ text: opt.label });
+      btn.title = `End Ending: ${opt.label}`;
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.editor.defaultMarkerEnd = opt.id;
+        for (const edgeId of this.editor.selectedEdgeIds) {
+          this.editor.setEdgeMarkerEnd(edgeId, opt.id);
+        }
+        this.updateState();
+        endGrid.querySelectorAll(".umlcanvas-end-marker-opt").forEach((b) => b.classList.remove("is-active"));
+        btn.classList.add("is-active");
+      });
+    }
+
+    // 4. Routing
+    popover.createDiv({ cls: "umlcanvas-line-section-title", text: "Routing" });
+    const routeRow = popover.createDiv({ cls: "umlcanvas-line-type-row" });
+    const routingOptions: Array<{ id: EdgeRouting; label: string; iconId: string }> = [
+      { id: "orthogonal", label: "Orthogonal", iconId: "git-branch" },
+      { id: "straight", label: "Straight", iconId: "minus" },
+      { id: "curved", label: "Curved", iconId: "activity" },
+    ];
+    for (const r of routingOptions) {
+      const isSelectedRoute = activeRouting === r.id;
+      const btn = routeRow.createEl("button", {
+        cls: `umlcanvas-line-opt-btn umlcanvas-routing-opt${isSelectedRoute ? " is-active" : ""}`,
+      });
+      const iconSpan = btn.createSpan({ cls: "umlcanvas-line-opt-icon" });
+      renderIcon(iconSpan, r.iconId);
+      btn.createSpan({ text: r.label });
+      btn.title = `Routing: ${r.label}`;
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.editor.defaultRouting = r.id;
+        for (const edgeId of this.editor.selectedEdgeIds) {
+          this.editor.updateEdgeRouting(edgeId, r.id);
+        }
+        this.updateState();
+        routeRow.querySelectorAll(".umlcanvas-routing-opt").forEach((b) => b.classList.remove("is-active"));
+        btn.classList.add("is-active");
+      });
+    }
+
+    // 5. UML Class Diagram Presets
+    popover.createDiv({ cls: "umlcanvas-menu-divider" });
+    popover.createDiv({ cls: "umlcanvas-line-section-title", text: "UML Class Diagram Presets" });
 
     const styles: Array<{ kind: string; label: string; iconId: string }> = [
       { kind: "uml.association", label: "Association (Line)", iconId: "minus" },
-      { kind: "uml.dependency", label: "Dependency (Arrow)", iconId: "arrow-up-right" },
-      { kind: "uml.generalization", label: "Generalization (Inherit)", iconId: "triangle" },
+      { kind: "uml.directedAssociation", label: "Directed Association (Arrow)", iconId: "arrow-up-right" },
       { kind: "uml.aggregation", label: "Aggregation (Hollow Diamond)", iconId: "diamond" },
       { kind: "uml.composition", label: "Composition (Filled Diamond)", iconId: "diamond" },
+      { kind: "uml.generalization", label: "Generalization (Inherit)", iconId: "triangle" },
       { kind: "uml.realization", label: "Realization (Dashed)", iconId: "git-branch" },
+      { kind: "uml.dependency", label: "Dependency (Arrow)", iconId: "arrow-up-right" },
+      { kind: "uml.directedAggregation", label: "Directed Aggregation (Diamond + Arrow)", iconId: "diamond" },
+      { kind: "uml.directedComposition", label: "Directed Composition (Diamond + Arrow)", iconId: "diamond" },
       { kind: "uml.link", label: "Plain Link", iconId: "minus" },
     ];
 
     for (const style of styles) {
       const item = popover.createEl("button", { cls: "umlcanvas-menu-item" });
-      if (this.editor.activeEdgeKind === style.kind) {
+      if (currentKind === style.kind) {
         item.classList.add("is-active");
       }
       const iconSpan = item.createSpan({ cls: "umlcanvas-menu-item-icon" });
@@ -1216,13 +1884,44 @@ export class Toolbar {
       item.addEventListener("click", (e) => {
         e.stopPropagation();
         this.editor.activeEdgeKind = style.kind;
+        const def = defaultEdgeStyleRegistry.get(style.kind);
+        this.editor.defaultMarkerStart = def.markerStartId ?? "none";
+        this.editor.defaultMarkerEnd = def.markerEndId ?? "none";
+        this.editor.defaultLineType = def.strokeDasharray ? "dashed" : "solid";
         for (const edgeId of this.editor.selectedEdgeIds) {
-          const edge = this.editor.diagram.edges.find((ed) => ed.id === edgeId);
-          if (edge) {
-            edge.kind = style.kind;
-          }
+          this.editor.updateEdgeKind(edgeId, style.kind);
         }
-        this.editor.updateDiagram({ ...this.editor.diagram });
+        this.closeConnectorMenu();
+      });
+    }
+
+    // 6. Actions (when an edge is selected)
+    if (this.editor.selectedEdgeIds.length > 0) {
+      popover.createDiv({ cls: "umlcanvas-menu-divider" });
+      popover.createDiv({ cls: "umlcanvas-line-section-title", text: "Line Actions" });
+      const actionsRow = popover.createDiv({ cls: "umlcanvas-line-type-row" });
+
+      const revBtn = actionsRow.createEl("button", { cls: "umlcanvas-line-opt-btn" });
+      const revIcon = revBtn.createSpan({ cls: "umlcanvas-line-opt-icon" });
+      renderIcon(revIcon, "arrow-left-right");
+      revBtn.createSpan({ text: "Reverse Direction" });
+      revBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        for (const id of this.editor.selectedEdgeIds) {
+          this.editor.reverseEdge(id);
+        }
+        this.closeConnectorMenu();
+      });
+
+      const rerouteActionBtn = actionsRow.createEl("button", { cls: "umlcanvas-line-opt-btn" });
+      const rerouteIcon = rerouteActionBtn.createSpan({ cls: "umlcanvas-line-opt-icon" });
+      renderIcon(rerouteIcon, "refresh-cw");
+      rerouteActionBtn.createSpan({ text: "Reset Bend Points" });
+      rerouteActionBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        for (const id of this.editor.selectedEdgeIds) {
+          this.editor.rerouteEdge(id);
+        }
         this.closeConnectorMenu();
       });
     }
@@ -1235,22 +1934,40 @@ export class Toolbar {
 
     this.container.appendChild(popover);
     this.connectorPopoverEl = popover;
-    this.lineBtn.classList.add("is-active");
+    if (anchor) {
+      anchor.classList.add("is-active");
+    }
 
-    const btnRect = this.lineBtn.getBoundingClientRect();
+    const btnRect = anchor ? anchor.getBoundingClientRect() : { left: 10, top: 10, right: 10, bottom: 10 };
     const containerRect = this.container.getBoundingClientRect();
-    const left = Math.max(10, btnRect.left - containerRect.left - 50);
-    const bottom = containerRect.bottom - btnRect.top + 8;
-    popover.setCssStyles({ left: `${left}px`, bottom: `${bottom}px` });
+    const isTopToolbar = anchor && this.mainToolbarEl && (this.mainToolbarEl === anchor || (typeof (this.mainToolbarEl as any).contains === "function" && this.mainToolbarEl.contains(anchor)));
+
+    const popoverWidth = popover.offsetWidth || 300;
+    const maxLeft = Math.max(10, containerRect.width - popoverWidth - 10);
+
+    if (isTopToolbar) {
+      const left = Math.min(Math.max(10, btnRect.left - containerRect.left), maxLeft);
+      const top = btnRect.bottom - containerRect.top + 8;
+      popover.setCssStyles({ left: `${left}px`, top: `${top}px`, bottom: "auto" });
+    } else {
+      const left = Math.min(Math.max(10, btnRect.left - containerRect.left - 50), maxLeft);
+      const bottom = containerRect.bottom - btnRect.top + 8;
+      popover.setCssStyles({ left: `${left}px`, bottom: `${bottom}px`, top: "auto" });
+    }
 
     this.connectorWinClickBound = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
-      if (
+      const insidePopover =
         this.connectorPopoverEl &&
-        !this.connectorPopoverEl.contains(target) &&
-        target !== this.lineBtn &&
-        !this.lineBtn.contains(target)
-      ) {
+        (this.connectorPopoverEl === target ||
+          (typeof this.connectorPopoverEl.contains === "function" &&
+            this.connectorPopoverEl.contains(target)));
+      const insideAnchor =
+        anchor &&
+        (anchor === target ||
+          (typeof anchor.contains === "function" && anchor.contains(target)));
+
+      if (!insidePopover && !insideAnchor) {
         this.closeConnectorMenu();
       }
     };
@@ -1271,6 +1988,10 @@ export class Toolbar {
     if (this.connectorPopoverEl) {
       this.connectorPopoverEl.remove();
       this.connectorPopoverEl = null;
+    }
+    if (this.currentConnectorAnchor) {
+      this.currentConnectorAnchor.classList.remove("is-active");
+      this.currentConnectorAnchor = null;
     }
     if (this.lineBtn) {
       this.lineBtn.classList.remove("is-active");
@@ -1293,6 +2014,7 @@ export class Toolbar {
     this.closeAllPopovers();
 
     const popover = createDiv({ cls: "umlcanvas-color-palette-popover" });
+    popover.addEventListener("mousedown", (e) => e.stopPropagation());
     const row = popover.createDiv({ cls: "umlcanvas-color-swatches-row" });
 
     // None / Reset button
@@ -1317,8 +2039,13 @@ export class Toolbar {
     const selectedEdges = this.editor.diagram.edges.filter((e) =>
       this.editor.selectedEdgeIds.includes(e.id)
     );
+    const selectedGroups = this.editor.diagram.groups.filter((g) =>
+      this.editor.selectedGroupIds.includes(g.id)
+    );
     const activeColor =
-      selectedNodes[0]?.style?.color ?? selectedEdges[0]?.style?.color;
+      selectedNodes[0]?.style?.color ??
+      selectedEdges[0]?.style?.color ??
+      selectedGroups[0]?.color;
 
     // 6 Presets
     for (const preset of CANVAS_COLOR_PRESETS) {
@@ -1370,11 +2097,7 @@ export class Toolbar {
     this.colorPaletteEl = popover;
     this.colorBtn.classList.add("is-active");
 
-    const btnRect = this.colorBtn.getBoundingClientRect();
-    const containerRect = this.container.getBoundingClientRect();
-    const left = Math.max(10, btnRect.left - containerRect.left);
-    const top = btnRect.bottom - containerRect.top + 6;
-    popover.setCssStyles({ left: `${left}px`, top: `${top}px` });
+    this.positionPopover(popover, this.colorBtn, 6, 260);
 
     this.onWindowClickBound = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
@@ -1426,6 +2149,7 @@ export class Toolbar {
     this.closeAllPopovers();
 
     const popover = createDiv({ cls: "umlcanvas-align-popover" });
+    popover.addEventListener("mousedown", (e) => e.stopPropagation());
 
     const createItem = (
       label: string,
@@ -1490,11 +2214,7 @@ export class Toolbar {
       this.alignBtn.classList.add("is-active");
     }
 
-    const btnRect = this.alignBtn.getBoundingClientRect();
-    const containerRect = this.container.getBoundingClientRect();
-    const left = Math.max(10, btnRect.left - containerRect.left);
-    const top = btnRect.bottom - containerRect.top + 6;
-    popover.setCssStyles({ left: `${left}px`, top: `${top}px` });
+    this.positionPopover(popover, this.alignBtn, 6, 240);
 
     const onWinClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
@@ -1533,6 +2253,327 @@ export class Toolbar {
     }
     if (this.alignBtn) {
       this.alignBtn.classList.remove("is-active");
+    }
+  }
+
+  stepFontSize(direction: 1 | -1): void {
+    if (this.renderer.activeInlineEditor && this.renderer.activeEditingNodeId) {
+      if (!this.editor.isNodeSelected(this.renderer.activeEditingNodeId)) {
+        this.editor.selectNode(this.renderer.activeEditingNodeId, false);
+      }
+    }
+    const currentFont = this.editor.getSelectionFont();
+    const currentSize = currentFont.fontSize ?? 13;
+    const newSize = getNextFontSize(currentSize, direction);
+    this.editor.setFontSizeForSelection(newSize);
+    if (this.renderer.activeInlineEditor) {
+      this.renderer.updateInlineEditorPosition();
+    }
+  }
+
+  toggleBold(): void {
+    if (this.renderer.activeInlineEditor && this.renderer.activeEditingNodeId) {
+      if (!this.editor.isNodeSelected(this.renderer.activeEditingNodeId)) {
+        this.editor.selectNode(this.renderer.activeEditingNodeId, false);
+      }
+    }
+    this.editor.toggleBoldForSelection();
+    if (this.renderer.activeInlineEditor) {
+      this.renderer.updateInlineEditorPosition();
+    }
+  }
+
+  toggleItalic(): void {
+    if (this.renderer.activeInlineEditor && this.renderer.activeEditingNodeId) {
+      if (!this.editor.isNodeSelected(this.renderer.activeEditingNodeId)) {
+        this.editor.selectNode(this.renderer.activeEditingNodeId, false);
+      }
+    }
+    this.editor.toggleItalicForSelection();
+    if (this.renderer.activeInlineEditor) {
+      this.renderer.updateInlineEditorPosition();
+    }
+  }
+
+  // ==========================================
+  // Font Size Popover Menu
+  // ==========================================
+  toggleFontSizeMenu(anchorEl?: HTMLElement): void {
+    if (this.fontSizePopoverEl) {
+      this.closeFontSizeMenu();
+    } else {
+      this.openFontSizeMenu(anchorEl);
+    }
+  }
+
+  openFontSizeMenu(anchorEl?: HTMLElement): void {
+    if (this.fontSizePopoverEl) return;
+    this.closeAllPopovers();
+
+    const popover = createDiv({ cls: "umlcanvas-font-size-popover" });
+    popover.addEventListener("mousedown", (e) => {
+      (e as any)._umlHandled = true;
+      e.stopPropagation();
+    });
+    const currentFont = this.editor.getSelectionFont();
+    const currentSize = currentFont.fontSize ?? 13;
+
+    // 1. Header / Stepper row
+    const stepperRow = popover.createDiv({ cls: "umlcanvas-font-stepper-row" });
+
+    const decBtn = stepperRow.createEl("button", {
+      cls: "umlcanvas-font-step-btn",
+      text: "A−",
+      title: "Decrease Font Size (-2px) [Ctrl+[]",
+      attr: { "aria-label": "Decrease Font Size" },
+    });
+    decBtn.addEventListener("mousedown", (e) => {
+      (e as any)._umlHandled = true;
+      e.stopPropagation();
+      e.preventDefault();
+    });
+
+    const sizeDisplay = stepperRow.createSpan({
+      cls: "umlcanvas-font-size-display",
+      text: `${currentSize}px`,
+    });
+
+    decBtn.addEventListener("click", (e) => {
+      (e as any)._umlHandled = true;
+      e.stopPropagation();
+      this.stepFontSize(-1);
+      const f = this.editor.getSelectionFont();
+      sizeDisplay.textContent = `${f.fontSize ?? 13}px`;
+    });
+
+    const incBtn = stepperRow.createEl("button", {
+      cls: "umlcanvas-font-step-btn",
+      text: "A+",
+      title: "Increase Font Size (+2px) [Ctrl+]]",
+      attr: { "aria-label": "Increase Font Size" },
+    });
+    incBtn.addEventListener("mousedown", (e) => {
+      (e as any)._umlHandled = true;
+      e.stopPropagation();
+      e.preventDefault();
+    });
+    incBtn.addEventListener("click", (e) => {
+      (e as any)._umlHandled = true;
+      e.stopPropagation();
+      this.stepFontSize(1);
+      const f = this.editor.getSelectionFont();
+      sizeDisplay.textContent = `${f.fontSize ?? 13}px`;
+    });
+
+    // 2. Font Style Quick Row (Bold & Italic pills)
+    const styleRow = popover.createDiv({ cls: "umlcanvas-font-style-row" });
+    const popoverBoldBtn = styleRow.createEl("button", {
+      cls: "umlcanvas-font-pill-btn",
+      text: "Bold (Ctrl+B)",
+      title: "Toggle Bold Style",
+    });
+    if (currentFont.isBold || currentFont.bold) popoverBoldBtn.classList.add("is-active");
+    popoverBoldBtn.addEventListener("mousedown", (e) => {
+      (e as any)._umlHandled = true;
+      e.stopPropagation();
+      e.preventDefault();
+    });
+    popoverBoldBtn.addEventListener("click", (e) => {
+      (e as any)._umlHandled = true;
+      e.stopPropagation();
+      this.editor.toggleBoldForSelection();
+      const f = this.editor.getSelectionFont();
+      popoverBoldBtn.classList.toggle("is-active", Boolean(f.isBold || f.bold));
+    });
+
+    const popoverItalicBtn = styleRow.createEl("button", {
+      cls: "umlcanvas-font-pill-btn",
+      text: "Italic (Ctrl+I)",
+      title: "Toggle Italic Style",
+    });
+    if (currentFont.isItalic || currentFont.italic) popoverItalicBtn.classList.add("is-active");
+    popoverItalicBtn.addEventListener("mousedown", (e) => {
+      (e as any)._umlHandled = true;
+      e.stopPropagation();
+      e.preventDefault();
+    });
+    popoverItalicBtn.addEventListener("click", (e) => {
+      (e as any)._umlHandled = true;
+      e.stopPropagation();
+      this.editor.toggleItalicForSelection();
+      const f = this.editor.getSelectionFont();
+      popoverItalicBtn.classList.toggle("is-active", Boolean(f.isItalic || f.italic));
+    });
+
+    // 3. Font Family Section
+    const familySection = popover.createDiv({ cls: "umlcanvas-font-section" });
+    familySection.createSpan({ cls: "umlcanvas-font-section-title", text: "Font Style & Family" });
+    const familyRow = familySection.createDiv({ cls: "umlcanvas-font-family-row" });
+    for (const preset of FONT_FAMILY_PRESETS) {
+      const famBtn = familyRow.createEl("button", {
+        cls: "umlcanvas-font-family-item",
+        text: preset.label,
+        title: preset.label,
+      });
+      famBtn.style.fontFamily = preset.fontFamily;
+      const isCurrentFamily = currentFont.fontFamily
+        ? currentFont.fontFamily === preset.fontFamily || currentFont.fontFamily === preset.id
+        : preset.id === "sans";
+      if (isCurrentFamily) {
+        famBtn.classList.add("is-active");
+      }
+      famBtn.addEventListener("mousedown", (e) => {
+        (e as any)._umlHandled = true;
+        e.stopPropagation();
+        e.preventDefault();
+      });
+      famBtn.addEventListener("click", (e) => {
+        (e as any)._umlHandled = true;
+        e.stopPropagation();
+        this.editor.setFontFamilyForSelection(preset.fontFamily);
+        this.closeFontSizeMenu();
+      });
+    }
+
+    // 4. Preset options list
+    const sizeSection = popover.createDiv({ cls: "umlcanvas-font-section" });
+    sizeSection.createSpan({ cls: "umlcanvas-font-section-title", text: "Font Size Presets" });
+    const presetsList = sizeSection.createDiv({ cls: "umlcanvas-font-presets-list" });
+    for (const preset of FONT_SIZE_PRESETS) {
+      const presetBtn = presetsList.createEl("button", {
+        cls: "umlcanvas-font-preset-btn",
+        title: `${preset.label} (${preset.size}px)`,
+        attr: { "aria-label": `${preset.label} (${preset.size}px)` },
+      });
+      if (currentSize === preset.size) {
+        presetBtn.classList.add("is-active");
+      }
+      presetBtn.createSpan({
+        cls: "umlcanvas-font-preset-label",
+        text: preset.label,
+      });
+      presetBtn.createSpan({
+        cls: "umlcanvas-font-preset-size",
+        text: `${preset.size}px`,
+      });
+
+      presetBtn.addEventListener("mousedown", (e) => {
+        (e as any)._umlHandled = true;
+        e.stopPropagation();
+        e.preventDefault();
+      });
+      presetBtn.addEventListener("click", (e) => {
+        (e as any)._umlHandled = true;
+        e.stopPropagation();
+        this.editor.setFontSizeForSelection(preset.size);
+        this.closeFontSizeMenu();
+      });
+    }
+
+    // 5. Actions row
+    const actionsRow = popover.createDiv({ cls: "umlcanvas-font-actions-row" });
+    const applyAllBtn = actionsRow.createEl("button", {
+      cls: "umlcanvas-font-apply-all-btn",
+      text: "Apply to All Canvas Elements",
+      title: "Apply current typography settings across all elements on canvas",
+      attr: { "aria-label": "Apply to All Canvas Elements" },
+    });
+    applyAllBtn.addEventListener("mousedown", (e) => {
+      (e as any)._umlHandled = true;
+      e.stopPropagation();
+      e.preventDefault();
+    });
+    applyAllBtn.addEventListener("click", (e) => {
+      (e as any)._umlHandled = true;
+      e.stopPropagation();
+      const f = this.editor.getSelectionFont();
+      this.editor.setFontForAllElements({
+        fontSize: f.fontSize,
+        bold: Boolean(f.isBold || f.bold),
+        italic: Boolean(f.isItalic || f.italic),
+        fontFamily: f.fontFamily,
+      });
+      this.closeFontSizeMenu();
+    });
+
+    const resetBtn = actionsRow.createEl("button", {
+      cls: "umlcanvas-font-reset-btn",
+      text: "Reset Typography",
+      title: "Reset font to default (13px, normal weight & style)",
+      attr: { "aria-label": "Reset Typography" },
+    });
+    resetBtn.addEventListener("mousedown", (e) => {
+      (e as any)._umlHandled = true;
+      e.stopPropagation();
+      e.preventDefault();
+    });
+    resetBtn.addEventListener("click", (e) => {
+      (e as any)._umlHandled = true;
+      e.stopPropagation();
+      this.editor.resetFontForSelection();
+      this.closeFontSizeMenu();
+    });
+
+    this.container.appendChild(popover);
+    this.fontSizePopoverEl = popover;
+
+    const anchor = anchorEl || this.fontSizeBtn;
+    if (anchor === this.contextFontSizeBtn || anchor === this.contextFontFamilyBtn) {
+      if (this.contextFontSizeBtn) this.contextFontSizeBtn.classList.add("is-active");
+      if (this.contextFontFamilyBtn) this.contextFontFamilyBtn.classList.add("is-active");
+    } else {
+      if (this.fontSizeBtn) this.fontSizeBtn.classList.add("is-active");
+      if (this.fontFamilyBtn) this.fontFamilyBtn.classList.add("is-active");
+    }
+
+    this.positionPopover(popover, anchor, 6, 260);
+
+    this.fontSizeWinClickBound = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (
+        this.fontSizePopoverEl &&
+        !this.fontSizePopoverEl.contains(target) &&
+        target !== this.fontSizeBtn &&
+        !this.fontSizeBtn?.contains(target) &&
+        target !== this.fontFamilyBtn &&
+        !this.fontFamilyBtn?.contains(target) &&
+        target !== this.contextFontSizeBtn &&
+        !this.contextFontSizeBtn?.contains(target) &&
+        target !== this.contextFontFamilyBtn &&
+        !this.contextFontFamilyBtn?.contains(target)
+      ) {
+        this.closeFontSizeMenu();
+      }
+    };
+    setTimeout(() => {
+      if (typeof window !== "undefined" && window?.addEventListener && this.fontSizeWinClickBound) {
+        window.addEventListener("mousedown", this.fontSizeWinClickBound);
+      }
+    }, 0);
+  }
+
+  closeFontSizeMenu(): void {
+    if (this.fontSizePopoverEl) {
+      this.fontSizePopoverEl.remove();
+      this.fontSizePopoverEl = null;
+    }
+    if (this.fontSizeBtn) {
+      this.fontSizeBtn.classList.remove("is-active");
+    }
+    if (this.fontFamilyBtn) {
+      this.fontFamilyBtn.classList.remove("is-active");
+    }
+    if (this.contextFontSizeBtn) {
+      this.contextFontSizeBtn.classList.remove("is-active");
+    }
+    if (this.contextFontFamilyBtn) {
+      this.contextFontFamilyBtn.classList.remove("is-active");
+    }
+    if (this.fontSizeWinClickBound) {
+      if (typeof window !== "undefined" && window?.removeEventListener) {
+        window.removeEventListener("mousedown", this.fontSizeWinClickBound);
+      }
+      this.fontSizeWinClickBound = null;
     }
   }
 

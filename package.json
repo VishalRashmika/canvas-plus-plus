@@ -1,6 +1,6 @@
 {
   "name": "canvas-plus-plus",
-  "version": "1.0.1",
+  "version": "2.0.8",
   "description": "Professional UML 2.x diagrams, hardware schematics, and freehand shape recognition on a high-performance visual canvas with AI coding agent integration.",
   "main": "main.js",
   "scripts": {
@@ -32,6 +32,6 @@
     "obsidian": "latest",
     "ts-jest": "^29.1.2",
     "tslib": "^2.6.2",
-    "typescript": "^5.4.3"
+    "typescript": "^5.9.3"
   }
 }

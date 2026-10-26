@@ -92,8 +92,11 @@ export const classDiagramDefinition: DiagramTypeDefinition = {
   ],
   allowedEdgeKinds: [
     "uml.association",
+    "uml.directedAssociation",
     "uml.aggregation",
+    "uml.directedAggregation",
     "uml.composition",
+    "uml.directedComposition",
     "uml.generalization",
     "uml.realization",
     "uml.dependency",
@@ -1034,8 +1037,11 @@ export const generalDiagramDefinition: DiagramTypeDefinition = {
   ],
   allowedEdgeKinds: [
     "uml.association",
+    "uml.directedAssociation",
     "uml.aggregation",
+    "uml.directedAggregation",
     "uml.composition",
+    "uml.directedComposition",
     "uml.generalization",
     "uml.realization",
     "uml.dependency",

@@ -4376,7 +4376,6 @@ body.umlcanvas-is-resizing-palette * {
 .theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar,
 .theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-main-toolbar,
 .theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-floating-bottom-toolbar {
-  background-color: var(--canvas-bg-toolbar, #f4f1ea);
   background-color: var(--canvas-bg-toolbar, #f4f1ea) !important;
   border: 1px solid var(--canvas-stroke-border, #d8d1c4) !important;
   box-shadow: 0 4px 16px rgba(50, 40, 30, 0.08), 0 1px 3px rgba(50, 40, 30, 0.04) !important;
@@ -4385,7 +4384,6 @@ body.umlcanvas-is-resizing-palette * {
 .umlcanvas-theme-light .umlcanvas-toolbar-group,
 .theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-group,
 .theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-group {
-  background-color: #ffffff;
   background-color: #ffffff !important;
   border: 1px solid var(--canvas-stroke-border, #d8d1c4) !important;
 }
@@ -4398,7 +4396,6 @@ body.umlcanvas-is-resizing-palette * {
 .theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn.clickable-icon,
 .theme-light .umlcanvas-toolbar-btn,
 .theme-light .umlcanvas-toolbar-btn.clickable-icon {
-  color: var(--canvas-text-body, #242832);
   color: var(--canvas-text-body, #242832) !important;
   background: transparent !important;
   background-color: transparent !important;
@@ -4428,7 +4425,6 @@ body.umlcanvas-is-resizing-palette * {
 .theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-toolbar-btn.clickable-icon.is-active,
 .theme-light .umlcanvas-toolbar-btn.is-active,
 .theme-light .umlcanvas-toolbar-btn.clickable-icon.is-active {
-  background-color: var(--canvas-accent, #5b4fe8);
   background-color: var(--canvas-accent, #5b4fe8) !important;
   color: #ffffff !important;
   box-shadow: none !important;
@@ -4658,7 +4654,6 @@ body.umlcanvas-is-resizing-palette * {
 .umlcanvas-theme-light .umlcanvas-font-stepper-combo,
 .theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-stepper-combo,
 .theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-stepper-combo {
-  background-color: #ffffff;
   background-color: #ffffff !important;
   border: 1px solid var(--canvas-stroke-border, #d8d1c4) !important;
 }
@@ -4672,7 +4667,6 @@ body.umlcanvas-is-resizing-palette * {
 .umlcanvas-theme-light .umlcanvas-font-stepper-combo .umlcanvas-font-size-btn,
 .theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-stepper-combo .umlcanvas-font-size-btn,
 .theme-light.umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-font-stepper-combo .umlcanvas-font-size-btn {
-  background-color: #ffffff;
   background-color: #ffffff !important;
   color: var(--canvas-text-body, #242832) !important;
   border: none !important;
@@ -4997,7 +4991,6 @@ body.umlcanvas-is-resizing-palette * {
 .theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar,
 .theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-main-toolbar,
 .theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-floating-bottom-toolbar {
-  background-color: #26262b;
   background-color: #26262b !important;
   border: 1px solid #38383e !important;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3) !important;
@@ -5006,7 +4999,6 @@ body.umlcanvas-is-resizing-palette * {
 .umlcanvas-theme-dark .umlcanvas-toolbar-group,
 .theme-dark .umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-group,
 .theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-group {
-  background-color: #1e1e1e;
   background-color: #1e1e1e !important;
   border: 1px solid #38383e !important;
 }
@@ -5019,7 +5011,6 @@ body.umlcanvas-is-resizing-palette * {
 .theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn.clickable-icon,
 .theme-dark .umlcanvas-toolbar-btn,
 .theme-dark .umlcanvas-toolbar-btn.clickable-icon {
-  color: #dcddde;
   color: #dcddde !important;
   background: transparent !important;
   background-color: transparent !important;
@@ -5049,7 +5040,6 @@ body.umlcanvas-is-resizing-palette * {
 .theme-dark.umlcanvas-view-container:not(.umlcanvas-theme-light) .umlcanvas-toolbar-btn.clickable-icon.is-active,
 .theme-dark .umlcanvas-toolbar-btn.is-active,
 .theme-dark .umlcanvas-toolbar-btn.clickable-icon.is-active {
-  background-color: #7b68ee;
   background-color: #7b68ee !important;
   color: #ffffff !important;
   box-shadow: none !important;
@@ -5486,4 +5476,8 @@ body.umlcanvas-is-resizing-palette * {
 .umlcanvas-edge-end-btn {
   font-size: 12px;
   padding: 4px 8px;
+}
+
+.umlcanvas-file-input-hidden {
+  display: none !important;
 }

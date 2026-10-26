@@ -262,29 +262,28 @@ export function getEdgeFontStyle(edge: DiagramEdge): FontStyleConfig {
 }
 
 export function getGroupFontStyle(group: Group): FontStyleConfig {
-  const g = group as any;
-  const groupStyle = g.style;
+  const groupStyle = group.style;
 
-  const fontSize = g.fontSize ?? groupStyle?.fontSize;
+  const fontSize = group.fontSize ?? groupStyle?.fontSize;
 
   let bold: boolean | undefined = undefined;
-  if (g.bold !== undefined) {
-    bold = g.bold;
+  if (group.bold !== undefined) {
+    bold = group.bold;
   } else if (groupStyle?.bold !== undefined) {
     bold = groupStyle.bold;
-  } else if (g.fontWeight !== undefined) {
-    bold = g.fontWeight === "bold" || g.fontWeight === 700;
+  } else if (group.fontWeight !== undefined) {
+    bold = group.fontWeight === "bold" || group.fontWeight === 700;
   } else if (groupStyle?.fontWeight !== undefined) {
     bold = groupStyle.fontWeight === "bold" || groupStyle.fontWeight === 700;
   }
 
   let italic: boolean | undefined = undefined;
-  if (g.italic !== undefined) {
-    italic = g.italic;
+  if (group.italic !== undefined) {
+    italic = group.italic;
   } else if (groupStyle?.italic !== undefined) {
     italic = groupStyle.italic;
-  } else if (g.fontStyle !== undefined) {
-    italic = g.fontStyle === "italic";
+  } else if (group.fontStyle !== undefined) {
+    italic = group.fontStyle === "italic";
   } else if (groupStyle?.fontStyle !== undefined) {
     italic = groupStyle.fontStyle === "italic";
   }
@@ -294,16 +293,16 @@ export function getGroupFontStyle(group: Group): FontStyleConfig {
       ? bold
         ? "bold"
         : "normal"
-      : g.fontWeight ?? groupStyle?.fontWeight;
+      : group.fontWeight ?? groupStyle?.fontWeight;
 
   const fontStyle =
     italic !== undefined
       ? italic
         ? "italic"
         : "normal"
-      : g.fontStyle ?? groupStyle?.fontStyle;
+      : group.fontStyle ?? groupStyle?.fontStyle;
 
-  const fontFamily = g.fontFamily ?? groupStyle?.fontFamily;
+  const fontFamily = group.fontFamily ?? groupStyle?.fontFamily;
 
   return { fontSize, bold, italic, fontWeight, fontStyle, fontFamily };
 }
@@ -316,81 +315,61 @@ export function applyFontToSvgElement(
 
   if (style.fontSize !== undefined) {
     el.setAttribute("font-size", String(style.fontSize));
-    if ((el as any).style) {
-      if (typeof (el as any).style.setProperty === "function") {
-        (el as any).style.setProperty("font-size", `${style.fontSize}px`, "important");
+    const targetEl = el as unknown as HTMLElement;
+    if (targetEl.style) {
+      if (typeof targetEl.style.setProperty === "function") {
+        targetEl.style.setProperty("font-size", `${style.fontSize}px`, "important");
       }
-      (el as any).style.fontSize = `${style.fontSize}px`;
+      targetEl.style.fontSize = `${style.fontSize}px`;
     }
   }
 
   if (style.fontFamily !== undefined) {
     el.setAttribute("font-family", style.fontFamily);
-    if ((el as any).style) {
-      if (typeof (el as any).style.setProperty === "function") {
-        (el as any).style.setProperty("font-family", style.fontFamily, "important");
+    const targetEl = el as unknown as HTMLElement;
+    if (targetEl.style) {
+      if (typeof targetEl.style.setProperty === "function") {
+        targetEl.style.setProperty("font-family", style.fontFamily, "important");
       }
-      (el as any).style.fontFamily = style.fontFamily;
+      targetEl.style.fontFamily = style.fontFamily;
     }
   }
 
   if (style.bold === true) {
     el.setAttribute("font-weight", "bold");
-    if ((el as any).style) {
-      if (typeof (el as any).style.setProperty === "function") {
-        (el as any).style.setProperty("font-weight", "bold", "important");
-      }
-      (el as any).style.fontWeight = "bold";
-    }
     el.classList.add("umlcanvas-bold");
     el.classList.remove("umlcanvas-not-bold");
   } else if (style.bold === false) {
     el.setAttribute("font-weight", "normal");
-    if ((el as any).style) {
-      if (typeof (el as any).style.setProperty === "function") {
-        (el as any).style.setProperty("font-weight", "normal", "important");
-      }
-      (el as any).style.fontWeight = "normal";
-    }
     el.classList.add("umlcanvas-not-bold");
     el.classList.remove("umlcanvas-bold");
   } else if (style.fontWeight !== undefined) {
     el.setAttribute("font-weight", String(style.fontWeight));
-    if ((el as any).style) {
-      if (typeof (el as any).style.setProperty === "function") {
-        (el as any).style.setProperty("font-weight", String(style.fontWeight), "important");
+    const targetEl = el as unknown as HTMLElement;
+    if (targetEl.style) {
+      if (typeof targetEl.style.setProperty === "function") {
+        targetEl.style.setProperty("font-weight", String(style.fontWeight), "important");
       }
-      (el as any).style.fontWeight = String(style.fontWeight);
+      targetEl.style.fontWeight = String(style.fontWeight);
     }
   }
 
   if (style.italic === true) {
     el.setAttribute("font-style", "italic");
-    if ((el as any).style) {
-      if (typeof (el as any).style.setProperty === "function") {
-        (el as any).style.setProperty("font-style", "italic", "important");
-      }
-      (el as any).style.fontStyle = "italic";
-    }
     el.classList.add("umlcanvas-italic");
     el.classList.remove("umlcanvas-not-italic");
   } else if (style.italic === false) {
     el.setAttribute("font-style", "normal");
-    if ((el as any).style) {
-      if (typeof (el as any).style.setProperty === "function") {
-        (el as any).style.setProperty("font-style", "normal", "important");
-      }
-      (el as any).style.fontStyle = "normal";
-    }
     el.classList.add("umlcanvas-not-italic");
     el.classList.remove("umlcanvas-italic");
   } else if (style.fontStyle !== undefined) {
     el.setAttribute("font-style", style.fontStyle);
-    if ((el as any).style) {
-      if (typeof (el as any).style.setProperty === "function") {
-        (el as any).style.setProperty("font-style", style.fontStyle, "important");
+    const targetEl = el as unknown as HTMLElement;
+    if (targetEl.style) {
+      if (typeof targetEl.style.setProperty === "function") {
+        targetEl.style.setProperty("font-style", style.fontStyle, "important");
       }
-      (el as any).style.fontStyle = style.fontStyle;
+      targetEl.style.fontStyle = style.fontStyle;
     }
   }
 }

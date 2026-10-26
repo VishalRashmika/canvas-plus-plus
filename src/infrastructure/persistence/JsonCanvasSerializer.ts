@@ -4,8 +4,8 @@ import {
   defaultEditPermissionMap,
   createDiagram,
 } from "../../domain/entities/Diagram";
-import { DiagramNode, NodeStyle, createDiagramNode } from "../../domain/entities/DiagramNode";
-import { DiagramEdge, EdgeStyle, createDiagramEdge } from "../../domain/entities/DiagramEdge";
+import { DiagramNode, createDiagramNode } from "../../domain/entities/DiagramNode";
+import { DiagramEdge, createDiagramEdge } from "../../domain/entities/DiagramEdge";
 import { Layer, createLayer } from "../../domain/entities/Layer";
 import { Group, createGroup } from "../../domain/entities/Group";
 import { Port } from "../../domain/entities/Port";
@@ -377,7 +377,7 @@ export class JsonCanvasSerializer {
                   gr.fontStyle === "italic" || gr.fontStyle === "normal"
                     ? gr.fontStyle
                     : undefined,
-                style: gr.style && typeof gr.style === "object" ? (gr.style as any) : undefined,
+                style: gr.style && typeof gr.style === "object" ? (gr.style) : undefined,
               })
             );
           }
@@ -416,7 +416,7 @@ export class JsonCanvasSerializer {
     }
 
     return createDiagram({
-      id: id as string,
+      id,
       diagramType,
       title,
       nodes,

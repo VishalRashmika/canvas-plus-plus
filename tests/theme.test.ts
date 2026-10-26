@@ -169,31 +169,31 @@ describe("Pastel-Inspired Light Theme Tests", () => {
     it("should adapt toolbar containers and groups to light theme colors", () => {
       // Light theme toolbar background: warm pastel surface
       expect(css).toContain(".umlcanvas-theme-light .umlcanvas-main-toolbar");
-      expect(css).toContain("background-color: var(--canvas-bg-toolbar, #f4f1ea);");
+      expect(css).toContain("background-color: var(--canvas-bg-toolbar, #f4f1ea) !important;");
       // Light theme group: crisp white
       expect(css).toContain(".umlcanvas-theme-light .umlcanvas-toolbar-group");
-      expect(css).toContain("background-color: #ffffff;");
+      expect(css).toContain("background-color: #ffffff !important;");
       // Light theme button text: high contrast charcoal ink
       expect(css).toContain(".umlcanvas-theme-light .umlcanvas-toolbar-btn");
-      expect(css).toContain("color: var(--canvas-text-body, #242832);");
+      expect(css).toContain("color: var(--canvas-text-body, #242832) !important;");
       // Light theme active button: accent with white text
       expect(css).toContain(".umlcanvas-theme-light .umlcanvas-toolbar-btn.is-active");
-      expect(css).toContain("background-color: var(--canvas-accent, #5b4fe8);");
+      expect(css).toContain("background-color: var(--canvas-accent, #5b4fe8) !important;");
     });
 
     it("should adapt toolbar containers and groups to dark theme colors", () => {
       // Dark theme toolbar background: dark secondary surface
       expect(css).toContain(".umlcanvas-theme-dark .umlcanvas-main-toolbar");
-      expect(css).toContain("background-color: #26262b;");
+      expect(css).toContain("background-color: #26262b !important;");
       // Dark theme group: dark primary surface
       expect(css).toContain(".umlcanvas-theme-dark .umlcanvas-toolbar-group");
-      expect(css).toContain("background-color: #1e1e1e;");
+      expect(css).toContain("background-color: #1e1e1e !important;");
       // Dark theme button text: light text
       expect(css).toContain(".umlcanvas-theme-dark .umlcanvas-toolbar-btn");
-      expect(css).toContain("color: #dcddde;");
+      expect(css).toContain("color: #dcddde !important;");
       // Dark theme active button: purple accent
       expect(css).toContain(".umlcanvas-theme-dark .umlcanvas-toolbar-btn.is-active");
-      expect(css).toContain("background-color: #7b68ee;");
+      expect(css).toContain("background-color: #7b68ee !important;");
     });
 
     it("should enforce stroke: currentColor and fill: none in light theme toolbar icons", () => {

@@ -7,6 +7,7 @@ module.exports = {
   moduleNameMapper: {
     "^obsidian$": "<rootDir>/tests/fakes/MockObsidian.ts",
   },
+  setupFilesAfterEnv: ["<rootDir>/tests/setup.ts"],
   collectCoverageFrom: [
     "src/domain/**/*.ts",
     "src/application/**/*.ts",

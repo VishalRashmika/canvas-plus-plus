@@ -657,7 +657,11 @@ export class ShapeRecognizer {
       return { shape: isSquareAspect ? "circle" : "ellipse", confidence: 0.70, bounds };
     }
 
-    return { shape: isSquare ? "square" : "rectangle", confidence: 0.75, bounds };
+    if (rectErr < 0.28 || areaRatio >= 0.60) {
+      return { shape: isSquare ? "square" : "rectangle", confidence: 0.70, bounds };
+    }
+
+    return { shape: "none", confidence: 0.25, bounds };
   }
 
   private distToSegment(p: Point, v: Point, w: Point): number {

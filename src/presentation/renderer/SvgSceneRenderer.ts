@@ -3266,6 +3266,12 @@ export class SvgSceneRenderer {
       inPlaceW = Math.max(20, colW - 8);
       inPlaceH = Math.max(20, rowH - 8);
       textAlign = "center";
+    } else if (node.kind === "generic.text") {
+      inPlaceX = node.position.x + 2;
+      inPlaceY = node.position.y + 2;
+      inPlaceW = Math.max(40, node.size.width - 4);
+      inPlaceH = Math.max(24, contentH, node.size.height - 4);
+      textAlign = "left";
     } else {
       // General shapes: vertically and horizontally centered in node
       inPlaceX = node.position.x + 8;
@@ -3941,7 +3947,15 @@ export class SvgSceneRenderer {
         const lines = newText.split(/\r?\n/);
         const lineSpacing = Math.round(fontSize * 1.35);
 
-        if (node.kind === "generic.stickyNote" || node.kind === "generic.note") {
+        if (node.kind === "generic.text") {
+          const maxLineLen = lines.reduce((max, l) => Math.max(max, l.length), 1);
+          const neededW = Math.max(50, Math.round(maxLineLen * charWidth + 24));
+          const neededH = Math.max(30, Math.round(lines.length * lineSpacing + 16));
+          node.size = {
+            width: neededW,
+            height: neededH,
+          };
+        } else if (node.kind === "generic.stickyNote" || node.kind === "generic.note") {
           const availableW = Math.max(40, node.size.width - (node.kind === "generic.stickyNote" ? 24 : 20));
           const wrapped = wrapTextToLines(newText, availableW, charWidth);
           const topOffset = node.kind === "generic.stickyNote" ? (26 + fontSize) : (14 + fontSize);

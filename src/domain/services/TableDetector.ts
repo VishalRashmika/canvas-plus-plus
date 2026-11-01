@@ -313,6 +313,60 @@ export class TableDetector {
       if (hLines.length < 2 || vLines.length < 2) {
         return null;
       }
+
+      // In a real grid table of crossing lines (like # or a tic-tac-toe / NxM grid without an outer box),
+      // the horizontal grid lines must span across the columns (from the leftmost vertical line to the rightmost),
+      // and vertical grid lines must span across the rows (from the topmost horizontal line to the bottommost).
+      // Separate letter strokes (e.g. in "HE", "TE", "THE", "THIS", "FILE") only span their own individual letter!
+      const minVX = Math.min(...vLines.map((v) => v.cx));
+      const maxVX = Math.max(...vLines.map((v) => v.cx));
+      const minHY = Math.min(...hLines.map((h) => h.cy));
+      const maxHY = Math.max(...hLines.map((h) => h.cy));
+
+      // Must have distinct horizontal and vertical spread
+      if (maxVX - minVX < 20 || maxHY - minHY < 20) {
+        return null;
+      }
+
+      const tolSpanX = Math.max(12, (maxVX - minVX) * 0.18);
+      const tolSpanY = Math.max(12, (maxHY - minHY) * 0.18);
+
+      // Verify each horizontal line spans across the vertical lines
+      const spanningHLines = hLines.filter(
+        (hl) => hl.minX <= minVX + tolSpanX && hl.maxX >= maxVX - tolSpanX
+      );
+
+      // Verify each vertical line spans across the horizontal lines
+      const spanningVLines = vLines.filter(
+        (vl) => vl.minY <= minHY + tolSpanY && vl.maxY >= maxHY - tolSpanY
+      );
+
+      if (spanningHLines.length < 2 || spanningVLines.length < 2) {
+        return null;
+      }
+
+      // Verify that horizontal and vertical lines actually cross each other into a grid.
+      const tolX = Math.max(8, tableW * 0.08);
+      const tolY = Math.max(8, tableH * 0.08);
+      let intersectionCount = 0;
+
+      for (const hl of spanningHLines) {
+        for (const vl of spanningVLines) {
+          const crosses =
+            vl.cx >= hl.minX - tolX &&
+            vl.cx <= hl.maxX + tolX &&
+            hl.cy >= vl.minY - tolY &&
+            hl.cy <= vl.maxY + tolY;
+          if (crosses) {
+            intersectionCount++;
+          }
+        }
+      }
+
+      if (intersectionCount < 4) {
+        return null;
+      }
+
       tableMinX = Math.min(
         ...hLines.map((l) => l.minX),
         ...vLines.map((l) => l.minX)
@@ -367,12 +421,25 @@ export class TableDetector {
     let internalVX: number[] = [];
 
     if (outerBox) {
-      internalHY = clusteredHY.filter(
-        (y) => y > tableMinY + 0.12 * tableH && y < tableMaxY - 0.12 * tableH
-      );
-      internalVX = clusteredVX.filter(
-        (x) => x > tableMinX + 0.12 * tableW && x < tableMaxX - 0.12 * tableW
-      );
+      // Horizontal dividers inside the outer box must span across the table (at least 65% of width)
+      internalHY = clusteredHY.filter((cy) => {
+        if (cy <= tableMinY + 0.12 * tableH || cy >= tableMaxY - 0.12 * tableH) return false;
+        const linesAtY = hLines.filter((l) => Math.abs(l.cy - cy) <= clusterTolY);
+        if (linesAtY.length === 0) return false;
+        const minX = Math.min(...linesAtY.map((l) => l.minX));
+        const maxX = Math.max(...linesAtY.map((l) => l.maxX));
+        return maxX - minX >= 0.65 * tableW;
+      });
+
+      // Vertical dividers inside the outer box must span across the table (at least 65% of height)
+      internalVX = clusteredVX.filter((cx) => {
+        if (cx <= tableMinX + 0.12 * tableW || cx >= tableMaxX - 0.12 * tableW) return false;
+        const linesAtX = vLines.filter((l) => Math.abs(l.cx - cx) <= clusterTolX);
+        if (linesAtX.length === 0) return false;
+        const minY = Math.min(...linesAtX.map((l) => l.minY));
+        const maxY = Math.max(...linesAtX.map((l) => l.maxY));
+        return maxY - minY >= 0.65 * tableH;
+      });
     } else {
       // Lines near the outer edges (within 12% of extremes) serve as boundaries
       internalHY = clusteredHY.filter(

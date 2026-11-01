@@ -153,6 +153,17 @@ export function calculateNodeFitSize(node: DiagramNode): Size {
     };
   }
 
+  if (kind === "generic.text") {
+    const text = node.labels[0]?.text ?? node.title ?? "";
+    const lines = text.split(/\r?\n/);
+    const maxChars = lines.reduce((m, l) => Math.max(m, l.length), 0);
+    const charW = Math.max(5, baseSize * 0.58 * scale * boldMult);
+    const lineSpacing = Math.round(baseSize * 1.35);
+    const width = Math.max(40, Math.ceil(maxChars * charW + 16));
+    const height = Math.max(24, Math.ceil(lines.length * lineSpacing + 12));
+    return { width, height };
+  }
+
   // Box shapes: uml.class, uml.object, generic.rectangle, generic.note
   const titleText = node.labels[0]?.text ?? "";
   const titleLines = titleText.split("\n");

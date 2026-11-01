@@ -149,7 +149,11 @@ export class HandwrittenFontDetector {
     );
 
     // 3. Handle single continuous cursive stroke with multiple letter lobes
-    if (strokes.length === 1 && strokeFeatures[0].width / strokeFeatures[0].height > 1.8) {
+    if (
+      strokes.length === 1 &&
+      (strokeFeatures[0].width / strokeFeatures[0].height > 1.2 ||
+        strokeFeatures[0].totalLength > 1.8 * Math.hypot(strokeFeatures[0].width, strokeFeatures[0].height))
+    ) {
       const cursiveSubStrokes = this.segmentCursiveStroke(strokes[0]);
       if (cursiveSubStrokes.length > 1) {
         return this.detect(cursiveSubStrokes);
@@ -630,6 +634,112 @@ export class HandwrittenFontDetector {
     return words;
   }
 
+  private static readonly LEXICON: string[] = [
+    // Common words
+    "the", "be", "to", "of", "and", "a", "in", "that", "have", "i", "it", "for", "not", "on", "with",
+    "he", "as", "you", "do", "at", "this", "but", "his", "by", "from", "they", "we", "say", "her",
+    "she", "or", "an", "will", "my", "one", "all", "would", "there", "their", "what", "so", "up",
+    "out", "if", "about", "who", "get", "which", "go", "me", "when", "make", "can", "like", "time",
+    "no", "just", "him", "know", "take", "people", "into", "year", "your", "good", "some", "could",
+    "them", "see", "other", "than", "then", "now", "look", "only", "come", "its", "over", "think",
+    "also", "back", "after", "use", "two", "how", "our", "work", "first", "well", "way", "even",
+    "new", "want", "because", "any", "these", "give", "day", "most", "us", "yes", "ok", "app",
+    "dog", "cat", "car", "box", "line", "text", "test", "file", "note", "save", "home", "page",
+    "help", "info", "view", "edit", "name", "type", "item", "data", "list", "menu", "link",
+    // Diagram, software & architecture terms
+    "class", "node", "interface", "object", "diagram", "table", "start", "end", "user", "order",
+    "payment", "auth", "login", "title", "state", "action", "decision", "package", "component",
+    "service", "controller", "model", "api", "database", "server", "client", "request", "response",
+    "error", "system", "process", "event", "config", "setting", "settings", "group", "shape",
+    "uml", "id", "true", "false", "null", "card", "flow", "step", "todo", "done", "cancel", "submit",
+    "hello", "world", "fit", "red", "blue", "green", "run"
+  ];
+
+  private refineWordWithLexicon(word: string, chars: DetectedCharacter[]): string {
+    if (!word || word.length < 3) return word;
+
+    // Separate leading/trailing punctuation if any
+    const match = word.match(/^([^a-zA-Z0-9]*)([a-zA-Z0-9?]+)([^a-zA-Z0-9]*)$/);
+    if (!match) return word;
+    const prefix = match[1];
+    const core = match[2];
+    const suffix = match[3];
+
+    if (core.length < 3) return word;
+
+    const lower = core.toLowerCase();
+    const isAllUpper = core === core.toUpperCase() && core !== core.toLowerCase();
+    const isCapitalized =
+      core[0] === core[0].toUpperCase() && core.slice(1) === core.slice(1).toLowerCase();
+
+    // If it's already an exact match in the lexicon, preserve original word characters
+    for (const entry of HandwrittenFontDetector.LEXICON) {
+      if (entry === lower) {
+        return word;
+      }
+    }
+
+    const hasUncertainChars = chars.some((c) => c.char === "?" || c.confidence < 0.7);
+
+    // Only attempt fuzzy correction if word length >= 4 AND (it has uncertain chars or is unknown)
+    if (core.length < 4 && !hasUncertainChars) {
+      return word;
+    }
+
+    let bestMatch: string | null = null;
+    let bestDist = Infinity;
+    const maxDist = core.length >= 7 ? 2 : 1;
+
+    for (const entry of HandwrittenFontDetector.LEXICON) {
+      if (Math.abs(entry.length - lower.length) > maxDist) continue;
+      if (entry.length < 4) continue;
+      const d = this.levenshtein(lower, entry);
+      if (d <= maxDist && d < bestDist) {
+        bestDist = d;
+        bestMatch = entry;
+      }
+    }
+
+    if (bestMatch && bestDist <= maxDist) {
+      let formatted: string;
+      if (isAllUpper) {
+        formatted = bestMatch.toUpperCase();
+      } else if (isCapitalized) {
+        formatted = bestMatch[0].toUpperCase() + bestMatch.slice(1);
+      } else {
+        formatted = bestMatch;
+      }
+      return prefix + formatted + suffix;
+    }
+
+    return word;
+  }
+
+  private levenshtein(a: string, b: string): number {
+    const al = a.length;
+    const bl = b.length;
+    if (al === 0) return bl;
+    if (bl === 0) return al;
+    const matrix: number[][] = [];
+    for (let i = 0; i <= al; i++) {
+      matrix[i] = [i];
+    }
+    for (let j = 0; j <= bl; j++) {
+      matrix[0][j] = j;
+    }
+    for (let i = 1; i <= al; i++) {
+      for (let j = 1; j <= bl; j++) {
+        const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j - 1] + cost
+        );
+      }
+    }
+    return matrix[al][bl];
+  }
+
   private buildWord(chars: DetectedCharacter[]): DetectedWord {
     let minX = Infinity,
       minY = Infinity,
@@ -644,7 +754,11 @@ export class HandwrittenFontDetector {
       maxY = Math.max(maxY, p.y + s.height);
     }
     const bounds = rectFromBounds(minX, minY, Math.max(1, maxX - minX), Math.max(1, maxY - minY));
-    const text = chars.map((c) => c.char).join("");
+    let text = chars.map((c) => c.char).join("");
+    const refinedText = this.refineWordWithLexicon(text, chars);
+    if (refinedText !== text) {
+      text = refinedText;
+    }
     const confidence =
       chars.reduce((acc, c) => acc + c.confidence, 0) / Math.max(1, chars.length);
 
@@ -931,6 +1045,17 @@ export class HandwrittenFontDetector {
       }
     }
 
+    // 10. 'm': 3 vertical stems or left stem + 2 arches/lobes to right
+    if (trueVerticals.length === 3) {
+      return { char: "m", confidence: 0.96 };
+    }
+    if (trueVerticals.length === 1 && trueVerticals[0].cx < minX + 0.40 * w) {
+      const otherTwo = strokes.filter((s) => s !== trueVerticals[0]);
+      if (otherTwo.every((s) => s.cx > minX + 0.28 * w && s.straightness < 0.88)) {
+        return { char: "m", confidence: 0.95 };
+      }
+    }
+
     return { char: "A", confidence: 0.85 };
   }
 
@@ -1012,16 +1137,46 @@ export class HandwrittenFontDetector {
       }
     }
 
-    // 6. 't': Vertical stem + horizontal crossbar in upper middle
+    // 6. 't' or 'f': Vertical stem + horizontal crossbar in upper middle
     const crossbarCandidate =
-      s1.isHorizontal && s1.cy > minY + 0.18 * h && s1.cy < minY + 0.60 * h
+      s1.isHorizontal && s1.cy > minY + 0.15 * h && s1.cy < minY + 0.60 * h
         ? s1
-        : s2.isHorizontal && s2.cy > minY + 0.18 * h && s2.cy < minY + 0.60 * h
+        : s2.isHorizontal && s2.cy > minY + 0.15 * h && s2.cy < minY + 0.60 * h
         ? s2
         : null;
     const tStemCandidate = crossbarCandidate === s1 ? s2 : s1;
-    if (crossbarCandidate && (tStemCandidate.isVertical || tStemCandidate.height > 0.60 * h)) {
+    if (crossbarCandidate && (tStemCandidate.isVertical || tStemCandidate.height > 0.55 * h)) {
+      if (
+        crossbarCandidate.cy < minY + 0.42 * h &&
+        (tStemCandidate.start.x < tStemCandidate.end.x || tStemCandidate.cx < minX + 0.48 * w)
+      ) {
+        return { char: "f", confidence: 0.96 };
+      }
       return { char: "t", confidence: 0.97 };
+    }
+
+    // 6b. 'e': horizontal mid-bar + C-arc
+    const midBar =
+      s1.isHorizontal && s1.cy > minY + 0.28 * h && s1.cy < minY + 0.72 * h
+        ? s1
+        : s2.isHorizontal && s2.cy > minY + 0.28 * h && s2.cy < minY + 0.72 * h
+        ? s2
+        : null;
+    const arcCandidate = midBar === s1 ? s2 : s1;
+    if (midBar && arcCandidate && arcCandidate.straightness < 0.82) {
+      return { char: "e", confidence: 0.96 };
+    }
+
+    // 6c. 'G': C-arc + bottom-right bar
+    const cArc =
+      s1.straightness < 0.82 && s1.width > 0.38 * w
+        ? s1
+        : s2.straightness < 0.82 && s2.width > 0.38 * w
+        ? s2
+        : null;
+    const gBar = cArc === s1 ? s2 : s1;
+    if (cArc && gBar && gBar.cx > minX + 0.45 * w && gBar.cy > minY + 0.45 * h) {
+      return { char: "G", confidence: 0.96 };
     }
 
     // 7. 'L': Vertical stem on left + bottom horizontal bar
@@ -1071,28 +1226,73 @@ export class HandwrittenFontDetector {
       }
     }
 
-    // 11. 'P' or 'D' or 'B' or 'R': 1 vertical stem on left + rightward loop/arc
+    // 11. Left stem + rightward stroke: 'P', 'D', 'B', 'R', 'K', 'b', 'h', 'n', 'r', 'p'
     const leftStem =
-      (s1.isVertical || s1.height > 0.65 * h) && s1.cx < minX + 0.48 * w
+      (s1.isVertical || s1.height > 0.52 * h) && s1.cx < minX + 0.48 * w
         ? s1
-        : (s2.isVertical || s2.height > 0.65 * h) && s2.cx < minX + 0.48 * w
+        : (s2.isVertical || s2.height > 0.52 * h) && s2.cx < minX + 0.48 * w
         ? s2
         : null;
     const rightStroke = leftStem === s1 ? s2 : s1;
     if (leftStem && rightStroke && rightStroke.cx > minX + 0.35 * w) {
-      if (rightStroke.height < 0.65 * h && rightStroke.cy < minY + 0.58 * h) {
-        return { char: "P", confidence: 0.97 };
-      }
+      // 'K': chevron arm branching right
       if (rightStroke.points.length >= 3 && !rightStroke.isClosed && rightStroke.straightness > 0.80) {
         const midPt = rightStroke.points[Math.floor(rightStroke.points.length / 2)];
         if (midPt.x < rightStroke.start.x && midPt.x < rightStroke.end.x) {
           return { char: "K", confidence: 0.96 };
         }
       }
+      // 'D': full height arc spanning from top to bottom
       if (rightStroke.height > 0.68 * h) {
         return { char: "D", confidence: 0.97 };
       }
+      // Lowercase 'b': tall stem + loop in bottom half only
+      if (
+        leftStem.height > 0.65 * h &&
+        rightStroke.cy > minY + 0.48 * h &&
+        rightStroke.height <= 0.65 * h &&
+        (rightStroke.isClosed || rightStroke.straightness < 0.85)
+      ) {
+        return { char: "b", confidence: 0.97 };
+      }
+      // Lowercase 'h': tall stem + arch in bottom half
+      if (leftStem.height > 0.65 * h && rightStroke.cy > minY + 0.45 * h && rightStroke.straightness < 0.85) {
+        return { char: "h", confidence: 0.96 };
+      }
+      // Uppercase 'P': stem with loop in upper half
+      if (rightStroke.height <= 0.68 * h && rightStroke.cy < minY + 0.58 * h) {
+        return { char: "P", confidence: 0.97 };
+      }
+      // Lowercase 'p': stem does not rise above loop top and extends into descender below
+      if (
+        leftStem.minY > rightStroke.minY + 0.15 * h &&
+        leftStem.maxY > rightStroke.maxY + 0.25 * h
+      ) {
+        return { char: "p", confidence: 0.96 };
+      }
+      // Lowercase 'n': shorter stem + arch
+      if (leftStem.height <= 0.68 * h && rightStroke.cy > minY + 0.35 * h && rightStroke.straightness < 0.85) {
+        return { char: "n", confidence: 0.95 };
+      }
       return { char: "P", confidence: 0.90 };
+    }
+
+    // 11b. Right stem + leftward stroke: 'd', 'q', 'a', 'u'
+    const rightStem =
+      (s1.isVertical || s1.height > 0.52 * h) && s1.cx > minX + 0.52 * w
+        ? s1
+        : (s2.isVertical || s2.height > 0.52 * h) && s2.cx > minX + 0.52 * w
+        ? s2
+        : null;
+    const leftStroke = rightStem === s1 ? s2 : s1;
+    if (rightStem && leftStroke && leftStroke.cx < minX + 0.65 * w) {
+      if (rightStem.height > 0.68 * h && leftStroke.cy > minY + 0.35 * h) {
+        return { char: "d", confidence: 0.97 };
+      }
+      if (rightStem.maxY > minY + 0.80 * h && leftStroke.cy < minY + 0.65 * h) {
+        return { char: "q", confidence: 0.96 };
+      }
+      return { char: "a", confidence: 0.95 };
     }
 
     // 12. 'V': 2 diagonal strokes meeting at bottom
@@ -1167,7 +1367,7 @@ export class HandwrittenFontDetector {
     const start = pts[0];
     const end = pts[n - 1];
 
-    // 7. 'C': Starts in right half, curves left to reach minX, ends in right half
+    // 7. 'C' vs 'G': Starts in right half, curves left to reach minX, ends in right half
     const startsRight = start.x > minX + 0.35 * w && start.y < minY + 0.50 * h;
     const endsRight = end.x > minX + 0.35 * w && end.y > minY + 0.50 * h;
     let reachesFarLeft = false;
@@ -1177,8 +1377,77 @@ export class HandwrittenFontDetector {
         break;
       }
     }
-    if (startsRight && endsRight && reachesFarLeft) {
-      return { char: "C", confidence: 0.97 };
+    if (startsRight && reachesFarLeft) {
+      if (end.x < minX + 0.70 * w && end.y < minY + 0.75 * h && end.y > minY + 0.38 * h) {
+        return { char: "G", confidence: 0.96 };
+      }
+      if (endsRight) {
+        return { char: "C", confidence: 0.97 };
+      }
+    }
+
+    // 7b. Lowercase 'e': starts in middle, moves right, loops over top to left, curves down to bottom right
+    if (
+      start.y > minY + 0.25 * h &&
+      start.y < minY + 0.75 * h &&
+      start.x < minX + 0.70 * w &&
+      end.x > minX + 0.30 * w &&
+      end.y > minY + 0.45 * h &&
+      s.totalLength > 1.65 * Math.hypot(w, h)
+    ) {
+      return { char: "e", confidence: 0.96 };
+    }
+
+    // 7c. Lowercase 'a': loop in lower portion with down-stroke ending bottom-right
+    if (
+      start.x > minX + 0.40 * w &&
+      start.y < minY + 0.50 * h &&
+      end.x > minX + 0.50 * w &&
+      end.y > minY + 0.60 * h &&
+      s.totalLength > 1.85 * Math.hypot(w, h)
+    ) {
+      return { char: "a", confidence: 0.95 };
+    }
+
+    // 7d. Lowercase 'g': loop in top half, descender hook at bottom-left
+    if (
+      end.y > minY + 0.78 * h &&
+      end.x < minX + 0.55 * w &&
+      s.totalLength > 1.95 * Math.hypot(w, h)
+    ) {
+      return { char: "g", confidence: 0.95 };
+    }
+
+    // 7e. Lowercase 'b': starts top-left, goes down, loops around bottom-right
+    if (
+      start.x < minX + 0.45 * w &&
+      start.y < minY + 0.35 * h &&
+      end.x < minX + 0.55 * w &&
+      end.y > minY + 0.45 * h &&
+      s.totalLength > 1.8 * Math.hypot(w, h)
+    ) {
+      return { char: "b", confidence: 0.94 };
+    }
+
+    // 7f. Lowercase 'd': loop at bottom-left, tall stem reaching top-right
+    if (
+      start.y > minY + 0.30 * h &&
+      end.y > minY + 0.65 * h &&
+      end.x > minX + 0.50 * w &&
+      s.totalLength > 1.9 * Math.hypot(w, h)
+    ) {
+      return { char: "d", confidence: 0.94 };
+    }
+
+    // 7g. Lowercase 'h': starts top-left, down to bottom, up to mid, arches over to bottom right
+    if (
+      start.x < minX + 0.45 * w &&
+      start.y < minY + 0.25 * h &&
+      end.x > minX + 0.50 * w &&
+      end.y > minY + 0.65 * h &&
+      s.totalLength > 1.7 * Math.hypot(w, h)
+    ) {
+      return { char: "h", confidence: 0.94 };
     }
 
     // 8. 'U': Starts top-left, curves down and around, ends top-right, open at top
@@ -1382,11 +1651,34 @@ export class HandwrittenFontDetector {
       const hasClosedBox = strokes.some(
         (s) => s.isClosed && s.width >= 0.65 * bounds.size.width && s.height >= 0.65 * bounds.size.height
       );
-      if (
-        (hasClosedBox && (hLines.length >= 1 || vLines.length >= 1)) ||
-        (hLines.length >= 2 && vLines.length >= 2)
-      ) {
+      if (hasClosedBox && (hLines.length >= 1 || vLines.length >= 1)) {
         return false;
+      }
+      if (hLines.length >= 2 && vLines.length >= 2) {
+        // Only reject as table if lines actually span across each other and intersect >= 4 times
+        const minVX = Math.min(...vLines.map((v) => v.cx));
+        const maxVX = Math.max(...vLines.map((v) => v.cx));
+        const minHY = Math.min(...hLines.map((h) => h.cy));
+        const maxHY = Math.max(...hLines.map((h) => h.cy));
+        if (maxVX - minVX >= 20 && maxHY - minHY >= 20) {
+          const tolSpanX = Math.max(12, (maxVX - minVX) * 0.18);
+          const tolSpanY = Math.max(12, (maxHY - minHY) * 0.18);
+          const spanningH = hLines.filter((hl) => hl.minX <= minVX + tolSpanX && hl.maxX >= maxVX - tolSpanX);
+          const spanningV = vLines.filter((vl) => vl.minY <= minHY + tolSpanY && vl.maxY >= maxHY - tolSpanY);
+          if (spanningH.length >= 2 && spanningV.length >= 2) {
+            let intersections = 0;
+            for (const hl of spanningH) {
+              for (const vl of spanningV) {
+                if (vl.cx >= hl.minX - 8 && vl.cx <= hl.maxX + 8 && hl.cy >= vl.minY - 8 && hl.cy <= vl.maxY + 8) {
+                  intersections++;
+                }
+              }
+            }
+            if (intersections >= 4) {
+              return false;
+            }
+          }
+        }
       }
     }
 

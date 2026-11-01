@@ -1884,9 +1884,16 @@ export class DiagramEditor {
       return newNode;
     }
 
+    // 3. Check if there is an outer bounding shape enclosing inner handwritten text/strokes
+    const enclosedResult = this.enhanceShapeWithContainedText(strokes, freehandNodes);
+    if (enclosedResult) {
+      return enclosedResult;
+    }
+
+    // 4. Handwritten text recognition (WITHOUT a bounding shape)
     const fontResult = defaultHandwrittenFontDetector.detect(strokes);
 
-    if (fontResult.isText && fontResult.text.trim().length > 0) {
+    if (fontResult.text.trim().length > 0) {
       const paddingX = 24;
       const paddingY = 16;
       const width = Math.max(70, Math.round(fontResult.bounds.size.width + paddingX));
@@ -1932,7 +1939,7 @@ export class DiagramEditor {
       return newNode;
     }
 
-    // If single stroke that is a shape
+    // 5. If single stroke that is a shape
     if (strokes.length === 1) {
       const shapeResult = this.snapStrokeToShape(strokes[0]);
       if (shapeResult) {
@@ -1940,6 +1947,146 @@ export class DiagramEditor {
         this.commandStack.execute(deleteCmd);
         this.notify();
         return shapeResult;
+      }
+    }
+
+    return null;
+  }
+
+  private enhanceShapeWithContainedText(
+    strokes: Stroke[],
+    freehandNodes: DiagramNode[]
+  ): DiagramNode | null {
+    if (strokes.length < 2) return null;
+
+    // Find if 1 stroke is a closed shape that encloses all other strokes
+    for (let i = 0; i < strokes.length; i++) {
+      const candidateOuter = strokes[i];
+      const otherStrokes = strokes.filter((_, idx) => idx !== i);
+
+      const shapeResult = defaultShapeRecognizer.recognize(candidateOuter);
+      const isClosedShape =
+        shapeResult.shape === "rectangle" ||
+        shapeResult.shape === "square" ||
+        shapeResult.shape === "diamond" ||
+        shapeResult.shape === "ellipse" ||
+        shapeResult.shape === "circle" ||
+        shapeResult.shape === "triangle";
+
+      if (!isClosedShape || shapeResult.confidence < 0.60) continue;
+
+      const outerB = shapeResult.bounds;
+      const tol = 16;
+      let allInside = true;
+
+      for (const other of otherStrokes) {
+        for (const pt of other.points) {
+          if (
+            pt.x < outerB.position.x - tol ||
+            pt.x > outerB.position.x + outerB.size.width + tol ||
+            pt.y < outerB.position.y - tol ||
+            pt.y > outerB.position.y + outerB.size.height + tol
+          ) {
+            allInside = false;
+            break;
+          }
+        }
+        if (!allInside) break;
+      }
+
+      if (allInside) {
+        // Recognize inner strokes as text
+        const fontResult = defaultHandwrittenFontDetector.detect(otherStrokes);
+        const innerText = fontResult.text.trim();
+
+        // Create the shape node with innerText as title
+        let nodeKind = "generic.rectangle";
+        const title = innerText;
+
+        const dt = this.diagram.diagramType;
+        switch (shapeResult.shape) {
+          case "square":
+          case "rectangle":
+            switch (dt) {
+              case "uml.class":
+                nodeKind = "uml.class";
+                break;
+              case "uml.usecase":
+                nodeKind = "uml.usecase";
+                break;
+              case "uml.activity":
+                nodeKind = "activity.action";
+                break;
+              case "uml.stateMachine":
+                nodeKind = "state.simple";
+                break;
+              default:
+                nodeKind = "generic.rectangle";
+            }
+            break;
+          case "circle":
+          case "ellipse":
+            switch (dt) {
+              case "uml.usecase":
+                nodeKind = "uml.usecase";
+                break;
+              case "uml.activity":
+                nodeKind = "activity.action";
+                break;
+              case "uml.stateMachine":
+                nodeKind = "state.simple";
+                break;
+              default:
+                nodeKind = shapeResult.shape === "circle" ? "generic.circle" : "generic.ellipse";
+            }
+            break;
+          case "diamond":
+            nodeKind = dt === "uml.activity" ? "activity.decision" : "generic.diamond";
+            break;
+          case "triangle":
+            nodeKind = "generic.triangle";
+            break;
+        }
+
+        const newNode = createDiagramNode({
+          id: `node-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          kind: nodeKind,
+          title: title || this.getDefaultTitleForKind(nodeKind),
+          position: {
+            x: Math.round(outerB.position.x),
+            y: Math.round(outerB.position.y),
+          },
+          size: {
+            width: Math.max(60, Math.round(outerB.size.width)),
+            height: Math.max(40, Math.round(outerB.size.height)),
+          },
+          labels: title
+            ? [
+                {
+                  id: `label-${Date.now()}`,
+                  text: title,
+                  anchor: "node",
+                  position: { x: 0, y: 0 },
+                  style: {
+                    fontFamily: fontResult.fontFamily,
+                    fontSize: fontResult.estimatedFontSize,
+                  },
+                },
+              ]
+            : [],
+        });
+
+        const deleteCmd = new DeleteNodesAndEdgesCommand(
+          this.diagram,
+          freehandNodes.map((n) => n.id)
+        );
+        const addCmd = new AddNodeCommand(this.diagram, newNode);
+        const compound = new CompoundCommand([deleteCmd, addCmd], "Enhance shape with contained text");
+        this.commandStack.execute(compound);
+
+        this.selectNode(newNode.id, false);
+        this.notify();
+        return newNode;
       }
     }
 
@@ -2432,7 +2579,8 @@ export class DiagramEditor {
       fontResult.isText &&
       fontResult.confidence >= confidenceThreshold &&
       fontResult.text.trim().length > 0 &&
-      fontResult.text !== "O" &&
+      (fontResult.text !== "O" ||
+        (fontResult.bounds.size.width <= 65 && fontResult.bounds.size.height <= 65)) &&
       result.shape !== "line" &&
       result.shape !== "arrow"
     ) {

@@ -307,6 +307,23 @@ export function getGroupFontStyle(group: Group): FontStyleConfig {
   return { fontSize, bold, italic, fontWeight, fontStyle, fontFamily };
 }
 
+export function resolveFontFamily(fontFamily?: string): string | undefined {
+  if (!fontFamily) return undefined;
+  if (fontFamily === "handwritten") {
+    return "Virgil, 'Comic Sans MS', cursive, sans-serif";
+  }
+  if (fontFamily === "sans") {
+    return "var(--font-text, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif)";
+  }
+  if (fontFamily === "mono") {
+    return "var(--font-monospace, monospace)";
+  }
+  if (fontFamily === "serif") {
+    return "Georgia, 'Times New Roman', serif";
+  }
+  return fontFamily;
+}
+
 export function applyFontToSvgElement(
   el: SVGElement,
   style?: FontStyleConfig | null
@@ -325,13 +342,14 @@ export function applyFontToSvgElement(
   }
 
   if (style.fontFamily !== undefined) {
-    el.setAttribute("font-family", style.fontFamily);
+    const resolvedFont = resolveFontFamily(style.fontFamily) ?? style.fontFamily;
+    el.setAttribute("font-family", resolvedFont);
     const targetEl = el as unknown as HTMLElement;
     if (targetEl.style) {
       if (typeof targetEl.style.setProperty === "function") {
-        targetEl.style.setProperty("font-family", style.fontFamily, "important");
+        targetEl.style.setProperty("font-family", resolvedFont, "important");
       }
-      targetEl.style.fontFamily = style.fontFamily;
+      targetEl.style.fontFamily = resolvedFont;
     }
   }
 

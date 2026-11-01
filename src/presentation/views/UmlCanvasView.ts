@@ -281,7 +281,10 @@ export class UmlCanvasView extends TextFileView {
         if (!this.editor) return;
         const autoDetect = strokeOpts?.autoDetect ?? this.renderer?.isAutoShapeDetection ?? true;
         if (autoDetect) {
-          const result = this.editor.snapStrokeToShape(stroke);
+          const result = this.editor.snapStrokeToShape(stroke, {
+            select: false,
+            fallbackToFreehand: true,
+          });
           if (result) {
             const isText = (result as DiagramNode).kind === "generic.text";
             this.showFreehandEscapeHatch(
@@ -289,10 +292,13 @@ export class UmlCanvasView extends TextFileView {
               isText ? "Handwriting recognized" : "Shape recognized"
             );
           } else {
-            this.editor.keepAsFreehand(stroke);
+            this.editor.keepAsFreehand(stroke, { select: false });
           }
         } else {
-          this.editor.keepAsFreehand(stroke);
+          this.editor.keepAsFreehand(stroke, { select: false });
+        }
+        if (this.editor.hasSelection) {
+          this.editor.clearSelection();
         }
       },
       onContextMenu: (e, canvasPoint, node, edge, group) => {
@@ -580,7 +586,10 @@ export class UmlCanvasView extends TextFileView {
       e.stopPropagation();
       if (this.editor) {
         this.editor.undo();
-        this.editor.keepAsFreehand(stroke);
+        this.editor.keepAsFreehand(stroke, { select: false });
+        if (this.editor.hasSelection) {
+          this.editor.clearSelection();
+        }
       }
       toast.remove();
       this.escapeHatchEl = null;

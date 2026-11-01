@@ -123,6 +123,7 @@ export interface AddNodeOptions {
   labels?: Partial<Label>[];
   customData?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
+  select?: boolean;
 }
 
 export interface CanvasClipboardData {
@@ -552,7 +553,9 @@ export class DiagramEditor {
     const cmd = new AddNodeCommand(this.diagram, node);
     this.commandStack.execute(cmd);
 
-    this.selectNode(node.id, false);
+    if (options?.select !== false) {
+      this.selectNode(node.id, false);
+    }
     return node;
   }
 
@@ -681,7 +684,7 @@ export class DiagramEditor {
   addEdge(
     fromNodeId: string,
     toNodeId: string,
-    options?: Partial<DiagramEdge>
+    options?: Partial<DiagramEdge> & { select?: boolean }
   ): DiagramEdge {
     const id =
       options?.id ?? `edge-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
@@ -745,7 +748,9 @@ export class DiagramEditor {
     const cmd = new AddEdgeCommand(this.diagram, edge);
     this.commandStack.execute(cmd);
 
-    this.selectEdge(edge.id, false);
+    if (options?.select !== false) {
+      this.selectEdge(edge.id, false);
+    }
     return edge;
   }
 
@@ -1684,7 +1689,8 @@ export class DiagramEditor {
 
   // --- Hand-Drawing, Shape Snapping & Freehand Escape Hatch (F-071, F-072, F-073) ---
 
-  addFreehandNode(stroke: Stroke): DiagramNode {
+  addFreehandNode(stroke: Stroke, options?: { select?: boolean }): DiagramNode {
+    const select = options?.select ?? false;
     const points = stroke.points;
     if (!points || points.length === 0) {
       return this.addNode({
@@ -1693,6 +1699,7 @@ export class DiagramEditor {
         size: { width: 100, height: 60 },
         title: "",
         customData: { pathData: "", points: [] },
+        select,
       });
     }
 
@@ -1731,11 +1738,12 @@ export class DiagramEditor {
         points: relPoints,
         originalStrokeId: stroke.id,
       },
+      select,
     });
   }
 
-  keepAsFreehand(stroke: Stroke): DiagramNode {
-    return this.addFreehandNode(stroke);
+  keepAsFreehand(stroke: Stroke, options?: { select?: boolean }): DiagramNode {
+    return this.addFreehandNode(stroke, options);
   }
 
   // --- Handwritten Font & Text Detection (F-074) ---
@@ -2426,6 +2434,7 @@ export class DiagramEditor {
       confidenceThreshold?: number;
       forceFreehand?: boolean;
       fallbackToFreehand?: boolean;
+      select?: boolean;
     } | number = 0.65
   ): DiagramNode | DiagramEdge | null {
     const opts =
@@ -2433,8 +2442,10 @@ export class DiagramEditor {
         ? { confidenceThreshold: optionsOrThreshold }
         : optionsOrThreshold;
 
+    const select = opts.select;
+
     if (opts.forceFreehand) {
-      return this.addFreehandNode(stroke);
+      return this.addFreehandNode(stroke, { select: select ?? false });
     }
 
     const confidenceThreshold = opts.confidenceThreshold ?? 0.65;
@@ -2547,6 +2558,7 @@ export class DiagramEditor {
           toSide,
           fromPortId: fromPort?.id,
           toPortId: toPort?.id,
+          select,
           style: isArrow
             ? {
                 markerEnd: "open-arrow",
@@ -2569,7 +2581,7 @@ export class DiagramEditor {
 
     // 1b. Check if user drew an arrowhead attached to an existing edge
     if (!isClosedShape && stroke.points && stroke.points.length >= 2) {
-      const attachedEdge = this.attachArrowHeadToExistingEdge(stroke);
+      const attachedEdge = this.attachArrowHeadToExistingEdge(stroke, { select });
       if (attachedEdge) {
         return attachedEdge;
       }
@@ -2603,12 +2615,13 @@ export class DiagramEditor {
           fontFamily: fontResult.fontFamily,
           fontSize: fontResult.estimatedFontSize,
         },
+        select,
       });
     }
 
     if (result.confidence < confidenceThreshold || result.shape === "none") {
       if (opts.fallbackToFreehand) {
-        return this.addFreehandNode(stroke);
+        return this.addFreehandNode(stroke, { select: select ?? false });
       }
       return null;
     }
@@ -2731,17 +2744,21 @@ export class DiagramEditor {
           height,
         },
         title,
+        select,
       });
     }
 
     if (opts.fallbackToFreehand) {
-      return this.addFreehandNode(stroke);
+      return this.addFreehandNode(stroke, { select: select ?? false });
     }
 
     return null;
   }
 
-  attachArrowHeadToExistingEdge(stroke: Stroke): DiagramEdge | null {
+  attachArrowHeadToExistingEdge(
+    stroke: Stroke,
+    options?: { select?: boolean }
+  ): DiagramEdge | null {
     if (!stroke.points || stroke.points.length < 2) return null;
 
     const arrowCheck = defaultShapeRecognizer.detectArrowHead(stroke.points);
@@ -2833,7 +2850,9 @@ export class DiagramEditor {
     }
 
     this.updateEdgeStyle(bestEdge.id, styleUpdates, newKind);
-    this.selectEdge(bestEdge.id, false);
+    if (options?.select !== false) {
+      this.selectEdge(bestEdge.id, false);
+    }
     this.notify();
     return bestEdge;
   }

@@ -494,6 +494,9 @@ export class SvgSceneRenderer {
       this.isGrabMode = false;
       this.container.classList.remove("umlcanvas-grab-mode");
     }
+    if (active && this.editor.hasSelection) {
+      this.editor.clearSelection();
+    }
     this.isFreehandMode = active;
     if (active) {
       this.container.classList.add("umlcanvas-freehand-mode");
@@ -2745,6 +2748,10 @@ export class SvgSceneRenderer {
           const shiftKeyHeld = Boolean(e.shiftKey);
           const effectiveAutoDetect = shiftKeyHeld ? !this.autoShapeDetection : this.autoShapeDetection;
           this.onStrokeComplete(stroke, { autoDetect: effectiveAutoDetect });
+          if (this.editor.hasSelection) {
+            this.editor.clearSelection();
+          }
+          this.renderInteractions();
         } else if (isMicroStroke) {
           if (!e.shiftKey && !e.metaKey && !e.ctrlKey && this.editor.hasSelection) {
             this.editor.clearSelection();

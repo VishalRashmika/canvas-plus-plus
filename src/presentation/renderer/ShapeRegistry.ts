@@ -197,6 +197,9 @@ export class ShapeRegistry {
     // Text Shape (Handwriting & Typography)
     this.register(this.createGenericTextShape());
 
+    // Table Shape (Tables & Grids)
+    this.register(this.createGenericTableShape());
+
     // Common Shapes (General-purpose)
     this.register(this.createGenericCircleShape());
     this.register(this.createGenericEllipseShape());
@@ -3849,6 +3852,133 @@ export class ShapeRegistry {
             applyFontToSvgElement(textEl, nodeFont);
             group.appendChild(textEl);
             lineY += lineSpacing;
+          }
+        }
+
+        return group;
+      },
+    };
+  }
+
+  private createGenericTableShape(): ShapeDefinition {
+    return {
+      kind: "generic.table",
+      displayName: "Table",
+      defaultSize: { width: 300, height: 180 },
+      getPorts(node: DiagramNode): Port[] {
+        if (node.ports && node.ports.length > 0) return node.ports;
+        const sides: Side[] = ["top", "right", "bottom", "left"];
+        return sides.map((side) => ({
+          id: `${node.id}-port-${side}`,
+          ownerNodeId: node.id,
+          name: side,
+          side,
+          offset: 0.5,
+          direction: "inout",
+        }));
+      },
+      getBoundaryPoint(node: DiagramNode, targetPoint: Point): Point {
+        return getRectPerimeterIntersection(
+          { position: node.position, size: node.size },
+          targetPoint
+        );
+      },
+      renderSvg(node: DiagramNode, context: RenderContext): SVGElement {
+        const svgNS = "http://www.w3.org/2000/svg";
+        const group = document.createElementNS(svgNS, "g");
+        group.setAttribute("class", "umlcanvas-shape-table");
+
+        const w = node.size.width;
+        const h = node.size.height;
+        const rows = Math.max(1, (node.customData?.rows as number) || 3);
+        const cols = Math.max(1, (node.customData?.cols as number) || 3);
+        const cells = (node.customData?.cells as string[][]) || [];
+
+        // Outer background rectangle with selection styling
+        const rect = document.createElementNS(svgNS, "rect");
+        rect.setAttribute("x", "0");
+        rect.setAttribute("y", "0");
+        rect.setAttribute("width", String(w));
+        rect.setAttribute("height", String(h));
+        rect.setAttribute("rx", "3");
+        rect.setAttribute("ry", "3");
+        rect.setAttribute(
+          "class",
+          context.isSelected
+            ? "umlcanvas-node-body umlcanvas-node-selected"
+            : "umlcanvas-node-body"
+        );
+        group.appendChild(rect);
+
+        // Row and column dimensions
+        const colWidth = w / cols;
+        const rowHeight = h / rows;
+
+        // Render horizontal row divider lines
+        for (let r = 1; r < rows; r++) {
+          const y = Math.round(r * rowHeight);
+          const line = document.createElementNS(svgNS, "line");
+          line.setAttribute("x1", "0");
+          line.setAttribute("y1", String(y));
+          line.setAttribute("x2", String(w));
+          line.setAttribute("y2", String(y));
+          line.setAttribute("class", "umlcanvas-table-grid-line");
+          group.appendChild(line);
+        }
+
+        // Render vertical column divider lines
+        for (let c = 1; c < cols; c++) {
+          const x = Math.round(c * colWidth);
+          const line = document.createElementNS(svgNS, "line");
+          line.setAttribute("x1", String(x));
+          line.setAttribute("y1", "0");
+          line.setAttribute("x2", String(x));
+          line.setAttribute("y2", String(h));
+          line.setAttribute("class", "umlcanvas-table-grid-line");
+          group.appendChild(line);
+        }
+
+        // Render cell contents
+        const nodeFont = getNodeFontStyle(node);
+        const fontSize = nodeFont.fontSize ?? 12;
+
+        for (let r = 0; r < rows; r++) {
+          for (let c = 0; c < cols; c++) {
+            const cellX = c * colWidth;
+            const cellY = r * rowHeight;
+            const cellText = cells[r]?.[c] ?? "";
+
+            const cellG = document.createElementNS(svgNS, "g");
+            cellG.setAttribute("class", "umlcanvas-table-cell");
+            cellG.setAttribute("data-row", String(r));
+            cellG.setAttribute("data-col", String(c));
+
+            // Transparent cell hitbox for clicking
+            const cellHitbox = document.createElementNS(svgNS, "rect");
+            cellHitbox.setAttribute("x", String(cellX));
+            cellHitbox.setAttribute("y", String(cellY));
+            cellHitbox.setAttribute("width", String(colWidth));
+            cellHitbox.setAttribute("height", String(rowHeight));
+            cellHitbox.setAttribute("class", "umlcanvas-table-cell-hitbox");
+            cellHitbox.setAttribute("fill", "transparent");
+            cellG.appendChild(cellHitbox);
+
+            if (cellText) {
+              const textEl = document.createElementNS(svgNS, "text");
+              textEl.setAttribute("x", String(cellX + colWidth / 2));
+              textEl.setAttribute("y", String(cellY + rowHeight / 2));
+              textEl.setAttribute("text-anchor", "middle");
+              textEl.setAttribute("dominant-baseline", "central");
+              textEl.setAttribute("class", "umlcanvas-table-cell-text");
+              textEl.textContent = cellText;
+              applyFontToSvgElement(textEl, {
+                ...nodeFont,
+                fontSize,
+              });
+              cellG.appendChild(textEl);
+            }
+
+            group.appendChild(cellG);
           }
         }
 

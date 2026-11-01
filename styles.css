@@ -1094,6 +1094,31 @@ body .umlcanvas-moving * {
 }
 
 /* --- Photo Frame Image --- */
+.umlcanvas-shape-table {
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.08));
+}
+
+.umlcanvas-table-grid-line {
+  stroke: var(--background-modifier-border, #7c7c7c);
+  stroke-width: 1px;
+}
+
+.umlcanvas-table-cell {
+  cursor: text;
+}
+
+.umlcanvas-table-cell-hitbox {
+  cursor: text;
+  pointer-events: all;
+}
+
+.umlcanvas-table-cell-text {
+  fill: var(--text-normal, #dcddde);
+  font-family: var(--font-text, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+  user-select: none;
+  pointer-events: none;
+}
+
 .umlcanvas-shape-image {
   filter: drop-shadow(0 3px 10px rgba(0, 0, 0, 0.16));
 }

@@ -159,6 +159,8 @@ export class SvgSceneRenderer {
   private inlineEditorEl: HTMLInputElement | HTMLTextAreaElement | null = null;
   private editingNodeId: string | null = null;
   private editingGroupId: string | null = null;
+  private editingCellRow?: number;
+  private editingCellCol?: number;
   private defsEl!: SVGDefsElement;
   private markerTemplates = new Map<
     string,
@@ -2784,6 +2786,15 @@ export class SvgSceneRenderer {
           node.kind !== "schematic.chip" &&
           node.kind !== "generic.freehand"
         ) {
+          if (node.kind === "generic.table") {
+            const cellEl = (e.target as HTMLElement | null)?.closest(".umlcanvas-table-cell");
+            const r = cellEl ? parseInt(cellEl.getAttribute("data-row") || "0", 10) : 0;
+            const c = cellEl ? parseInt(cellEl.getAttribute("data-col") || "0", 10) : 0;
+            this.dragMode = { type: "none" };
+            this.renderInteractions();
+            this.startInlineEditor(node, { row: r, col: c });
+            return;
+          }
           this.dragMode = { type: "none" };
           this.renderInteractions();
           this.startInlineEditor(node);
@@ -3066,6 +3077,13 @@ export class SvgSceneRenderer {
             this.onChipEdit(node);
             return;
           }
+          if (node.kind === "generic.table") {
+            const cellEl = target.closest(".umlcanvas-table-cell");
+            const r = cellEl ? parseInt(cellEl.getAttribute("data-row") || "0", 10) : 0;
+            const c = cellEl ? parseInt(cellEl.getAttribute("data-col") || "0", 10) : 0;
+            this.startInlineEditor(node, { row: r, col: c });
+            return;
+          }
           this.startInlineEditor(node);
           return;
         }
@@ -3231,6 +3249,22 @@ export class SvgSceneRenderer {
       inPlaceX = node.position.x + 8;
       inPlaceY = node.position.y + Math.max(0, node.size.height - inPlaceH - 10);
       inPlaceW = Math.max(40, node.size.width - 16);
+      textAlign = "center";
+    } else if (node.kind === "generic.table") {
+      const rows = Math.max(1, (node.customData?.rows as number) || 3);
+      const cols = Math.max(1, (node.customData?.cols as number) || 3);
+      const colW = node.size.width / cols;
+      const rowH = node.size.height / rows;
+
+      const rAttr = this.inlineEditorEl?.getAttribute("data-cell-row");
+      const cAttr = this.inlineEditorEl?.getAttribute("data-cell-col");
+      const r = rAttr !== null && rAttr !== undefined ? parseInt(rAttr, 10) : (this.editingCellRow ?? 0);
+      const c = cAttr !== null && cAttr !== undefined ? parseInt(cAttr, 10) : (this.editingCellCol ?? 0);
+
+      inPlaceX = node.position.x + c * colW + 4;
+      inPlaceY = node.position.y + r * rowH + 4;
+      inPlaceW = Math.max(20, colW - 8);
+      inPlaceH = Math.max(20, rowH - 8);
       textAlign = "center";
     } else {
       // General shapes: vertically and horizontally centered in node
@@ -3402,9 +3436,16 @@ export class SvgSceneRenderer {
     this.updateInlineEditorPosition();
   }
 
-  public startInlineEditor(node: DiagramNode): void {
+  public startInlineEditor(
+    node: DiagramNode,
+    cell?: { row: number; col: number }
+  ): void {
     if (this.inlineEditorEl) {
-      if (this.editingNodeId === node.id) {
+      if (
+        this.editingNodeId === node.id &&
+        (node.kind !== "generic.table" ||
+          (this.editingCellRow === cell?.row && this.editingCellCol === cell?.col))
+      ) {
         this.inlineEditorEl.focus();
         return;
       }
@@ -3416,6 +3457,14 @@ export class SvgSceneRenderer {
     }
 
     this.editingNodeId = node.id;
+    if (node.kind === "generic.table") {
+      this.editingCellRow = cell?.row ?? 0;
+      this.editingCellCol = cell?.col ?? 0;
+    } else {
+      this.editingCellRow = undefined;
+      this.editingCellCol = undefined;
+    }
+
     const nodeEl = this.nodesLayerEl.querySelector<SVGGElement>(
       `[data-node-id="${node.id}"]`
     );
@@ -3423,7 +3472,11 @@ export class SvgSceneRenderer {
       nodeEl.classList.add("umlcanvas-node-editing");
     }
 
-    const currentText = node.labels[0]?.text ?? "";
+    let currentText = node.labels[0]?.text ?? "";
+    if (node.kind === "generic.table") {
+      const cells = (node.customData?.cells as string[][]) || [];
+      currentText = cells[this.editingCellRow ?? 0]?.[this.editingCellCol ?? 0] ?? "";
+    }
 
     if (node.kind === "generic.stickyNote" || node.kind === "generic.note") {
       const nodeFont = getNodeFontStyle(node);
@@ -3462,6 +3515,10 @@ export class SvgSceneRenderer {
         spellcheck: "false",
       },
     });
+    if (node.kind === "generic.table") {
+      textarea.setAttribute("data-cell-row", String(this.editingCellRow ?? 0));
+      textarea.setAttribute("data-cell-col", String(this.editingCellCol ?? 0));
+    }
     textarea.value = currentText;
 
     const styles: Record<string, string> = {
@@ -3482,6 +3539,32 @@ export class SvgSceneRenderer {
 
     textarea.addEventListener("keydown", (e: KeyboardEvent) => {
       e.stopPropagation();
+
+      if (node.kind === "generic.table") {
+        const rows = Math.max(1, (node.customData?.rows as number) || 3);
+        const cols = Math.max(1, (node.customData?.cols as number) || 3);
+        const r = this.editingCellRow ?? 0;
+        const c = this.editingCellCol ?? 0;
+
+        if (e.key === "Tab") {
+          e.preventDefault();
+          this.commitInlineEditor();
+          const nextC = e.shiftKey ? (c > 0 ? c - 1 : cols - 1) : (c + 1 < cols ? c + 1 : 0);
+          const nextR = e.shiftKey
+            ? (c > 0 ? r : (r > 0 ? r - 1 : rows - 1))
+            : (c + 1 < cols ? r : (r + 1 < rows ? r + 1 : 0));
+          this.startInlineEditor(node, { row: nextR, col: nextC });
+          return;
+        }
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          this.commitInlineEditor();
+          const nextR = r + 1 < rows ? r + 1 : 0;
+          this.startInlineEditor(node, { row: nextR, col: c });
+          return;
+        }
+      }
+
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
         e.preventDefault();
         this.editor.toggleBoldForSelection();
@@ -3831,6 +3914,8 @@ export class SvgSceneRenderer {
     const nodeId = this.inlineEditorEl.getAttribute("data-node-id");
     const edgeId = this.inlineEditorEl.getAttribute("data-edge-id");
     const groupId = this.inlineEditorEl.getAttribute("data-group-id");
+    const cellRowAttr = this.inlineEditorEl.getAttribute("data-cell-row");
+    const cellColAttr = this.inlineEditorEl.getAttribute("data-cell-col");
     const newText = this.inlineEditorEl.value.trim();
 
     this.cleanupInlineEditor();
@@ -3838,6 +3923,17 @@ export class SvgSceneRenderer {
     if (nodeId) {
       const node = this.editor.diagram.nodes.find((n) => n.id === nodeId);
       if (node) {
+        if (node.kind === "generic.table") {
+          const r = cellRowAttr !== null ? parseInt(cellRowAttr, 10) : (this.editingCellRow ?? 0);
+          const c = cellColAttr !== null ? parseInt(cellColAttr, 10) : (this.editingCellCol ?? 0);
+          this.editor.updateTableCell(node.id, r, c, newText);
+          this.editingCellRow = undefined;
+          this.editingCellCol = undefined;
+          this.renderNodes();
+          this.renderInteractions();
+          return;
+        }
+
         const nodeFont = getNodeFontStyle(node);
         const fontSize = nodeFont.fontSize ?? (node.kind === "generic.note" ? 11 : 13);
         const boldMultiplier = nodeFont.bold ? 1.1 : 1.0;

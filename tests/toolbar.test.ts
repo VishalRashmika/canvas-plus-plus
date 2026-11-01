@@ -519,6 +519,7 @@ describe("Toolbar Redesign Tests", () => {
     const circleBtn = buttons.find((b) => b.title.includes("Circle"));
     const diamondBtn = buttons.find((b) => b.title.includes("Diamond"));
     const triangleBtn = buttons.find((b) => b.title.includes("Triangle"));
+    const tableBtn = buttons.find((b) => b.title.includes("Table"));
     const noteBtn = buttons.find((b) => b.title.includes("Note"));
     const lineBtn = buttons.find((b) => b.title.includes("Connector"));
 
@@ -528,6 +529,7 @@ describe("Toolbar Redesign Tests", () => {
     expect(circleBtn).toBeDefined();
     expect(diamondBtn).toBeDefined();
     expect(triangleBtn).toBeDefined();
+    expect(tableBtn).toBeDefined();
     expect(noteBtn).toBeDefined();
     expect(lineBtn).toBeDefined();
 
@@ -550,6 +552,13 @@ describe("Toolbar Redesign Tests", () => {
     expect(editor.diagram.nodes[2].kind).toBe("generic.diamond");
     expect(editor.diagram.nodes[2].labels[0].text).toBe("Diamond");
     expect(editor.diagram.nodes[2].labels[0].text.toLowerCase()).not.toContain("decision");
+
+    // Clicking Table creates a generic.table node (3x3)
+    tableBtn?.click();
+    expect(editor.diagram.nodes.length).toBe(4);
+    expect(editor.diagram.nodes[3].kind).toBe("generic.table");
+    expect(editor.diagram.nodes[3].customData?.rows).toBe(3);
+    expect(editor.diagram.nodes[3].customData?.cols).toBe(3);
 
     // Test Line Tool: selecting 2 nodes and clicking line connects them!
     editor.clearSelection();

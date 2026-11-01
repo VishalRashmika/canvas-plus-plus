@@ -795,6 +795,41 @@ export class SvgExporter {
         break;
       }
 
+      case "generic.table": {
+        const rows = Math.max(1, (node.customData?.rows as number) || 3);
+        const cols = Math.max(1, (node.customData?.cols as number) || 3);
+        const cells = (node.customData?.cells as string[][]) || [];
+        const colWidth = w / cols;
+        const rowHeight = h / rows;
+
+        out += `    <rect x="0" y="0" width="${w}" height="${h}" rx="3" class="node-body" fill="${nodeBg}" stroke="${strokeColor}" stroke-width="1.5" />\n`;
+
+        for (let r = 1; r < rows; r++) {
+          const y = Math.round(r * rowHeight);
+          out += `    <line x1="0" y1="${y}" x2="${w}" y2="${y}" stroke="${strokeColor}" stroke-width="1" />\n`;
+        }
+
+        for (let c = 1; c < cols; c++) {
+          const x = Math.round(c * colWidth);
+          out += `    <line x1="${x}" y1="0" x2="${x}" y2="${h}" stroke="${strokeColor}" stroke-width="1" />\n`;
+        }
+
+        const nodeFont = getNodeFontStyle(node);
+        const fontAttrs = this.getFontAttributes(nodeFont);
+
+        for (let r = 0; r < rows; r++) {
+          for (let c = 0; c < cols; c++) {
+            const cellText = cells[r]?.[c] ?? "";
+            if (cellText) {
+              const cx = c * colWidth + colWidth / 2;
+              const cy = r * rowHeight + rowHeight / 2 + 4;
+              out += `    <text x="${cx}" y="${cy}" text-anchor="middle" class="node-title"${fontAttrs}>${escapeXml(cellText)}</text>\n`;
+            }
+          }
+        }
+        break;
+      }
+
       case "generic.freehand": {
         const pathData = (node.customData?.pathData as string) || "";
         out += `    <path class="umlcanvas-freehand-path" d="${escapeXml(pathData)}" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />\n`;

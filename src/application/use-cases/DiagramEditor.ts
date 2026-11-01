@@ -61,6 +61,8 @@ import {
   PropagateChipInterfaceCommand,
   NodeMove,
   NodeGeometry,
+  UpdateTableCellCommand,
+  UpdateTableStructureCommand,
 } from "../commands/DiagramCommands";
 import { ChipInterfaceDefinition } from "../../domain/entities/ChipInterfaceDefinition";
 import {
@@ -82,6 +84,10 @@ import {
   defaultHandwrittenFontDetector,
   HandwrittenFontDetectionResult,
 } from "../../domain/services/HandwrittenFontDetector";
+import {
+  defaultTableDetector,
+  DetectedTable,
+} from "../../domain/services/TableDetector";
 import {
   SequenceLayoutOptions,
   SequenceLayoutResult,
@@ -1653,6 +1659,31 @@ export class DiagramEditor {
       return conn;
     }
 
+    // 2. Check if strokes form a table
+    const tableResult = defaultTableDetector.detect(strokes);
+    if (tableResult.isTable && tableResult.confidence >= confidenceThreshold) {
+      const node = this.addNode({
+        kind: "generic.table",
+        title: "",
+        position: {
+          x: Math.round(tableResult.bounds.position.x),
+          y: Math.round(tableResult.bounds.position.y),
+        },
+        size: {
+          width: Math.max(120, Math.round(tableResult.bounds.size.width)),
+          height: Math.max(80, Math.round(tableResult.bounds.size.height)),
+        },
+        customData: {
+          rows: tableResult.rows,
+          cols: tableResult.cols,
+          cells: tableResult.cells,
+          rowHeights: tableResult.rowHeights,
+          colWidths: tableResult.colWidths,
+        },
+      });
+      return node;
+    }
+
     const fontResult = defaultHandwrittenFontDetector.detect(strokes);
 
     if (
@@ -1718,6 +1749,44 @@ export class DiagramEditor {
       return connectionResult;
     }
 
+    // 2. Check if selected strokes form a table (rows and columns)
+    const tableResult = defaultTableDetector.detect(strokes);
+    if (tableResult.isTable && tableResult.confidence >= 0.70) {
+      const newNode = createDiagramNode({
+        id: `table-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        kind: "generic.table",
+        title: "",
+        position: {
+          x: Math.round(tableResult.bounds.position.x),
+          y: Math.round(tableResult.bounds.position.y),
+        },
+        size: {
+          width: Math.max(120, Math.round(tableResult.bounds.size.width)),
+          height: Math.max(80, Math.round(tableResult.bounds.size.height)),
+        },
+        labels: [],
+        customData: {
+          rows: tableResult.rows,
+          cols: tableResult.cols,
+          cells: tableResult.cells,
+          rowHeights: tableResult.rowHeights,
+          colWidths: tableResult.colWidths,
+        },
+      });
+
+      const deleteCmd = new DeleteNodesAndEdgesCommand(
+        this.diagram,
+        freehandNodes.map((n) => n.id)
+      );
+      const addCmd = new AddNodeCommand(this.diagram, newNode);
+      const compound = new CompoundCommand([deleteCmd, addCmd], "Enhance handwriting to table");
+      this.commandStack.execute(compound);
+
+      this.selectNode(newNode.id, false);
+      this.notify();
+      return newNode;
+    }
+
     const fontResult = defaultHandwrittenFontDetector.detect(strokes);
 
     if (fontResult.isText && fontResult.text.trim().length > 0) {
@@ -1778,6 +1847,121 @@ export class DiagramEditor {
     }
 
     return null;
+  }
+
+  // --- Table Operations ---
+
+  updateTableCell(nodeId: string, row: number, col: number, text: string): void {
+    const cmd = new UpdateTableCellCommand(this.diagram, nodeId, row, col, text);
+    this.commandStack.execute(cmd);
+    this.notify();
+  }
+
+  addTableRow(nodeId: string, atIndex?: number): void {
+    const node = this.diagram.nodes.find((n) => n.id === nodeId);
+    if (!node || node.kind !== "generic.table") return;
+    const rows = Math.max(1, (node.customData?.rows as number) || 3);
+    const cols = Math.max(1, (node.customData?.cols as number) || 3);
+    const cells = ((node.customData?.cells as string[][]) || []).map((r) => [...r]);
+    const insertIdx = atIndex !== undefined ? Math.max(0, Math.min(rows, atIndex)) : rows;
+    const newRow = Array.from({ length: cols }, () => "");
+    cells.splice(insertIdx, 0, newRow);
+    const nextCustomData = {
+      ...node.customData,
+      rows: rows + 1,
+      cells,
+    };
+    const cmd = new UpdateTableStructureCommand(this.diagram, nodeId, nextCustomData);
+    this.commandStack.execute(cmd);
+    this.notify();
+  }
+
+  deleteTableRow(nodeId: string, rowIndex: number): void {
+    const node = this.diagram.nodes.find((n) => n.id === nodeId);
+    if (!node || node.kind !== "generic.table") return;
+    const rows = Math.max(1, (node.customData?.rows as number) || 3);
+    if (rows <= 1) return;
+    const cols = Math.max(1, (node.customData?.cols as number) || 3);
+    const cells = ((node.customData?.cells as string[][]) || []).map((r) => [...r]);
+    if (rowIndex >= 0 && rowIndex < cells.length) {
+      cells.splice(rowIndex, 1);
+    }
+    const nextCustomData = {
+      ...node.customData,
+      rows: rows - 1,
+      cells,
+    };
+    const cmd = new UpdateTableStructureCommand(this.diagram, nodeId, nextCustomData);
+    this.commandStack.execute(cmd);
+    this.notify();
+  }
+
+  addTableColumn(nodeId: string, atIndex?: number): void {
+    const node = this.diagram.nodes.find((n) => n.id === nodeId);
+    if (!node || node.kind !== "generic.table") return;
+    const rows = Math.max(1, (node.customData?.rows as number) || 3);
+    const cols = Math.max(1, (node.customData?.cols as number) || 3);
+    const cells = ((node.customData?.cells as string[][]) || []).map((r) => [...r]);
+    const insertIdx = atIndex !== undefined ? Math.max(0, Math.min(cols, atIndex)) : cols;
+    for (let r = 0; r < rows; r++) {
+      if (!cells[r]) cells[r] = [];
+      cells[r].splice(insertIdx, 0, "");
+    }
+    const nextCustomData = {
+      ...node.customData,
+      cols: cols + 1,
+      cells,
+    };
+    const cmd = new UpdateTableStructureCommand(this.diagram, nodeId, nextCustomData);
+    this.commandStack.execute(cmd);
+    this.notify();
+  }
+
+  deleteTableColumn(nodeId: string, colIndex: number): void {
+    const node = this.diagram.nodes.find((n) => n.id === nodeId);
+    if (!node || node.kind !== "generic.table") return;
+    const rows = Math.max(1, (node.customData?.rows as number) || 3);
+    const cols = Math.max(1, (node.customData?.cols as number) || 3);
+    if (cols <= 1) return;
+    const cells = ((node.customData?.cells as string[][]) || []).map((r) => [...r]);
+    for (let r = 0; r < rows; r++) {
+      if (cells[r] && colIndex >= 0 && colIndex < cells[r].length) {
+        cells[r].splice(colIndex, 1);
+      }
+    }
+    const nextCustomData = {
+      ...node.customData,
+      cols: cols - 1,
+      cells,
+    };
+    const cmd = new UpdateTableStructureCommand(this.diagram, nodeId, nextCustomData);
+    this.commandStack.execute(cmd);
+    this.notify();
+  }
+
+  addTableNode(params?: {
+    rows?: number;
+    cols?: number;
+    position?: Point;
+    size?: Size;
+    cells?: string[][];
+  }): DiagramNode {
+    const rows = params?.rows ?? 3;
+    const cols = params?.cols ?? 3;
+    const emptyCells =
+      params?.cells ??
+      Array.from({ length: rows }, () => Array.from({ length: cols }, () => ""));
+    return this.addNode({
+      kind: "generic.table",
+      title: "",
+      position: params?.position ?? { x: 100, y: 100 },
+      size: params?.size ?? { width: 300, height: 180 },
+      customData: {
+        rows,
+        cols,
+        cells: emptyCells,
+      },
+    });
   }
 
   private enhanceConnectionStrokes(

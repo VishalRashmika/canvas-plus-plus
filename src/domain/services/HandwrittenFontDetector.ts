@@ -1375,6 +1375,21 @@ export class HandwrittenFontDetector {
       }
     }
 
+    // If strokes form an intersecting grid or table, it's not handwritten text
+    if (strokes.length >= 3 && bounds.size.width >= 50 && bounds.size.height >= 40) {
+      const hLines = strokes.filter((s) => s.isHorizontal && s.width >= 0.35 * bounds.size.width);
+      const vLines = strokes.filter((s) => s.isVertical && s.height >= 0.35 * bounds.size.height);
+      const hasClosedBox = strokes.some(
+        (s) => s.isClosed && s.width >= 0.65 * bounds.size.width && s.height >= 0.65 * bounds.size.height
+      );
+      if (
+        (hasClosedBox && (hLines.length >= 1 || vLines.length >= 1)) ||
+        (hLines.length >= 2 && vLines.length >= 2)
+      ) {
+        return false;
+      }
+    }
+
     // Multi-stroke letters (like E with 4 lines, A with 3 lines, H with 3 lines):
     if (strokes.length >= 2) {
       return true;

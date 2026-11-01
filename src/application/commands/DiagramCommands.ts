@@ -434,6 +434,71 @@ export class UpdateNodeLabelCommand implements Command {
   }
 }
 
+export class UpdateTableCellCommand implements Command {
+  readonly description = "Update table cell";
+  private oldCells: string[][] = [];
+  private newCells: string[][] = [];
+
+  constructor(
+    private readonly diagram: Diagram,
+    private readonly nodeId: string,
+    private readonly row: number,
+    private readonly col: number,
+    private readonly text: string
+  ) {}
+
+  execute(): void {
+    const node = this.diagram.nodes.find((n) => n.id === this.nodeId);
+    if (!node) return;
+    const currentCells = (node.customData?.cells as string[][]) || [];
+    this.oldCells = currentCells.map((r) => [...r]);
+    const nextCells = currentCells.map((r) => [...r]);
+    while (nextCells.length <= this.row) nextCells.push([]);
+    while (nextCells[this.row].length <= this.col) nextCells[this.row].push("");
+    nextCells[this.row][this.col] = this.text;
+    this.newCells = nextCells;
+    node.customData = {
+      ...node.customData,
+      cells: nextCells,
+    };
+  }
+
+  undo(): void {
+    const node = this.diagram.nodes.find((n) => n.id === this.nodeId);
+    if (!node) return;
+    node.customData = {
+      ...node.customData,
+      cells: this.oldCells.map((r) => [...r]),
+    };
+  }
+}
+
+export class UpdateTableStructureCommand implements Command {
+  readonly description = "Update table structure";
+  private oldCustomData: Record<string, unknown> = {};
+  private newCustomData: Record<string, unknown> = {};
+
+  constructor(
+    private readonly diagram: Diagram,
+    private readonly nodeId: string,
+    private readonly nextCustomData: Record<string, unknown>
+  ) {}
+
+  execute(): void {
+    const node = this.diagram.nodes.find((n) => n.id === this.nodeId);
+    if (!node) return;
+    this.oldCustomData = JSON.parse(JSON.stringify(node.customData || {}));
+    this.newCustomData = JSON.parse(JSON.stringify(this.nextCustomData));
+    node.customData = { ...this.newCustomData };
+  }
+
+  undo(): void {
+    const node = this.diagram.nodes.find((n) => n.id === this.nodeId);
+    if (!node) return;
+    node.customData = { ...this.oldCustomData };
+  }
+}
+
 export class CompoundCommand implements Command {
   constructor(
     private readonly commands: Command[],

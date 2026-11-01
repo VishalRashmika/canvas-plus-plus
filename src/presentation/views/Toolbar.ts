@@ -18,6 +18,7 @@ import {
 } from "../theme/Typography";
 import { defaultEdgeStyleRegistry } from "../renderer/EdgeStyleRegistry";
 import { Group } from "../../domain/entities/Group";
+import { DiagramNode } from "../../domain/entities/DiagramNode";
 
 interface HandledEvent extends Event {
   _umlHandled?: boolean;
@@ -60,6 +61,7 @@ export class Toolbar {
   private vaultNoteBtn?: HTMLButtonElement;
   private imageBtn?: HTMLButtonElement;
   private groupBoxBtn!: HTMLButtonElement;
+  private tableBtn!: HTMLButtonElement;
   private lineBtn!: HTMLButtonElement;
 
   // Context-sensitive Component Controls
@@ -388,6 +390,46 @@ export class Toolbar {
       this.updateToolMode();
     }
     return group;
+  }
+
+  public addTableAtCenter(rows = 3, cols = 3): DiagramNode {
+    const transform = this.renderer.currentTransform;
+    const centerScreen = {
+      x: this.container.clientWidth / 2,
+      y: this.container.clientHeight / 2,
+    };
+    const canvasX = (centerScreen.x - transform.panX) / transform.zoom;
+    const canvasY = (centerScreen.y - transform.panY) / transform.zoom;
+    const width = 300;
+    const height = 180;
+    const emptyCells = Array.from({ length: rows }, () =>
+      Array.from({ length: cols }, () => "")
+    );
+    const node = this.editor.addNode({
+      kind: "generic.table",
+      title: "",
+      position: {
+        x: Math.round(canvasX - width / 2),
+        y: Math.round(canvasY - height / 2),
+      },
+      size: { width, height },
+      customData: {
+        rows,
+        cols,
+        cells: emptyCells,
+      },
+    });
+    this.editor.selectNode(node.id, false);
+
+    if (this.renderer.grabMode && typeof this.renderer.setGrabMode === "function") {
+      this.renderer.setGrabMode(false);
+      this.updateToolMode();
+    }
+    if (this.renderer.freehandMode) {
+      this.renderer.setFreehandMode(false);
+      this.updateToolMode();
+    }
+    return node;
   }
 
   private handleLineButtonClick(): void {
@@ -1060,6 +1102,17 @@ export class Toolbar {
       "triangle"
     );
     shapeGroup.appendChild(this.triangleBtn);
+
+    // Table
+    this.tableBtn = this.createButton(
+      "Table (3x3 Table)",
+      "",
+      () => {
+        this.addTableAtCenter();
+      },
+      "table"
+    );
+    shapeGroup.appendChild(this.tableBtn);
 
     // Note Card
     this.noteBtn = this.createButton(

@@ -477,6 +477,8 @@ export class DiagramEditor {
         return "";
       case "generic.image":
         return "Image";
+      case "generic.pdf":
+        return "PDF Document";
       default:
         return "Node";
     }

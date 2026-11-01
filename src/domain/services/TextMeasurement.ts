@@ -129,6 +129,15 @@ export function calculateNodeFitSize(node: DiagramNode): Size {
     };
   }
 
+  if (kind === "generic.pdf") {
+    const titleText = node.labels[0]?.text ?? "";
+    const minW = Math.max(200, titleText.length * 8.5 * scale * boldMult + 40);
+    return {
+      width: Math.max(node.size.width, minW),
+      height: Math.max(node.size.height, 200),
+    };
+  }
+
   if (kind === "obsidian.note") {
     const content =
       (node.customData?.content as string) ||

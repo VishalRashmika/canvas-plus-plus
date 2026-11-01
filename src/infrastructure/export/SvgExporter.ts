@@ -879,6 +879,33 @@ export class SvgExporter {
         break;
       }
 
+      case "generic.pdf": {
+        const headerH = 32;
+        const r = 8;
+        const rawTitle = node.labels[0]?.text || (node.metadata?.filePath as string) || "PDF Document";
+        const pdfTitle = rawTitle.replace(/\.pdf$/i, "");
+        out += `    <rect x="0" y="0" width="${w}" height="${h}" rx="${r}" ry="${r}" class="umlcanvas-pdf-card"${bodyAttrs} />\n`;
+        out += `    <path d="M 0 ${r} A ${r} ${r} 0 0 1 ${r} 0 L ${w - r} 0 A ${r} ${r} 0 0 1 ${w} ${r} L ${w} ${headerH} L 0 ${headerH} Z" fill="rgba(128,128,128,0.06)" />\n`;
+        out += `    <line x1="0" y1="${headerH}" x2="${w}" y2="${headerH}" stroke="${strokeColor}" stroke-width="1" />\n`;
+        // PDF Icon
+        out += `    <g transform="translate(10, 8)">\n`;
+        out += `      <path d="M9 2H3.5A1.5 1.5 0 0 0 2 3.5v11A1.5 1.5 0 0 0 3.5 16h7a1.5 1.5 0 0 0 1.5-1.5V5L9 2z" fill="none" stroke="${strokeColor}" stroke-width="1.2" stroke-linejoin="round" />\n`;
+        out += `      <polyline points="8.5 2 8.5 5.5 12 5.5" fill="none" stroke="${strokeColor}" stroke-width="1.2" stroke-linejoin="round" />\n`;
+        out += `    </g>\n`;
+        // Title
+        out += `    <text x="32" y="21" class="umlcanvas-pdf-title"${fontAttrs}>${escapeXml(pdfTitle)}</text>\n`;
+        // Open icon
+        out += `    <text x="${w - 20}" y="21" font-size="14" fill="${strokeColor}">↗</text>\n`;
+        // Fallback document body
+        const pageW = Math.round(w * 0.7);
+        const pageH = Math.round((h - headerH) * 0.75);
+        const pageX = Math.round((w - pageW) / 2);
+        const pageY = Math.round(headerH + (h - headerH - pageH) / 2);
+        out += `    <rect x="${pageX}" y="${pageY}" width="${pageW}" height="${pageH}" rx="4" fill="rgba(128,128,128,0.08)" stroke="${strokeColor}" stroke-width="1" stroke-dasharray="3 3" />\n`;
+        out += `    <text x="${w / 2}" y="${pageY + pageH / 2}" text-anchor="middle" font-size="13" fill="${strokeColor}">PDF: ${escapeXml(pdfTitle)}</text>\n`;
+        break;
+      }
+
       case "obsidian.note": {
         const headerH = 32;
         const r = 8;

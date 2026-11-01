@@ -27,6 +27,7 @@ import { PalettePanel } from "./PalettePanel";
 import { MinimapView } from "./MinimapView";
 import { NoteSuggestModal } from "./NoteSuggestModal";
 import { ImageSuggestModal, isImageFile } from "./ImageSuggestModal";
+import { PdfSuggestModal, isPdfFile } from "./PdfSuggestModal";
 import { ChipDefinitionModal } from "./ChipDefinitionModal";
 import { ChipInterfaceDefinition } from "../../domain/entities/ChipInterfaceDefinition";
 import { defaultCustomChipRegistry } from "../../domain/services/CustomChipRegistry";
@@ -323,10 +324,16 @@ export class UmlCanvasView extends TextFileView {
         }
 
         // 2. Check dataTransfer text for wikilink or path
+        let subpath: string | undefined = undefined;
         if (!file && e.dataTransfer) {
           const text = e.dataTransfer.getData("text/plain") || "";
           const match = text.match(/^\[\[(.*?)\]\]$/);
-          const linkPath = match ? match[1].split("|")[0].split("#")[0] : text.trim();
+          const rawMatch = match ? match[1] : text.trim();
+          const subpathMatch = rawMatch.match(/(#[^|]+)/);
+          if (subpathMatch) {
+            subpath = subpathMatch[1];
+          }
+          const linkPath = rawMatch.split("|")[0].split("#")[0].trim();
           if (linkPath) {
             const dest = this.app.metadataCache.getFirstLinkpathDest(linkPath, this.file?.path ?? "");
             if (dest instanceof TFile) {
@@ -339,6 +346,13 @@ export class UmlCanvasView extends TextFileView {
                 const byPathMd = this.app.vault.getAbstractFileByPath(linkPath + ".md");
                 if (byPathMd instanceof TFile) {
                   file = byPathMd;
+                } else {
+                  const byPathPdf = this.app.vault.getAbstractFileByPath(
+                    linkPath.toLowerCase().endsWith(".pdf") ? linkPath : linkPath + ".pdf"
+                  );
+                  if (byPathPdf instanceof TFile) {
+                    file = byPathPdf;
+                  }
                 }
               }
             }
@@ -348,6 +362,8 @@ export class UmlCanvasView extends TextFileView {
         if (file) {
           if (isImageFile(file)) {
             await this.addImageToCanvas({ file, canvasPoint });
+          } else if (isPdfFile(file)) {
+            await this.addPdfToCanvas({ file, canvasPoint, subpath });
           } else {
             await this.addNoteToCanvas(file, canvasPoint);
           }
@@ -364,6 +380,20 @@ export class UmlCanvasView extends TextFileView {
                 reader.onload = () => {
                   const dataUrl = reader.result as string;
                   void this.addImageToCanvas({
+                    src: dataUrl,
+                    title: osFile.name.replace(/\.[^/.]+$/, ""),
+                    canvasPoint,
+                  });
+                };
+                reader.readAsDataURL(osFile);
+              }
+              return true;
+            } else if (osFile.type === "application/pdf" || isPdfFile(osFile.name)) {
+              if (typeof FileReader !== "undefined") {
+                const reader = new FileReader();
+                reader.onload = () => {
+                  const dataUrl = reader.result as string;
+                  void this.addPdfToCanvas({
                     src: dataUrl,
                     title: osFile.name.replace(/\.[^/.]+$/, ""),
                     canvasPoint,
@@ -422,6 +452,9 @@ export class UmlCanvasView extends TextFileView {
       },
       () => {
         this.openImagePickerModal();
+      },
+      () => {
+        this.openPdfPickerModal();
       }
     );
 
@@ -477,7 +510,7 @@ export class UmlCanvasView extends TextFileView {
       }
     });
 
-    // Setup Image Paste listener
+    // Setup Image & PDF Paste listener
     this.rootEl.addEventListener("paste", (e: ClipboardEvent) => {
       const items = e.clipboardData?.items;
       if (items) {
@@ -498,6 +531,21 @@ export class UmlCanvasView extends TextFileView {
               reader.readAsDataURL(blob);
               return;
             }
+          } else if (item.type === "application/pdf") {
+            e.preventDefault();
+            const blob = item.getAsFile();
+            if (blob && typeof FileReader !== "undefined") {
+              const reader = new FileReader();
+              reader.onload = () => {
+                const dataUrl = reader.result as string;
+                void this.addPdfToCanvas({
+                  src: dataUrl,
+                  title: "Document",
+                });
+              };
+              reader.readAsDataURL(blob);
+              return;
+            }
           }
         }
       }
@@ -505,6 +553,8 @@ export class UmlCanvasView extends TextFileView {
 
     // Load full note content from vault for embedded note cards
     void this.loadVaultNotesContent();
+    // Resolve resource paths for vault PDFs and images
+    this.resolveVaultResourcePaths();
   }
 
   showFreehandEscapeHatch(stroke: Stroke, message = "Shape recognized"): void {
@@ -811,13 +861,24 @@ export class UmlCanvasView extends TextFileView {
         });
       }
 
+      if (node.kind === "generic.pdf") {
+        menu.addItem((item) => {
+          item
+            .setTitle("Change PDF document...")
+            .setIcon("file-text")
+            .onClick(() => {
+              this.openPdfPickerModal(node.position);
+            });
+        });
+      }
+
       const filePath =
         (node.metadata?.filePath as string) ||
         (node.customData?.filePath as string);
       if (filePath) {
         menu.addItem((item) => {
           item
-            .setTitle("Open note in Obsidian")
+            .setTitle(node.kind === "generic.pdf" ? "Open PDF in Obsidian" : "Open note in Obsidian")
             .setIcon("external-link")
             .onClick(() => {
               void this.app.workspace.openLinkText(filePath, "", false);
@@ -1372,6 +1433,15 @@ export class UmlCanvasView extends TextFileView {
 
       menu.addItem((item) => {
         item
+          .setTitle("Insert PDF document...")
+          .setIcon("file-text")
+          .onClick(() => {
+            this.openPdfPickerModal(canvasPoint);
+          });
+      });
+
+      menu.addItem((item) => {
+        item
           .setTitle("Paste")
           .setIcon("clipboard")
           .onClick(() => {
@@ -1518,6 +1588,106 @@ export class UmlCanvasView extends TextFileView {
     return imageNode;
   }
 
+  public openPdfPickerModal(canvasPoint?: Point): void {
+    const vaultPdfs = this.app.vault.getFiles().filter((f: TFile) => isPdfFile(f));
+    if (vaultPdfs.length > 0) {
+      new PdfSuggestModal(this.app, (file: TFile) => {
+        void this.addPdfToCanvas({ file, canvasPoint });
+      }).open();
+    } else {
+      this.openLocalPdfFileDialog(canvasPoint);
+    }
+  }
+
+  public openLocalPdfFileDialog(canvasPoint?: Point): void {
+    if (typeof document === "undefined") return;
+    const input = createEl("input", {
+      type: "file",
+      cls: "umlcanvas-file-input-hidden",
+    });
+    input.accept = "application/pdf,.pdf";
+    input.addEventListener("change", () => {
+      const file = input.files?.[0];
+      if (file && typeof FileReader !== "undefined") {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const dataUrl = reader.result as string;
+          void this.addPdfToCanvas({
+            src: dataUrl,
+            title: file.name.replace(/\.[^/.]+$/, ""),
+            canvasPoint,
+          });
+        };
+        reader.readAsDataURL(file);
+      }
+      input.remove();
+    });
+    document.body.appendChild(input);
+    input.click();
+  }
+
+  public async addPdfToCanvas(options: {
+    file?: TFile;
+    filePath?: string;
+    src?: string;
+    title?: string;
+    subpath?: string;
+    canvasPoint?: Point;
+    size?: Size;
+  }): Promise<DiagramNode | null> {
+    if (!this.editor) return null;
+
+    let targetPoint = options.canvasPoint;
+    if (!targetPoint) {
+      const transform = this.renderer?.currentTransform ?? { panX: 0, panY: 0, zoom: 1 };
+      const centerScreen = {
+        x: (this.rootEl?.clientWidth ?? 800) / 2,
+        y: (this.rootEl?.clientHeight ?? 600) / 2,
+      };
+      targetPoint = {
+        x: Math.round((centerScreen.x - transform.panX) / transform.zoom - 170),
+        y: Math.round((centerScreen.y - transform.panY) / transform.zoom - 220),
+      };
+    }
+
+    let src = options.src || "";
+    const filePath = options.filePath || (options.file ? options.file.path : "");
+    const title = options.title || (options.file ? options.file.basename : "Document");
+    const subpath = options.subpath || "";
+
+    if (options.file) {
+      try {
+        if (typeof this.app.vault.getResourcePath === "function") {
+          src = this.app.vault.getResourcePath(options.file);
+        } else {
+          src = options.file.path;
+        }
+      } catch {
+        src = options.file.path;
+      }
+    }
+
+    const pdfNode = this.editor.addNode({
+      kind: "generic.pdf",
+      title,
+      position: targetPoint,
+      size: options.size ?? { width: 340, height: 440 },
+      metadata: {
+        filePath,
+        src,
+        subpath,
+      },
+      customData: {
+        filePath,
+        src,
+        subpath,
+      },
+    });
+
+    this.editor.selectNode(pdfNode.id, false);
+    return pdfNode;
+  }
+
   public addStickyNoteToCanvas(options?: {
     text?: string;
     color?: string;
@@ -1614,10 +1784,55 @@ export class UmlCanvasView extends TextFileView {
     return noteNode;
   }
 
+  private resolveVaultResourcePaths(): void {
+    if (!this.editor) return;
+    const resourceNodes = this.editor.diagram.nodes.filter(
+      (n) =>
+        (n.kind === "generic.pdf" || n.kind === "generic.image") &&
+        Boolean(n.metadata?.filePath || n.customData?.filePath)
+    );
+    for (const node of resourceNodes) {
+      const filePath =
+        (node.metadata?.filePath as string) ||
+        (node.customData?.filePath as string);
+      if (!filePath) continue;
+
+      const file = this.app.vault.getAbstractFileByPath(filePath);
+      if (file instanceof TFile) {
+        let src = "";
+        try {
+          if (typeof this.app.vault.getResourcePath === "function") {
+            src = this.app.vault.getResourcePath(file);
+          } else {
+            src = file.path;
+          }
+        } catch {
+          src = file.path;
+        }
+
+        if (src && node.customData?.src !== src) {
+          this.editor.updateNode(node.id, {
+            metadata: {
+              ...node.metadata,
+              src,
+            },
+            customData: {
+              ...node.customData,
+              src,
+            },
+          });
+        }
+      }
+    }
+  }
+
   private async loadVaultNotesContent(): Promise<void> {
     if (!this.editor) return;
     const noteNodes = this.editor.diagram.nodes.filter(
-      (n) => n.kind === "obsidian.note" || Boolean(n.metadata?.filePath)
+      (n) =>
+        (n.kind === "obsidian.note" || Boolean(n.metadata?.filePath)) &&
+        n.kind !== "generic.pdf" &&
+        n.kind !== "generic.image"
     );
     if (noteNodes.length === 0) return;
 
@@ -1699,19 +1914,29 @@ export class UmlCanvasView extends TextFileView {
     );
     if (matchingNodes.length === 0) return;
 
-    const oldBasename = oldPath.split("/").pop()?.replace(/\.md$/, "") ?? "";
+    const oldBasename = oldPath.split("/").pop()?.replace(/\.(md|pdf)$/i, "") ?? "";
     for (const node of matchingNodes) {
       const newLabels = node.labels.map((l) =>
         l.text === oldBasename ? { ...l, text: file.basename } : l
       );
+      let newSrc = node.customData?.src;
+      if (typeof this.app.vault.getResourcePath === "function") {
+        try {
+          newSrc = this.app.vault.getResourcePath(file);
+        } catch (err) {
+          void err;
+        }
+      }
       this.editor.updateNode(node.id, {
         metadata: {
           ...node.metadata,
           filePath: file.path,
+          ...(newSrc ? { src: newSrc } : {}),
         },
         customData: {
           ...node.customData,
           filePath: file.path,
+          ...(newSrc ? { src: newSrc } : {}),
         },
         labels: newLabels,
       });

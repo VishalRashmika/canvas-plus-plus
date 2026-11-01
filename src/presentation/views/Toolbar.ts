@@ -60,6 +60,7 @@ export class Toolbar {
   private noteBtn!: HTMLButtonElement;
   private vaultNoteBtn?: HTMLButtonElement;
   private imageBtn?: HTMLButtonElement;
+  private pdfBtn?: HTMLButtonElement;
   private groupBoxBtn!: HTMLButtonElement;
   private tableBtn!: HTMLButtonElement;
   private lineBtn!: HTMLButtonElement;
@@ -150,7 +151,8 @@ export class Toolbar {
     private readonly onToggleMinimap?: () => void,
     private readonly onAddNoteRequested?: () => void,
     private readonly onToggleTheme?: () => void,
-    private readonly onAddImageRequested?: () => void
+    private readonly onAddImageRequested?: () => void,
+    private readonly onAddPdfRequested?: () => void
   ) {
     this.freehandEnabled = this.renderer.isFreehandEnabled;
 
@@ -341,6 +343,38 @@ export class Toolbar {
     const size = { width: 220, height: 260 };
     this.editor.addNode({
       kind: "generic.image",
+      title,
+      position: {
+        x: Math.round(canvasX - size.width / 2),
+        y: Math.round(canvasY - size.height / 2),
+      },
+      size,
+      metadata: { src },
+      customData: { src },
+    });
+
+    if (this.renderer.grabMode && typeof this.renderer.setGrabMode === "function") {
+      this.renderer.setGrabMode(false);
+      this.updateToolMode();
+    }
+    if (this.renderer.freehandMode) {
+      this.renderer.setFreehandMode(false);
+      this.updateToolMode();
+    }
+  }
+
+  public addPdfAtCenter(src = "", title = "Document"): void {
+    const transform = this.renderer.currentTransform;
+    const centerScreen = {
+      x: this.container.clientWidth / 2,
+      y: this.container.clientHeight / 2,
+    };
+    const canvasX = (centerScreen.x - transform.panX) / transform.zoom;
+    const canvasY = (centerScreen.y - transform.panY) / transform.zoom;
+
+    const size = { width: 340, height: 440 };
+    this.editor.addNode({
+      kind: "generic.pdf",
       title,
       position: {
         x: Math.round(canvasX - size.width / 2),
@@ -1140,6 +1174,21 @@ export class Toolbar {
     );
     shapeGroup.appendChild(this.imageBtn);
 
+    // PDF Document
+    this.pdfBtn = this.createButton(
+      "Insert PDF Document",
+      "",
+      () => {
+        if (this.onAddPdfRequested) {
+          this.onAddPdfRequested();
+        } else {
+          this.addPdfAtCenter();
+        }
+      },
+      "file-text"
+    );
+    shapeGroup.appendChild(this.pdfBtn);
+
     // Vault Note
     if (this.onAddNoteRequested) {
       this.vaultNoteBtn = this.createButton(
@@ -1681,6 +1730,13 @@ export class Toolbar {
         this.onAddImageRequested();
       } else {
         this.addImageAtCenter();
+      }
+    });
+    addItem("Insert PDF Document...", "file-text", () => {
+      if (this.onAddPdfRequested) {
+        this.onAddPdfRequested();
+      } else {
+        this.addPdfAtCenter();
       }
     });
     if (this.onAddNoteRequested) {

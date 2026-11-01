@@ -15,6 +15,7 @@ export interface PlainCanvasNode {
   color?: string;
   text?: string;
   file?: string;
+  subpath?: string;
   url?: string;
   label?: string;
 }
@@ -99,10 +100,16 @@ export class JsonCanvasImporter {
         compartments: parsed.compartments,
         stereotype: parsed.stereotype,
         style: rawNode.color ? { color: rawNode.color } : undefined,
-        metadata: parsed.filePath ? { filePath: parsed.filePath } : undefined,
+        metadata: parsed.filePath
+          ? {
+              filePath: parsed.filePath,
+              ...(parsed.subpath ? { subpath: parsed.subpath } : {}),
+            }
+          : undefined,
         customData: parsed.filePath
           ? {
               filePath: parsed.filePath,
+              ...(parsed.subpath ? { subpath: parsed.subpath } : {}),
               ...(parsed.kind === "obsidian.note" ? { scaleMode: "fit", scale: 1.0 } : {}),
             }
           : undefined,
@@ -177,6 +184,7 @@ export class JsonCanvasImporter {
     stereotype?: string;
     compartments?: Compartment[];
     filePath?: string;
+    subpath?: string;
   } {
     if (raw.type === "file") {
       const fileName = raw.file ? raw.file.replace(/\.[^/.]+$/, "").split("/").pop() ?? "File" : "File";
@@ -186,12 +194,23 @@ export class JsonCanvasImporter {
           title: fileName,
           kind: "generic.image",
           filePath: raw.file,
+          subpath: raw.subpath,
+        };
+      }
+      const isPdf = raw.file && /\.pdf$/i.test(raw.file);
+      if (isPdf) {
+        return {
+          title: fileName,
+          kind: "generic.pdf",
+          filePath: raw.file,
+          subpath: raw.subpath,
         };
       }
       return {
         title: fileName,
         kind: "obsidian.note",
         filePath: raw.file,
+        subpath: raw.subpath,
       };
     }
 

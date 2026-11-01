@@ -1707,6 +1707,147 @@ body .umlcanvas-moving * {
   user-select: none;
 }
 
+/* --- Embedded PDF Document Cards --- */
+.umlcanvas-pdf-card {
+  fill: var(--background-primary, var(--background-secondary));
+  stroke: var(--background-modifier-border, var(--text-muted));
+  stroke-width: 1.5;
+  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.1));
+  rx: 8;
+  ry: 8;
+  transition: stroke 0.15s ease, filter 0.15s ease;
+}
+
+.umlcanvas-pdf-card:hover {
+  stroke: var(--interactive-accent-hover, var(--text-muted));
+}
+
+.umlcanvas-pdf-card.umlcanvas-node-selected {
+  stroke: var(--interactive-accent);
+  stroke-width: 2;
+  filter: drop-shadow(0 0 0 2px var(--interactive-accent));
+}
+
+.umlcanvas-pdf-header-bg {
+  fill: var(--background-secondary, var(--background-primary-alt));
+  cursor: grab;
+}
+
+.umlcanvas-moving .umlcanvas-pdf-header-bg {
+  cursor: grabbing;
+}
+
+.umlcanvas-pdf-header-sep {
+  stroke: var(--background-modifier-border);
+  stroke-width: 1;
+}
+
+.umlcanvas-pdf-icon {
+  color: var(--text-muted);
+  pointer-events: none;
+  user-select: none;
+}
+
+.umlcanvas-pdf-badge {
+  fill: #e53935;
+  font-family: var(--font-text, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+  font-weight: 700;
+  pointer-events: none;
+  user-select: none;
+}
+
+.umlcanvas-pdf-title {
+  fill: var(--text-normal);
+  font-family: var(--font-text, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  transition: fill 0.15s ease;
+}
+
+.umlcanvas-pdf-title:hover {
+  fill: var(--interactive-accent);
+}
+
+.umlcanvas-pdf-open-btn {
+  fill: var(--text-muted);
+  font-size: 15px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: fill 0.15s ease, transform 0.15s ease;
+}
+
+.umlcanvas-pdf-open-btn:hover {
+  fill: var(--interactive-accent);
+  transform: scale(1.2);
+}
+
+.umlcanvas-pdf-page-badge {
+  fill: var(--text-muted);
+  font-family: var(--font-text, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+  font-size: 11px;
+  font-weight: 500;
+  pointer-events: none;
+  user-select: none;
+}
+
+.umlcanvas-pdf-foreign {
+  overflow: hidden;
+}
+
+.umlcanvas-pdf-container {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  box-sizing: border-box;
+  position: relative;
+  background-color: var(--background-primary);
+}
+
+.umlcanvas-pdf-frame {
+  width: 100%;
+  height: 100%;
+  border: none;
+  display: block;
+  background-color: var(--background-primary);
+}
+
+/* Disable pointer-events inside the iframe while panning or moving nodes to avoid event swallowing */
+.umlcanvas-moving .umlcanvas-pdf-frame {
+  pointer-events: none !important;
+}
+
+.umlcanvas-pdf-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-style: italic;
+  background-color: var(--background-secondary);
+}
+
+.umlcanvas-pdf-svg-fallback {
+  pointer-events: none;
+  user-select: none;
+}
+
+.umlcanvas-pdf-fallback-page {
+  fill: var(--background-secondary, rgba(128, 128, 128, 0.08));
+  stroke: var(--background-modifier-border, var(--text-muted));
+  stroke-width: 1;
+}
+
+.umlcanvas-pdf-fallback-text {
+  fill: var(--text-muted);
+  font-family: var(--font-text, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+  font-size: 13px;
+  font-weight: 500;
+}
+
 /* --- Behavioral Diagram Elements (Activity, State, Sequence - Phase 3) --- */
 
 /* Initial & Final Nodes (Activity & State) */
@@ -2588,6 +2729,7 @@ body .umlcanvas-moving * {
 /* Node Color Application */
 .umlcanvas-node[data-color] .umlcanvas-node-body,
 .umlcanvas-node[data-color] .umlcanvas-obsidian-note-card,
+.umlcanvas-node[data-color] .umlcanvas-pdf-card,
 .umlcanvas-node[data-color] .umlcanvas-note-body,
 .umlcanvas-node[data-color] .umlcanvas-swimlane-body,
 .umlcanvas-node[data-color] .umlcanvas-system-boundary-box,
@@ -2610,7 +2752,8 @@ body .umlcanvas-moving * {
 .umlcanvas-node[data-color] .umlcanvas-node-selected,
 .umlcanvas-node.umlcanvas-node-selected .umlcanvas-node-body,
 .umlcanvas-node[data-color] .umlcanvas-node-body.umlcanvas-node-selected,
-.umlcanvas-node[data-color] .umlcanvas-obsidian-note-card.umlcanvas-node-selected {
+.umlcanvas-node[data-color] .umlcanvas-obsidian-note-card.umlcanvas-node-selected,
+.umlcanvas-node[data-color] .umlcanvas-pdf-card.umlcanvas-node-selected {
   stroke: var(--interactive-accent);
   stroke-width: 2.5px;
   filter: drop-shadow(0 0 4px rgba(var(--interactive-accent-rgb, 120, 100, 255), 0.5));
@@ -4220,24 +4363,32 @@ body.umlcanvas-is-resizing-palette * {
 
 /* Vault Notes & Sticky Notes */
 .umlcanvas-theme-light .umlcanvas-obsidian-note-card,
-.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-obsidian-note-card {
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-obsidian-note-card,
+.umlcanvas-theme-light .umlcanvas-pdf-card,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-pdf-card {
   fill: #ffffff;
   stroke: var(--canvas-stroke-node, #475060);
   filter: drop-shadow(0 2px 8px rgba(60, 50, 40, 0.08));
 }
 
 .umlcanvas-theme-light .umlcanvas-obsidian-note-header-bg,
-.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-obsidian-note-header-bg {
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-obsidian-note-header-bg,
+.umlcanvas-theme-light .umlcanvas-pdf-header-bg,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-pdf-header-bg {
   fill: var(--canvas-bg-header, #f4f0e8);
 }
 
 .umlcanvas-theme-light .umlcanvas-obsidian-note-header-sep,
-.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-obsidian-note-header-sep {
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-obsidian-note-header-sep,
+.umlcanvas-theme-light .umlcanvas-pdf-header-sep,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-pdf-header-sep {
   stroke: var(--canvas-stroke-divider, #cbd1dc);
 }
 
 .umlcanvas-theme-light .umlcanvas-obsidian-note-title,
-.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-obsidian-note-title {
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-obsidian-note-title,
+.umlcanvas-theme-light .umlcanvas-pdf-title,
+.theme-light .umlcanvas-view-container:not(.umlcanvas-theme-dark) .umlcanvas-pdf-title {
   fill: var(--canvas-text-title, #1a1d24);
 }
 

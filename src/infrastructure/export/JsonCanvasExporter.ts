@@ -75,11 +75,20 @@ export class JsonCanvasExporter {
         (node.metadata?.filePath as string) ||
         (node.customData?.filePath as string);
 
-      if ((node.kind === "obsidian.note" || node.kind === "generic.image") && filePath) {
+      if (
+        (node.kind === "obsidian.note" ||
+          node.kind === "generic.image" ||
+          node.kind === "generic.pdf") &&
+        filePath
+      ) {
+        const subpath =
+          (node.metadata?.subpath as string) ||
+          (node.customData?.subpath as string);
         plainNodes.push({
           id: node.id,
           type: "file",
           file: filePath,
+          ...(subpath ? { subpath } : {}),
           x: Math.round(node.position.x),
           y: Math.round(node.position.y),
           width: Math.round(node.size.width),

@@ -115,6 +115,7 @@ export class ShapeRegistry {
     this.register(this.createGenericNoteShape());
     this.register(this.createGenericStickyNoteShape());
     this.register(this.createGenericImageShape());
+    this.register(this.createGenericPdfShape());
     this.register(this.createObsidianNoteShape());
 
     // --- Phase 3 Behavioral Shapes ---
@@ -1195,6 +1196,237 @@ export class ShapeRegistry {
               (!title ? " umlcanvas-placeholder-text" : ""),
           }
         );
+
+        return group;
+      },
+    };
+  }
+
+  private createGenericPdfShape(): ShapeDefinition {
+    return {
+      kind: "generic.pdf",
+      displayName: "PDF Document",
+      defaultTitle: "PDF Document",
+      defaultSize: { width: 340, height: 440 },
+      getPorts(node: DiagramNode): Port[] {
+        if (node.ports && node.ports.length > 0) return node.ports;
+        const sides: Side[] = ["top", "right", "bottom", "left"];
+        return sides.map((side) => ({
+          id: `${node.id}-port-${side}`,
+          ownerNodeId: node.id,
+          name: side,
+          side,
+          offset: 0.5,
+          direction: "inout",
+        }));
+      },
+      getBoundaryPoint(node: DiagramNode, targetPoint: Point): Point {
+        return getRectPerimeterIntersection(
+          { position: node.position, size: node.size },
+          targetPoint
+        );
+      },
+      renderSvg(node: DiagramNode, context: RenderContext): SVGElement {
+        const svgNS = "http://www.w3.org/2000/svg";
+        const group = document.createElementNS(svgNS, "g");
+        group.setAttribute("class", "umlcanvas-shape-pdf");
+
+        const w = node.size.width;
+        const h = node.size.height;
+        const r = 8;
+        const headerH = 32;
+        const bodyH = Math.max(10, h - headerH);
+
+        // 1. Card container / background rect
+        const bgRect = document.createElementNS(svgNS, "rect");
+        bgRect.setAttribute("x", "0");
+        bgRect.setAttribute("y", "0");
+        bgRect.setAttribute("width", String(w));
+        bgRect.setAttribute("height", String(h));
+        bgRect.setAttribute("rx", String(r));
+        bgRect.setAttribute("ry", String(r));
+        bgRect.setAttribute(
+          "class",
+          context.isSelected
+            ? "umlcanvas-pdf-card umlcanvas-node-selected"
+            : "umlcanvas-pdf-card"
+        );
+        if (node.style?.fillColor) {
+          bgRect.setAttribute("fill", node.style.fillColor);
+        }
+        if (node.style?.strokeColor) {
+          bgRect.setAttribute("stroke", node.style.strokeColor);
+        }
+        group.appendChild(bgRect);
+
+        // 2. Header background rect
+        const headerRect = document.createElementNS(svgNS, "path");
+        headerRect.setAttribute(
+          "d",
+          `M 0 ${r} A ${r} ${r} 0 0 1 ${r} 0 L ${w - r} 0 A ${r} ${r} 0 0 1 ${w} ${r} L ${w} ${headerH} L 0 ${headerH} Z`
+        );
+        headerRect.setAttribute("class", "umlcanvas-pdf-header-bg");
+        group.appendChild(headerRect);
+
+        // 3. Header separator line
+        const sepLine = document.createElementNS(svgNS, "line");
+        sepLine.setAttribute("x1", "0");
+        sepLine.setAttribute("y1", String(headerH));
+        sepLine.setAttribute("x2", String(w));
+        sepLine.setAttribute("y2", String(headerH));
+        sepLine.setAttribute("class", "umlcanvas-pdf-header-sep");
+        group.appendChild(sepLine);
+
+        // 4. PDF Document Icon with distinctive PDF styling
+        const iconGroup = document.createElementNS(svgNS, "g");
+        iconGroup.setAttribute("class", "umlcanvas-pdf-icon");
+        iconGroup.setAttribute("transform", "translate(10, 8)");
+
+        const iconPath = document.createElementNS(svgNS, "path");
+        iconPath.setAttribute(
+          "d",
+          "M9 2H3.5A1.5 1.5 0 0 0 2 3.5v11A1.5 1.5 0 0 0 3.5 16h7a1.5 1.5 0 0 0 1.5-1.5V5L9 2z"
+        );
+        iconPath.setAttribute("fill", "none");
+        iconPath.setAttribute("stroke", "currentColor");
+        iconPath.setAttribute("stroke-width", "1.2");
+        iconPath.setAttribute("stroke-linejoin", "round");
+        iconGroup.appendChild(iconPath);
+
+        const iconFold = document.createElementNS(svgNS, "polyline");
+        iconFold.setAttribute("points", "8.5 2 8.5 5.5 12 5.5");
+        iconFold.setAttribute("fill", "none");
+        iconFold.setAttribute("stroke", "currentColor");
+        iconFold.setAttribute("stroke-width", "1.2");
+        iconFold.setAttribute("stroke-linejoin", "round");
+        iconGroup.appendChild(iconFold);
+
+        const pdfBadgeText = document.createElementNS(svgNS, "text");
+        pdfBadgeText.setAttribute("x", "7");
+        pdfBadgeText.setAttribute("y", "12");
+        pdfBadgeText.setAttribute("text-anchor", "middle");
+        pdfBadgeText.setAttribute("font-size", "5");
+        pdfBadgeText.setAttribute("font-weight", "bold");
+        pdfBadgeText.setAttribute("class", "umlcanvas-pdf-badge");
+        pdfBadgeText.textContent = "PDF";
+        iconGroup.appendChild(pdfBadgeText);
+
+        group.appendChild(iconGroup);
+
+        // 5. Title Text
+        const titleText = document.createElementNS(svgNS, "text");
+        titleText.setAttribute("x", "30");
+        titleText.setAttribute("y", "21");
+        titleText.setAttribute("class", "umlcanvas-pdf-title");
+        const rawTitle = node.labels[0]?.text || (node.metadata?.filePath as string) || "PDF Document";
+        const title = rawTitle.replace(/\.pdf$/i, "");
+        const subpath =
+          (node.metadata?.subpath as string) || (node.customData?.subpath as string) || "";
+        const rightMargin = subpath ? (w >= 240 ? 80 : 35) : 30;
+        const maxChars = Math.max(8, Math.floor((w - rightMargin) / 7.5));
+        titleText.textContent = title.length > maxChars ? `${title.slice(0, maxChars - 2)}…` : title;
+        titleText.setAttribute("title", rawTitle);
+        applyFontToSvgElement(titleText, getNodeFontStyle(node));
+        group.appendChild(titleText);
+
+        // 6a. Subpath / Page badge in header if specified
+        if (subpath && w >= 220) {
+          const pageBadge = document.createElementNS(svgNS, "text");
+          pageBadge.setAttribute("x", String(w - 38));
+          pageBadge.setAttribute("y", "21");
+          pageBadge.setAttribute("class", "umlcanvas-pdf-page-badge");
+          const pageMatch = subpath.match(/page=(\d+)/i);
+          const badgeText = pageMatch ? `p. ${pageMatch[1]}` : subpath.replace(/^#/, "");
+          pageBadge.textContent = badgeText;
+          pageBadge.setAttribute("title", `Target: ${subpath}`);
+          group.appendChild(pageBadge);
+        }
+
+        // 6b. Clickable Open Icon in Header (↗)
+        const openIcon = document.createElementNS(svgNS, "text");
+        openIcon.setAttribute("x", String(w - 20));
+        openIcon.setAttribute("y", "21");
+        openIcon.setAttribute("class", "umlcanvas-pdf-open-btn");
+        const pdfFilePath =
+          (node.metadata?.filePath as string) || (node.customData?.filePath as string) || "";
+        openIcon.setAttribute("data-file-path", pdfFilePath);
+        openIcon.textContent = "↗";
+        openIcon.setAttribute("title", "Open PDF in Obsidian");
+        group.appendChild(openIcon);
+
+        // 7. Rich HTML PDF Body via foreignObject (loads PDF via iframe or embed)
+        const foreign = document.createElementNS(svgNS, "foreignObject");
+        foreign.setAttribute("x", "0");
+        foreign.setAttribute("y", String(headerH));
+        foreign.setAttribute("width", String(w));
+        foreign.setAttribute("height", String(bodyH));
+        foreign.setAttribute("class", "umlcanvas-pdf-foreign");
+
+        const containerDiv = safeCreateDiv({
+          cls: "umlcanvas-pdf-container",
+        });
+
+        const src =
+          (node.customData?.src as string) ||
+          (node.metadata?.src as string) ||
+          (node.customData?.filePath as string) ||
+          (node.metadata?.filePath as string) ||
+          "";
+
+        let fullSrc = src;
+        if (src && subpath && !src.includes("#")) {
+          fullSrc = `${src}${subpath.startsWith("#") ? subpath : "#" + subpath}`;
+        }
+
+        if (fullSrc) {
+          const iframe = safeCreateEl("iframe", {
+            cls: "umlcanvas-pdf-frame",
+            attr: {
+              src: fullSrc,
+              type: "application/pdf",
+              frameborder: "0",
+              title: title || "PDF Document",
+            },
+          });
+          containerDiv.appendChild(iframe);
+        } else {
+          const placeholder = safeCreateDiv({
+            cls: "umlcanvas-pdf-placeholder",
+            text: "PDF Document (drop or select file)",
+          });
+          containerDiv.appendChild(placeholder);
+        }
+
+        foreign.appendChild(containerDiv);
+        group.appendChild(foreign);
+
+        // 8. SVG Fallback elements (for headless Jest tests and SVG-only exporters)
+        const fallbackGroup = document.createElementNS(svgNS, "g");
+        fallbackGroup.setAttribute("class", "umlcanvas-pdf-svg-fallback");
+
+        const pageW = Math.round(w * 0.72);
+        const pageH = Math.round(bodyH * 0.78);
+        const pageX = Math.round((w - pageW) / 2);
+        const pageY = Math.round(headerH + (bodyH - pageH) / 2);
+
+        const pageRect = document.createElementNS(svgNS, "rect");
+        pageRect.setAttribute("x", String(pageX));
+        pageRect.setAttribute("y", String(pageY));
+        pageRect.setAttribute("width", String(pageW));
+        pageRect.setAttribute("height", String(pageH));
+        pageRect.setAttribute("rx", "4");
+        pageRect.setAttribute("class", "umlcanvas-pdf-fallback-page");
+        fallbackGroup.appendChild(pageRect);
+
+        const fallbackTitle = document.createElementNS(svgNS, "text");
+        fallbackTitle.setAttribute("x", String(w / 2));
+        fallbackTitle.setAttribute("y", String(pageY + pageH / 2));
+        fallbackTitle.setAttribute("text-anchor", "middle");
+        fallbackTitle.setAttribute("class", "umlcanvas-pdf-fallback-text");
+        fallbackTitle.textContent = `${title}.pdf`;
+        fallbackGroup.appendChild(fallbackTitle);
+
+        group.appendChild(fallbackGroup);
 
         return group;
       },
@@ -4224,4 +4456,32 @@ function safeCreateDiv(options?: { cls?: string; text?: string; attr?: Record<st
     createDiv: (childOpts?: unknown) => safeCreateDiv(childOpts as { cls?: string; text?: string }),
     createEl: () => ({} as HTMLElement),
   } as unknown as HTMLDivElement;
+}
+
+function safeCreateEl(tag: string, options?: { cls?: string; attr?: Record<string, string> }): HTMLElement {
+  if (typeof document !== "undefined") {
+    const el = document.createElement(tag);
+    if (options?.cls) {
+      el.className = options.cls;
+      if (el.classList && typeof el.classList.add === "function") {
+        el.classList.add(...options.cls.split(" ").filter(Boolean));
+      }
+    }
+    if (options?.attr) {
+      for (const [k, v] of Object.entries(options.attr)) {
+        el.setAttribute(k, v);
+      }
+    }
+    return el;
+  }
+  const mockAttrs: Record<string, string> = { ...(options?.attr || {}) };
+  return {
+    tagName: tag.toUpperCase(),
+    className: options?.cls || "",
+    attributes: mockAttrs,
+    style: {} as CSSStyleDeclaration,
+    setAttribute(k: string, v: string) { mockAttrs[k] = v; },
+    getAttribute(k: string) { return mockAttrs[k] ?? null; },
+    appendChild: (child: Node) => child,
+  } as unknown as HTMLElement;
 }

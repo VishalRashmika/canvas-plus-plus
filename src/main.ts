@@ -169,6 +169,21 @@ export default class CanvasPlusPlusPlugin extends Plugin {
       },
     });
 
+    this.addCommand({
+      id: "insert-pdf-document",
+      name: "Insert PDF document",
+      checkCallback: (checking: boolean) => {
+        const activeView = this.app.workspace.getActiveViewOfType(UmlCanvasView);
+        if (activeView && activeView.diagramEditor) {
+          if (!checking) {
+            activeView.openPdfPickerModal();
+          }
+          return true;
+        }
+        return false;
+      },
+    });
+
     // F-084: Register command palette entry to export active diagram for RAG
     this.addCommand({
       id: "export-diagram-for-rag",

@@ -91,7 +91,9 @@ export class Modal {
 
 export class FuzzySuggestModal<T> {
   app: any;
+  placeholder: string = "";
   constructor(app: any) { this.app = app; }
+  setPlaceholder(text: string) { this.placeholder = text; }
   open() {}
   close() {}
 }
@@ -222,7 +224,7 @@ export class Menu {
 export class TAbstractFile {
   path: string = "";
   name: string = "";
-  parent?: any;
+  parent: any = null;
   constructor(path = "", name = "") {
     this.path = path;
     this.name = name || (path ? path.split("/").pop() || "" : "");
@@ -237,6 +239,8 @@ export class TFolder extends TAbstractFile {
 }
 
 export class TFile extends TAbstractFile {
+  stat: any = { ctime: 0, mtime: 0, size: 0 };
+  vault: any = {};
   basename: string = "";
   extension: string = "";
   constructor(path = "", basename = "", extension = "") {

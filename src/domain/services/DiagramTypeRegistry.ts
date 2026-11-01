@@ -994,6 +994,7 @@ export const generalDiagramDefinition: DiagramTypeDefinition = {
     "generic.note",
     "generic.stickyNote",
     "generic.image",
+    "generic.pdf",
     "obsidian.note",
     "uml.class",
     "uml.interface",

@@ -1448,7 +1448,7 @@ export class SvgSceneRenderer {
       nodeGroup.appendChild(renderedShape);
 
       // Render markdown for obsidian note embeds
-      if (node.kind === "obsidian.note" || node.metadata?.filePath) {
+      if (node.kind === "obsidian.note" || (node.metadata?.filePath && node.kind !== "generic.image" && node.kind !== "generic.pdf")) {
         const bodyEl = renderedShape.querySelector<HTMLElement>(
           ".umlcanvas-obsidian-note-body"
         );
@@ -1863,7 +1863,7 @@ export class SvgSceneRenderer {
   private handleWheel(e: WheelEvent): void {
     const target = e.target as HTMLElement | null;
     const scrollable = target?.closest?.(
-      ".umlcanvas-obsidian-note-body, .umlcanvas-scrollable, .umlcanvas-obsidian-note-container"
+      ".umlcanvas-obsidian-note-body, .umlcanvas-scrollable, .umlcanvas-obsidian-note-container, .umlcanvas-pdf-container, .umlcanvas-pdf-frame"
     ) as HTMLElement | null;
     if (scrollable) {
       if (e.altKey) {
@@ -2150,8 +2150,10 @@ export class SvgSceneRenderer {
       }
     }
 
-    // Click on note open button (F-Obsidian-Notes)
-    const openBtn = target.closest(".umlcanvas-obsidian-note-open-btn");
+    // Click on note or PDF open button
+    const openBtn = target.closest(
+      ".umlcanvas-obsidian-note-open-btn, .umlcanvas-pdf-open-btn"
+    );
     if (openBtn) {
       e.stopPropagation();
       const filePath = openBtn.getAttribute("data-file-path");
@@ -2241,8 +2243,12 @@ export class SvgSceneRenderer {
           this.editor.selectNode(nodeId, false);
         }
 
-        // If clicking inside the scrollable note body, allow text selection and internal interactions without initiating card dragging
-        if (target.closest(".umlcanvas-obsidian-note-body")) {
+        // If clicking inside the scrollable note body or PDF container, allow text selection and internal interactions without initiating card dragging
+        if (
+          target.closest(
+            ".umlcanvas-obsidian-note-body, .umlcanvas-pdf-container, .umlcanvas-pdf-frame"
+          )
+        ) {
           return;
         }
 
@@ -2783,6 +2789,7 @@ export class SvgSceneRenderer {
           node &&
           !this.editor.isNodeLocked(node.id) &&
           node.kind !== "obsidian.note" &&
+          node.kind !== "generic.pdf" &&
           node.kind !== "schematic.chip" &&
           node.kind !== "generic.freehand"
         ) {
@@ -3063,6 +3070,7 @@ export class SvgSceneRenderer {
         if (node && !this.editor.isNodeLocked(node.id)) {
           if (
             (node.kind === "obsidian.note" ||
+              node.kind === "generic.pdf" ||
               (node.metadata?.filePath && node.kind !== "generic.image"))
           ) {
             const filePath =
@@ -3250,6 +3258,12 @@ export class SvgSceneRenderer {
       inPlaceY = node.position.y + Math.max(0, node.size.height - inPlaceH - 10);
       inPlaceW = Math.max(40, node.size.width - 16);
       textAlign = "center";
+    } else if (node.kind === "generic.pdf") {
+      inPlaceH = 24;
+      inPlaceX = node.position.x + 30;
+      inPlaceY = node.position.y + 4;
+      inPlaceW = Math.max(40, node.size.width - 60);
+      textAlign = "left";
     } else if (node.kind === "generic.table") {
       const rows = Math.max(1, (node.customData?.rows as number) || 3);
       const cols = Math.max(1, (node.customData?.cols as number) || 3);

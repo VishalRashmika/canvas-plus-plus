@@ -25,6 +25,7 @@ export const SHAPE_CATEGORIES: ShapeCategory[] = [
       "generic.ellipse",
       "generic.stickyNote",
       "generic.image",
+      "generic.pdf",
       "generic.note",
       "obsidian.note",
     ],

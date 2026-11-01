@@ -487,8 +487,8 @@ export class UpdateTableStructureCommand implements Command {
   execute(): void {
     const node = this.diagram.nodes.find((n) => n.id === this.nodeId);
     if (!node) return;
-    this.oldCustomData = JSON.parse(JSON.stringify(node.customData || {}));
-    this.newCustomData = JSON.parse(JSON.stringify(this.nextCustomData));
+    this.oldCustomData = JSON.parse(JSON.stringify(node.customData || {})) as Record<string, unknown>;
+    this.newCustomData = JSON.parse(JSON.stringify(this.nextCustomData)) as Record<string, unknown>;
     node.customData = { ...this.newCustomData };
   }
 

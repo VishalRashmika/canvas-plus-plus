@@ -108,14 +108,14 @@ export class ShapeRecognizer {
     const end = points[points.length - 1];
     const straightness = endToEndDist / totalLength;
 
-    // Check if stroke ends with an arrow head (hook/barb in the last 20-30% of stroke)
+    // Check if stroke ends with an arrow head (or starts with an arrowhead)
     const arrowCheck = this.detectArrowHead(points);
     if (arrowCheck.hasArrowHead) {
       return {
         shape: "arrow",
         confidence: Math.min(0.95, Math.max(0.7, arrowCheck.confidence)),
         bounds,
-        startPoint: { x: start.x, y: start.y },
+        startPoint: arrowCheck.tailPoint ?? { x: start.x, y: start.y },
         endPoint: arrowCheck.tipPoint,
       };
     }
@@ -141,94 +141,312 @@ export class ShapeRecognizer {
     };
   }
 
-  private detectArrowHead(points: StrokePoint[]): {
+  public detectArrowHead(points: StrokePoint[]): {
     hasArrowHead: boolean;
     confidence: number;
     tipPoint: Point;
+    tailPoint: Point;
+    atStart?: boolean;
   } {
     const n = points.length;
-    if (n < 8) {
-      return {
-        hasArrowHead: false,
-        confidence: 0,
-        tipPoint: { x: points[n - 1].x, y: points[n - 1].y },
-      };
+    const defaultRes = {
+      hasArrowHead: false,
+      confidence: 0,
+      tipPoint: { x: points[n - 1].x, y: points[n - 1].y },
+      tailPoint: { x: points[0].x, y: points[0].y },
+    };
+
+    if (n < 4) {
+      return defaultRes;
     }
 
-    // Main shaft should be roughly the first 70-80% of points
-    const splitIndex = Math.floor(n * 0.75);
-    const shaftPoints = points.slice(0, splitIndex);
-    const headPoints = points.slice(splitIndex);
-
-    let shaftLength = 0;
-    for (let i = 0; i < shaftPoints.length - 1; i++) {
-      shaftLength += Math.hypot(
-        shaftPoints[i + 1].x - shaftPoints[i].x,
-        shaftPoints[i + 1].y - shaftPoints[i].y
+    // 1. Calculate arc lengths and total length
+    const arcLengths: number[] = [0];
+    for (let i = 0; i < n - 1; i++) {
+      const segLen = Math.hypot(
+        points[i + 1].x - points[i].x,
+        points[i + 1].y - points[i].y
       );
+      arcLengths.push(arcLengths[i] + segLen);
     }
-    const shaftDist = Math.hypot(
-      shaftPoints[shaftPoints.length - 1].x - shaftPoints[0].x,
-      shaftPoints[shaftPoints.length - 1].y - shaftPoints[0].y
-    );
-
-    const shaftStraightness = shaftDist / Math.max(1, shaftLength);
-
-    if (shaftStraightness < 0.8) {
-      return {
-        hasArrowHead: false,
-        confidence: 0,
-        tipPoint: { x: points[n - 1].x, y: points[n - 1].y },
-      };
+    const totalLen = arcLengths[n - 1];
+    if (totalLen < 12) {
+      return defaultRes;
     }
 
-    // Check angle change in head points relative to shaft direction
-    const shaftDx = shaftPoints[shaftPoints.length - 1].x - shaftPoints[0].x;
-    const shaftDy = shaftPoints[shaftPoints.length - 1].y - shaftPoints[0].y;
-    const shaftAngle = Math.atan2(shaftDy, shaftDx);
+    // --- Hypothesis A: Arrowhead at the END (shaft from start to tip, head turns backwards) ---
+    const minSplitA = Math.max(2, Math.floor(n * 0.35));
+    const refIdxA = Math.min(n - 1, Math.max(minSplitA, Math.floor(n * 0.65)));
+    let refDxA = points[refIdxA].x - points[0].x;
+    let refDyA = points[refIdxA].y - points[0].y;
+    let refDistA = Math.hypot(refDxA, refDyA);
+    if (refDistA < 5) {
+      refDxA = points[n - 1].x - points[0].x;
+      refDyA = points[n - 1].y - points[0].y;
+      refDistA = Math.hypot(refDxA, refDyA);
+    }
 
-    let sharpTurnCount = 0;
-    for (let i = 0; i < headPoints.length - 1; i++) {
-      const hDx = headPoints[i + 1].x - headPoints[i].x;
-      const hDy = headPoints[i + 1].y - headPoints[i].y;
-      const headAngle = Math.atan2(hDy, hDx);
-      let angleDiff = Math.abs(headAngle - shaftAngle);
-      if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
+    if (refDistA >= 8) {
+      const uAx = refDxA / refDistA;
+      const uAy = refDyA / refDistA;
 
-      // An arrow barb turns sharply back (> 90 degrees)
-      if (angleDiff > Math.PI / 2) {
-        sharpTurnCount++;
+      let maxProjA = -Infinity;
+      let maxProjIdxA = minSplitA;
+      for (let i = minSplitA; i < n; i++) {
+        const proj = (points[i].x - points[0].x) * uAx + (points[i].y - points[0].y) * uAy;
+        if (proj > maxProjA) {
+          maxProjA = proj;
+          maxProjIdxA = i;
+        }
+      }
+
+      const candidatesA: number[] = [];
+      if (maxProjIdxA < n - 1 && maxProjIdxA >= minSplitA) {
+        candidatesA.push(maxProjIdxA);
+      }
+      for (let i = minSplitA; i < n - 1; i++) {
+        if (!candidatesA.includes(i)) {
+          candidatesA.push(i);
+        }
+      }
+
+      let bestTipIdxA = -1;
+      let bestConfidenceA = 0;
+
+      for (const k of candidatesA) {
+        const shaftDist = Math.hypot(points[k].x - points[0].x, points[k].y - points[0].y);
+        const shaftLen = arcLengths[k];
+        const shaftStraightness = shaftDist / Math.max(1, shaftLen);
+        if (shaftStraightness < 0.65 || shaftDist < 10) continue;
+
+        const headLen = totalLen - shaftLen;
+        if (headLen < 4 || headLen > 1.35 * shaftLen) continue;
+
+        const sDx = points[k].x - points[0].x;
+        const sDy = points[k].y - points[0].y;
+        const sDist = Math.hypot(sDx, sDy);
+        if (sDist < 5) continue;
+        const sUx = sDx / sDist;
+        const sUy = sDy / sDist;
+
+        let maxRetreat = 0;
+        for (let j = k; j < n; j++) {
+          const pProj = (points[j].x - points[k].x) * sUx + (points[j].y - points[k].y) * sUy;
+          if (pProj < maxRetreat) {
+            maxRetreat = pProj;
+          }
+        }
+
+        const shaftAngle = Math.atan2(sDy, sDx);
+        let sharpTurns = 0;
+        for (let j = k; j < n - 1; j++) {
+          const segDx = points[j + 1].x - points[j].x;
+          const segDy = points[j + 1].y - points[j].y;
+          const segLen = Math.hypot(segDx, segDy);
+          if (segLen < 1.5) continue;
+          const segAngle = Math.atan2(segDy, segDx);
+          let diff = Math.abs(segAngle - shaftAngle);
+          if (diff > Math.PI) diff = 2 * Math.PI - diff;
+          if (diff > Math.PI * 0.35) { // > ~63 degrees
+            sharpTurns++;
+          }
+        }
+
+        if (maxRetreat <= -2.5 || sharpTurns >= 1) {
+          const conf = Math.min(0.98, Math.max(0.72, shaftStraightness - (headLen / shaftLen) * 0.08));
+          if (conf > bestConfidenceA) {
+            bestConfidenceA = conf;
+            bestTipIdxA = k;
+          }
+        }
+      }
+
+      if (bestTipIdxA !== -1) {
+        return {
+          hasArrowHead: true,
+          confidence: bestConfidenceA,
+          tipPoint: { x: points[bestTipIdxA].x, y: points[bestTipIdxA].y },
+          tailPoint: { x: points[0].x, y: points[0].y },
+          atStart: false,
+        };
       }
     }
 
-    let maxProj = -Infinity;
-    let tip = shaftPoints[shaftPoints.length - 1];
-    const shaftLen = Math.hypot(shaftDx, shaftDy);
-    if (shaftLen > 0) {
-      const uX = shaftDx / shaftLen;
-      const uY = shaftDy / shaftLen;
-      for (const p of points) {
-        const proj = (p.x - points[0].x) * uX + (p.y - points[0].y) * uY;
-        if (proj > maxProj) {
-          maxProj = proj;
-          tip = p;
+    // --- Hypothesis B: Arrowhead at the START (stroke drawn starting with arrowhead, then shaft) ---
+    const maxSplitB = Math.min(n - 3, Math.ceil(n * 0.65));
+    const refIdxB = Math.max(0, Math.floor(n * 0.35));
+    let refDxB = points[n - 1].x - points[refIdxB].x;
+    let refDyB = points[n - 1].y - points[refIdxB].y;
+    let refDistB = Math.hypot(refDxB, refDyB);
+    if (refDistB < 5) {
+      refDxB = points[n - 1].x - points[0].x;
+      refDyB = points[n - 1].y - points[0].y;
+      refDistB = Math.hypot(refDxB, refDyB);
+    }
+
+    if (refDistB >= 8) {
+      const uBx = refDxB / refDistB;
+      const uBy = refDyB / refDistB;
+
+      let minProjB = Infinity;
+      let minProjIdxB = 0;
+      for (let i = 0; i <= maxSplitB; i++) {
+        const proj = (points[i].x - points[n - 1].x) * uBx + (points[i].y - points[n - 1].y) * uBy;
+        if (proj < minProjB) {
+          minProjB = proj;
+          minProjIdxB = i;
+        }
+      }
+
+      const candidatesB: number[] = [];
+      if (minProjIdxB > 0 && minProjIdxB <= maxSplitB) {
+        candidatesB.push(minProjIdxB);
+      }
+      for (let i = 1; i <= maxSplitB; i++) {
+        if (!candidatesB.includes(i)) candidatesB.push(i);
+      }
+
+      let bestTipIdxB = -1;
+      let bestConfidenceB = 0;
+
+      for (const k of candidatesB) {
+        const shaftDist = Math.hypot(points[n - 1].x - points[k].x, points[n - 1].y - points[k].y);
+        const shaftLen = totalLen - arcLengths[k];
+        const shaftStraightness = shaftDist / Math.max(1, shaftLen);
+        if (shaftStraightness < 0.65 || shaftDist < 10) continue;
+
+        const headLen = arcLengths[k];
+        if (headLen < 4 || headLen > 1.35 * shaftLen) continue;
+
+        const sDx = points[n - 1].x - points[k].x;
+        const sDy = points[n - 1].y - points[k].y;
+        const sDist = Math.hypot(sDx, sDy);
+        if (sDist < 5) continue;
+
+        const shaftAngle = Math.atan2(sDy, sDx);
+        let sharpTurns = 0;
+        for (let j = 0; j < k; j++) {
+          const segDx = points[j + 1].x - points[j].x;
+          const segDy = points[j + 1].y - points[j].y;
+          const segLen = Math.hypot(segDx, segDy);
+          if (segLen < 1.5) continue;
+          const segAngle = Math.atan2(segDy, segDx);
+          let diff = Math.abs(segAngle - shaftAngle);
+          if (diff > Math.PI) diff = 2 * Math.PI - diff;
+          if (diff > Math.PI * 0.35) {
+            sharpTurns++;
+          }
+        }
+
+        if (sharpTurns >= 1) {
+          const conf = Math.min(0.98, Math.max(0.72, shaftStraightness - (headLen / shaftLen) * 0.08));
+          if (conf > bestConfidenceB) {
+            bestConfidenceB = conf;
+            bestTipIdxB = k;
+          }
+        }
+      }
+
+      if (bestTipIdxB !== -1) {
+        return {
+          hasArrowHead: true,
+          confidence: bestConfidenceB,
+          tipPoint: { x: points[bestTipIdxB].x, y: points[bestTipIdxB].y },
+          tailPoint: { x: points[n - 1].x, y: points[n - 1].y },
+          atStart: true,
+        };
+      }
+    }
+
+    return defaultRes;
+  }
+
+  public detectStandaloneArrowhead(points: StrokePoint[]): {
+    isArrowHead: boolean;
+    confidence: number;
+    tipPoint: Point;
+    direction: Point;
+  } {
+    const n = points.length;
+    const defaultRes = {
+      isArrowHead: false,
+      confidence: 0,
+      tipPoint: { x: points[Math.floor(n / 2)]?.x ?? 0, y: points[Math.floor(n / 2)]?.y ?? 0 },
+      direction: { x: 1, y: 0 },
+    };
+
+    if (n < 3) return defaultRes;
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const p of points) {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    }
+    const width = maxX - minX;
+    const height = maxY - minY;
+    if (Math.max(width, height) < 6 || Math.max(width, height) > 160) {
+      return defaultRes;
+    }
+
+    let totalLen = 0;
+    for (let i = 0; i < n - 1; i++) {
+      totalLen += Math.hypot(points[i + 1].x - points[i].x, points[i + 1].y - points[i].y);
+    }
+    if (totalLen < 8 || totalLen > 320) return defaultRes;
+
+    const endDist = Math.hypot(points[n - 1].x - points[0].x, points[n - 1].y - points[0].y);
+    if (endDist < 6 && totalLen > 30) return defaultRes;
+
+    let bestCornerIdx = -1;
+    let bestAngleDiff = 0;
+    for (let i = 1; i < n - 1; i++) {
+      const dx1 = points[i].x - points[0].x;
+      const dy1 = points[i].y - points[0].y;
+      const len1 = Math.hypot(dx1, dy1);
+      const dx2 = points[n - 1].x - points[i].x;
+      const dy2 = points[n - 1].y - points[i].y;
+      const len2 = Math.hypot(dx2, dy2);
+
+      if (len1 < 3 || len2 < 3) continue;
+
+      const ratio = len1 / len2;
+      if (ratio < 0.18 || ratio > 5.5) continue;
+
+      const ang1 = Math.atan2(dy1, dx1);
+      const ang2 = Math.atan2(dy2, dx2);
+      let diff = Math.abs(ang2 - ang1);
+      if (diff > Math.PI) diff = 2 * Math.PI - diff;
+
+      if (diff >= Math.PI * 0.20 && diff <= Math.PI * 0.90) {
+        if (diff > bestAngleDiff) {
+          bestAngleDiff = diff;
+          bestCornerIdx = i;
         }
       }
     }
 
-    if (sharpTurnCount >= 1) {
+    if (bestCornerIdx !== -1) {
+      const tip = { x: points[bestCornerIdx].x, y: points[bestCornerIdx].y };
+      const baseMid = {
+        x: (points[0].x + points[n - 1].x) / 2,
+        y: (points[0].y + points[n - 1].y) / 2,
+      };
+      const dirDx = tip.x - baseMid.x;
+      const dirDy = tip.y - baseMid.y;
+      const dirLen = Math.hypot(dirDx, dirDy);
+      const direction = dirLen > 0 ? { x: dirDx / dirLen, y: dirDy / dirLen } : { x: 1, y: 0 };
+
       return {
-        hasArrowHead: true,
+        isArrowHead: true,
         confidence: 0.85,
-        tipPoint: { x: tip.x, y: tip.y },
+        tipPoint: tip,
+        direction,
       };
     }
 
-    return {
-      hasArrowHead: false,
-      confidence: 0,
-      tipPoint: { x: points[n - 1].x, y: points[n - 1].y },
-    };
+    return defaultRes;
   }
 
   private recognizeClosedStroke(

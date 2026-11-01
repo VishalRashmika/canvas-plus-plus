@@ -77,7 +77,7 @@ import { ValidationIssue } from "../../domain/entities/DiagramTypeDefinition";
 import { calculateNodeFitSize } from "../../domain/services/TextMeasurement";
 import { defaultJsonCanvasImporter } from "../../infrastructure/persistence/JsonCanvasImporter";
 import { Stereotype } from "../../domain/value-objects/Stereotype";
-import { Stroke, defaultShapeRecognizer } from "../../domain/services/ShapeRecognizer";
+import { Stroke, RecognitionResult, defaultShapeRecognizer } from "../../domain/services/ShapeRecognizer";
 import {
   defaultHandwrittenFontDetector,
   HandwrittenFontDetectionResult,
@@ -1100,18 +1100,19 @@ export class DiagramEditor {
     const s = markerStart.replace(/^uml-marker-/, "");
     const e = markerEnd.replace(/^uml-marker-/, "");
     const isDashed = lineType === "dashed" || lineType === "dotted";
+    const isArrowEnd = e === "open-arrow" || e === "arrow" || e === "arrow-open";
 
-    if (s === "diamond-hollow" && (e === "open-arrow" || e === "arrow")) return "uml.directedAggregation";
-    if (s === "diamond-filled" && (e === "open-arrow" || e === "arrow")) return "uml.directedComposition";
+    if (s === "diamond-hollow" && isArrowEnd) return "uml.directedAggregation";
+    if (s === "diamond-filled" && isArrowEnd) return "uml.directedComposition";
     if (s === "diamond-hollow" && (e === "none" || !e)) return "uml.aggregation";
     if (s === "diamond-filled" && (e === "none" || !e)) return "uml.composition";
     if ((s === "none" || !s) && (e === "triangle-hollow" || e === "triangle") && isDashed) return "uml.realization";
     if ((s === "none" || !s) && (e === "triangle-hollow" || e === "triangle")) return "uml.generalization";
-    if ((s === "none" || !s) && (e === "open-arrow" || e === "arrow") && isDashed) return "uml.dependency";
-    if ((s === "none" || !s) && (e === "open-arrow" || e === "arrow")) return "uml.directedAssociation";
+    if ((s === "none" || !s) && isArrowEnd && isDashed) return "uml.dependency";
+    if ((s === "none" || !s) && isArrowEnd) return "uml.directedAssociation";
     if ((s === "none" || !s) && (e === "none" || !e)) return "uml.association";
     if ((s === "none" || !s) && e === "triangle-filled") return "profile.extension";
-    if ((s === "none" || !s) && e === "arrow-filled") return "sequence.syncMessage";
+    if ((s === "none" || !s) && (e === "arrow-filled" || e === "filled-arrow")) return "sequence.syncMessage";
     return fallbackKind ?? "uml.association";
   }
 
@@ -1645,6 +1646,13 @@ export class DiagramEditor {
     if (!strokes || strokes.length === 0) return null;
 
     const confidenceThreshold = options?.confidenceThreshold ?? 0.65;
+
+    // 1. Check if strokes form a connection between 2 components
+    const conn = this.enhanceConnectionStrokes(strokes, []);
+    if (conn) {
+      return conn;
+    }
+
     const fontResult = defaultHandwrittenFontDetector.detect(strokes);
 
     if (
@@ -1700,6 +1708,15 @@ export class DiagramEditor {
         })),
       };
     });
+
+    // 1. First check if selected strokes form a connection between 2 components
+    const connectionResult = this.enhanceConnectionStrokes(
+      strokes,
+      freehandNodes.map((n) => n.id)
+    );
+    if (connectionResult) {
+      return connectionResult;
+    }
 
     const fontResult = defaultHandwrittenFontDetector.detect(strokes);
 
@@ -1763,6 +1780,216 @@ export class DiagramEditor {
     return null;
   }
 
+  private enhanceConnectionStrokes(
+    strokes: Stroke[],
+    freehandNodeIds: string[]
+  ): DiagramEdge | null {
+    if (!strokes || strokes.length === 0) return null;
+
+    const findStandardNode = (pt: Point, excludeId?: string): DiagramNode | null => {
+      let bestNode: DiagramNode | null = null;
+      let minDist = 160;
+      for (const node of this.diagram.nodes) {
+        if (excludeId && node.id === excludeId) continue;
+        if (freehandNodeIds.includes(node.id)) continue;
+        if (node.kind === "generic.freehand") continue;
+
+        const d = this.distanceToNode(pt, node);
+        if (d < minDist) {
+          minDist = d;
+          bestNode = node;
+        }
+      }
+      return bestNode;
+    };
+
+    // Find if any stroke or combination connects 2 standard nodes
+    let bestShaft: Stroke | null = null;
+    let fromNode: DiagramNode | null = null;
+    let toNode: DiagramNode | null = null;
+    let shaftResult: RecognitionResult | null = null;
+
+    // Sort strokes by arc length descending
+    const sortedStrokes = [...strokes].sort((a, b) => {
+      const lenA = (a.points || []).reduce(
+        (acc, p, i) => (i === 0 ? 0 : acc + Math.hypot(p.x - a.points[i - 1].x, p.y - a.points[i - 1].y)),
+        0
+      );
+      const lenB = (b.points || []).reduce(
+        (acc, p, i) => (i === 0 ? 0 : acc + Math.hypot(p.x - b.points[i - 1].x, p.y - b.points[i - 1].y)),
+        0
+      );
+      return lenB - lenA;
+    });
+
+    for (const stroke of sortedStrokes) {
+      if (!stroke.points || stroke.points.length < 2) continue;
+      const rec = defaultShapeRecognizer.recognize(stroke);
+      const sp = rec.startPoint ?? stroke.points[0];
+      const ep = rec.endPoint ?? stroke.points[stroke.points.length - 1];
+
+      const fn = findStandardNode(sp);
+      const tn = findStandardNode(ep, fn?.id);
+
+      if (fn && tn && fn.id !== tn.id) {
+        bestShaft = stroke;
+        fromNode = fn;
+        toNode = tn;
+        shaftResult = rec;
+        break;
+      }
+    }
+
+    if (!bestShaft || !fromNode || !toNode) {
+      return null;
+    }
+
+    // Check if shaft itself is an arrow or if any other stroke is an arrowhead
+    let hasArrowHead = shaftResult?.shape === "arrow";
+    let arrowPointsToTarget = true; // default points to toNode
+
+    // Check the remaining strokes for arrowheads
+    const otherStrokes = strokes.filter((s) => s.id !== bestShaft.id);
+    for (const other of otherStrokes) {
+      if (!other.points || other.points.length < 2) continue;
+      const arrowCheck = defaultShapeRecognizer.detectArrowHead(other.points);
+      const standaloneCheck = defaultShapeRecognizer.detectStandaloneArrowhead(other.points);
+
+      if (arrowCheck.hasArrowHead || standaloneCheck.isArrowHead) {
+        hasArrowHead = true;
+        const tip = standaloneCheck.isArrowHead ? standaloneCheck.tipPoint : arrowCheck.tipPoint;
+        const dToTarget = this.distanceToNode(tip, toNode);
+        const dToSource = this.distanceToNode(tip, fromNode);
+        if (dToTarget <= dToSource) {
+          arrowPointsToTarget = true;
+        } else {
+          arrowPointsToTarget = false;
+        }
+        break;
+      }
+
+      // Check if this other stroke is an arrow barb near the shaft endpoint
+      const shaftSp = shaftResult?.startPoint ?? bestShaft.points[0];
+      const shaftEp = shaftResult?.endPoint ?? bestShaft.points[bestShaft.points.length - 1];
+      const sDx = shaftEp.x - shaftSp.x;
+      const sDy = shaftEp.y - shaftSp.y;
+      const sLen = Math.hypot(sDx, sDy);
+
+      let minOtherDistToEp = Infinity;
+      let minOtherDistToSp = Infinity;
+      for (const pt of other.points) {
+        const dEp = Math.hypot(pt.x - shaftEp.x, pt.y - shaftEp.y);
+        const dSp = Math.hypot(pt.x - shaftSp.x, pt.y - shaftSp.y);
+        if (dEp < minOtherDistToEp) minOtherDistToEp = dEp;
+        if (dSp < minOtherDistToSp) minOtherDistToSp = dSp;
+      }
+
+      const oDx = other.points[other.points.length - 1].x - other.points[0].x;
+      const oDy = other.points[other.points.length - 1].y - other.points[0].y;
+      const oLen = Math.hypot(oDx, oDy);
+
+      if (sLen > 20 && oLen >= 5 && oLen <= 90) {
+        const angS = Math.atan2(sDy, sDx);
+        const angO = Math.atan2(oDy, oDx);
+        let angDiff = Math.abs(angO - angS);
+        if (angDiff > Math.PI) angDiff = 2 * Math.PI - angDiff;
+        const isDiagonalBarb =
+          (angDiff >= Math.PI * 0.08 && angDiff <= Math.PI * 0.48) ||
+          (angDiff >= Math.PI * 0.52 && angDiff <= Math.PI * 0.92);
+
+        if (minOtherDistToEp <= 45 && isDiagonalBarb) {
+          hasArrowHead = true;
+          arrowPointsToTarget = true;
+          break;
+        } else if (minOtherDistToSp <= 45 && isDiagonalBarb) {
+          hasArrowHead = true;
+          arrowPointsToTarget = false;
+          break;
+        }
+      }
+    }
+
+    const sourceNode = arrowPointsToTarget ? fromNode : toNode;
+    const targetNode = arrowPointsToTarget ? toNode : fromNode;
+
+    const dt = this.diagram.diagramType;
+    let edgeKind = "uml.directedAssociation";
+    if (hasArrowHead) {
+      switch (dt) {
+        case "uml.activity":
+        case "uml.interactionOverview":
+          edgeKind = "activity.controlFlow";
+          break;
+        case "uml.stateMachine":
+          edgeKind = "state.transition";
+          break;
+        case "uml.sequence":
+          edgeKind = "sequence.syncMessage";
+          break;
+        case "uml.class":
+        default:
+          edgeKind = "uml.directedAssociation";
+      }
+    } else {
+      edgeKind = this.activeEdgeKind ?? "uml.association";
+    }
+
+    const sourceCenter = {
+      x: sourceNode.position.x + sourceNode.size.width / 2,
+      y: sourceNode.position.y + sourceNode.size.height / 2,
+    };
+    const targetCenter = {
+      x: targetNode.position.x + targetNode.size.width / 2,
+      y: targetNode.position.y + targetNode.size.height / 2,
+    };
+
+    const fromSide = getFacingSide(sourceNode.position, sourceNode.size, targetCenter);
+    const toSide = getFacingSide(targetNode.position, targetNode.size, sourceCenter);
+
+    const fromPort = sourceNode.ports?.find((p) => p.side === fromSide);
+    const toPort = targetNode.ports?.find((p) => p.side === toSide);
+
+    const newEdge = createDiagramEdge({
+      id: `edge-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      kind: edgeKind,
+      fromNodeId: sourceNode.id,
+      toNodeId: targetNode.id,
+      fromSide,
+      toSide,
+      fromPortId: fromPort?.id,
+      toPortId: toPort?.id,
+      routing: this.defaultRouting,
+      style: hasArrowHead
+        ? {
+            markerEnd: "open-arrow",
+            lineType: "solid",
+            dashed: false,
+            strokeDasharray: undefined,
+          }
+        : {
+            markerEnd: "none",
+            markerStart: "none",
+            lineType: "solid",
+            dashed: false,
+            strokeDasharray: undefined,
+          },
+    });
+
+    if (freehandNodeIds.length > 0) {
+      const deleteCmd = new DeleteNodesAndEdgesCommand(this.diagram, freehandNodeIds);
+      const addCmd = new AddEdgeCommand(this.diagram, newEdge);
+      const compound = new CompoundCommand([deleteCmd, addCmd], "Enhance strokes to connector");
+      this.commandStack.execute(compound);
+    } else {
+      const addCmd = new AddEdgeCommand(this.diagram, newEdge);
+      this.commandStack.execute(addCmd);
+    }
+
+    this.selectEdge(newEdge.id, false);
+    this.notify();
+    return newEdge;
+  }
+
   snapStrokeToShape(
     stroke: Stroke,
     optionsOrThreshold: {
@@ -1812,11 +2039,14 @@ export class DiagramEditor {
     // 1. Handdrawn Connection Line between 2 components (Issue #5)
     // If user drew a line or stroke between two components, connect them directly
     if (!isClosedShape && stroke.points && stroke.points.length >= 2) {
-      const fromNode = this.findNearestNode(sp, 140);
-      const toNode = this.findNearestNode(ep, 140, fromNode?.id);
+      const startPt = result.shape === "arrow" && result.startPoint ? result.startPoint : sp;
+      const endPt = result.shape === "arrow" && result.endPoint ? result.endPoint : ep;
+
+      const fromNode = this.findNearestNode(startPt, 150);
+      const toNode = this.findNearestNode(endPt, 150, fromNode?.id);
 
       if (fromNode && toNode && fromNode.id !== toNode.id) {
-        let edgeKind = "uml.association";
+        let edgeKind = "uml.directedAssociation";
         if (result.shape === "arrow") {
           switch (dt) {
             case "uml.activity":
@@ -1826,15 +2056,12 @@ export class DiagramEditor {
             case "uml.stateMachine":
               edgeKind = "state.transition";
               break;
-            case "uml.package":
-              edgeKind = "package.dependency";
-              break;
-            case "uml.profile":
-              edgeKind = "profile.extension";
+            case "uml.sequence":
+              edgeKind = "sequence.syncMessage";
               break;
             case "uml.class":
             default:
-              edgeKind = "uml.dependency";
+              edgeKind = "uml.directedAssociation";
           }
         } else {
           switch (dt) {
@@ -1866,20 +2093,23 @@ export class DiagramEditor {
           y: toNode.position.y + toNode.size.height / 2,
         };
 
-        const distFromCenter = Math.hypot(sp.x - fromCenter.x, sp.y - fromCenter.y);
-        const distToCenter = Math.hypot(ep.x - toCenter.x, ep.y - toCenter.y);
+        const distFromCenter = Math.hypot(startPt.x - fromCenter.x, startPt.y - fromCenter.y);
+        const distToCenter = Math.hypot(endPt.x - toCenter.x, endPt.y - toCenter.y);
 
         const fromSide: Side =
           distFromCenter > 20
-            ? getFacingSide(fromNode.position, fromNode.size, sp)
+            ? getFacingSide(fromNode.position, fromNode.size, startPt)
             : getFacingSide(fromNode.position, fromNode.size, toCenter);
         const toSide: Side =
           distToCenter > 20
-            ? getFacingSide(toNode.position, toNode.size, ep)
+            ? getFacingSide(toNode.position, toNode.size, endPt)
             : getFacingSide(toNode.position, toNode.size, fromCenter);
 
         const fromPort = fromNode.ports?.find((p) => p.side === fromSide);
         const toPort = toNode.ports?.find((p) => p.side === toSide);
+
+        const isArrow = result.shape === "arrow";
+        const isCustomKind = !isArrow && this.activeEdgeKind && this.activeEdgeKind !== "uml.association";
 
         return this.addEdge(fromNode.id, toNode.id, {
           kind: edgeKind,
@@ -1887,7 +2117,31 @@ export class DiagramEditor {
           toSide,
           fromPortId: fromPort?.id,
           toPortId: toPort?.id,
+          style: isArrow
+            ? {
+                markerEnd: "open-arrow",
+                lineType: "solid",
+                dashed: false,
+                strokeDasharray: undefined,
+              }
+            : isCustomKind
+            ? undefined
+            : {
+                markerEnd: "none",
+                markerStart: "none",
+                lineType: "solid",
+                dashed: false,
+                strokeDasharray: undefined,
+              },
         });
+      }
+    }
+
+    // 1b. Check if user drew an arrowhead attached to an existing edge
+    if (!isClosedShape && stroke.points && stroke.points.length >= 2) {
+      const attachedEdge = this.attachArrowHeadToExistingEdge(stroke);
+      if (attachedEdge) {
+        return attachedEdge;
       }
     }
 
@@ -2054,6 +2308,103 @@ export class DiagramEditor {
     }
 
     return null;
+  }
+
+  attachArrowHeadToExistingEdge(stroke: Stroke): DiagramEdge | null {
+    if (!stroke.points || stroke.points.length < 2) return null;
+
+    const arrowCheck = defaultShapeRecognizer.detectArrowHead(stroke.points);
+    const standaloneCheck = defaultShapeRecognizer.detectStandaloneArrowhead(stroke.points);
+
+    let isBarb = false;
+    let tip: Point;
+
+    if (standaloneCheck.isArrowHead) {
+      tip = standaloneCheck.tipPoint;
+    } else if (arrowCheck.hasArrowHead) {
+      tip = arrowCheck.tipPoint;
+    } else {
+      const pStart = stroke.points[0];
+      const pEnd = stroke.points[stroke.points.length - 1];
+      const strokeLen = Math.hypot(pEnd.x - pStart.x, pEnd.y - pStart.y);
+      if (strokeLen >= 6 && strokeLen <= 85) {
+        isBarb = true;
+        tip = pEnd;
+      } else {
+        return null;
+      }
+    }
+
+    let bestEdge: DiagramEdge | null = null;
+    let bestDist = 120;
+    let targetEnd = true; // true = markerEnd, false = markerStart
+
+    for (const edge of this.diagram.edges) {
+      const fromNode = this.diagram.nodes.find((n) => n.id === edge.fromNodeId);
+      const toNode = this.diagram.nodes.find((n) => n.id === edge.toNodeId);
+      if (!fromNode || !toNode) continue;
+
+      const fromCenter = {
+        x: fromNode.position.x + fromNode.size.width / 2,
+        y: fromNode.position.y + fromNode.size.height / 2,
+      };
+      const toCenter = {
+        x: toNode.position.x + toNode.size.width / 2,
+        y: toNode.position.y + toNode.size.height / 2,
+      };
+
+      let checkPt = tip;
+      if (isBarb) {
+        // For a barb, pick the stroke point closest to the node center
+        const p1 = stroke.points[0];
+        const p2 = stroke.points[stroke.points.length - 1];
+        const d1 = Math.min(Math.hypot(p1.x - toCenter.x, p1.y - toCenter.y), Math.hypot(p1.x - fromCenter.x, p1.y - fromCenter.y));
+        const d2 = Math.min(Math.hypot(p2.x - toCenter.x, p2.y - toCenter.y), Math.hypot(p2.x - fromCenter.x, p2.y - fromCenter.y));
+        checkPt = d1 < d2 ? p1 : p2;
+      }
+
+      const dToCenter = Math.hypot(checkPt.x - toCenter.x, checkPt.y - toCenter.y);
+      const dFromCenter = Math.hypot(checkPt.x - fromCenter.x, checkPt.y - fromCenter.y);
+      const dToNode = this.distanceToNode(checkPt, toNode);
+      const dFromNode = this.distanceToNode(checkPt, fromNode);
+
+      const effectiveDistTo = Math.min(dToCenter, dToNode);
+      const effectiveDistFrom = Math.min(dFromCenter, dFromNode);
+
+      if (effectiveDistTo < bestDist && effectiveDistTo <= effectiveDistFrom) {
+        bestDist = effectiveDistTo;
+        bestEdge = edge;
+        targetEnd = true;
+      } else if (effectiveDistFrom < bestDist) {
+        bestDist = effectiveDistFrom;
+        bestEdge = edge;
+        targetEnd = false;
+      }
+    }
+
+    if (!bestEdge) return null;
+
+    const newKind =
+      bestEdge.kind === "uml.association" || bestEdge.kind === "uml.dependency"
+        ? "uml.directedAssociation"
+        : bestEdge.kind;
+
+    const styleUpdates: Partial<EdgeStyle> = {
+      lineType: "solid",
+      dashed: false,
+      strokeDasharray: undefined,
+    };
+
+    if (targetEnd) {
+      styleUpdates.markerEnd = "open-arrow";
+    } else {
+      styleUpdates.markerStart = "open-arrow";
+    }
+
+    this.updateEdgeStyle(bestEdge.id, styleUpdates, newKind);
+    this.selectEdge(bestEdge.id, false);
+    this.notify();
+    return bestEdge;
   }
 
   private distanceToNode(pt: Point, node: DiagramNode): number {

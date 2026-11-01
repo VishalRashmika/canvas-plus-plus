@@ -415,6 +415,11 @@ describe("Issue #17 & #18: Hand Drawn Shapes, Auto Connection & Object Managemen
       expect(result).toBeDefined();
       expect(result.fromNodeId).toBe(nodeA.id);
       expect(result.toNodeId).toBe(nodeB.id);
+      expect(result.kind).toBe("uml.directedAssociation");
+      expect(result.style?.markerEnd).toBe("open-arrow");
+      expect(result.style?.lineType).toBe("solid");
+      expect(result.style?.dashed).toBe(false);
+      expect(result.style?.strokeDasharray).toBeUndefined();
     });
 
     it("should automatically connect two components when drawing a slightly curved or wobbly handdrawn line between them", () => {

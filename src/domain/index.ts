@@ -20,3 +20,4 @@ export * from "./entities/DiagramTypeDefinition";
 export * from "./services/ChipService";
 export * from "./services/CustomChipRegistry";
 export * from "./services/ShapeRecognizer";
+export * from "./services/HandwrittenFontDetector";

@@ -282,7 +282,11 @@ export class UmlCanvasView extends TextFileView {
         if (autoDetect) {
           const result = this.editor.snapStrokeToShape(stroke);
           if (result) {
-            this.showFreehandEscapeHatch(stroke);
+            const isText = (result as DiagramNode).kind === "generic.text";
+            this.showFreehandEscapeHatch(
+              stroke,
+              isText ? "Handwriting recognized" : "Shape recognized"
+            );
           } else {
             this.editor.keepAsFreehand(stroke);
           }
@@ -467,6 +471,9 @@ export class UmlCanvasView extends TextFileView {
       } else if (!mod && (e.key === "m" || e.key === "M") && !isInput) {
         e.preventDefault();
         this.minimap?.toggle();
+      } else if (e.shiftKey && (e.key === "E" || e.key === "e") && !isInput) {
+        e.preventDefault();
+        this.editor?.enhanceSelection();
       }
     });
 
@@ -500,7 +507,7 @@ export class UmlCanvasView extends TextFileView {
     void this.loadVaultNotesContent();
   }
 
-  showFreehandEscapeHatch(stroke: Stroke): void {
+  showFreehandEscapeHatch(stroke: Stroke, message = "Shape recognized"): void {
     if (this.escapeHatchEl) {
       this.escapeHatchEl.remove();
       this.escapeHatchEl = null;
@@ -513,7 +520,7 @@ export class UmlCanvasView extends TextFileView {
     if (!this.rootEl) return;
 
     const toast = this.rootEl.createDiv({ cls: "umlcanvas-escape-hatch-toast" });
-    toast.createSpan({ text: "Shape recognized" });
+    toast.createSpan({ text: message });
     const btn = toast.createEl("button", {
       cls: "umlcanvas-escape-hatch-btn",
       text: "Keep as freehand",
@@ -775,6 +782,23 @@ export class UmlCanvasView extends TextFileView {
             this.editor?.toggleNodeLock(node.id);
           });
       });
+
+      const hasFreehand =
+        node.kind === "generic.freehand" ||
+        (this.editor?.selectedNodeIds.some(
+          (id) => this.editor?.diagram.nodes.find((n) => n.id === id)?.kind === "generic.freehand"
+        ) ?? false);
+
+      if (hasFreehand) {
+        menu.addItem((item) => {
+          item
+            .setTitle("Enhance handwriting to text (Sparkles)")
+            .setIcon("sparkles")
+            .onClick(() => {
+              this.editor?.enhanceSelection();
+            });
+        });
+      }
 
       if (node.kind === "generic.image") {
         menu.addItem((item) => {

@@ -29,6 +29,7 @@ export interface NodeStyle {
 export interface DiagramNode {
   readonly id: Id;
   kind: ShapeKind;
+  title?: string;
   position: Point;
   size: Size;
   ports: Port[];
@@ -53,6 +54,7 @@ export interface DiagramNode {
 export function createDiagramNode(params: {
   id: Id;
   kind?: ShapeKind;
+  title?: string;
   position?: Point;
   size?: Size;
   ports?: Port[];
@@ -68,6 +70,7 @@ export function createDiagramNode(params: {
   return {
     id: params.id,
     kind: params.kind ?? "generic.rectangle",
+    title: params.title ?? params.labels?.[0]?.text,
     position: params.position ?? { x: 0, y: 0 },
     size: params.size ?? { width: 100, height: 60 },
     ports: params.ports ?? [],

@@ -69,6 +69,7 @@ export class Toolbar {
   private colorIndicatorEl!: HTMLElement;
   private labelBtn!: HTMLButtonElement;
   private autoFitBtn!: HTMLButtonElement;
+  private enhanceBtn!: HTMLButtonElement;
   private alignBtn!: HTMLButtonElement;
   private groupBtn!: HTMLButtonElement;
   private ungroupBtn!: HTMLButtonElement;
@@ -742,6 +743,17 @@ export class Toolbar {
     );
     this.contextGroup.appendChild(this.autoFitBtn);
 
+    // Enhance Handwriting to Text / Shape
+    this.enhanceBtn = this.createButton(
+      "Enhance Handwriting / Shape (Shift+E)",
+      "",
+      () => {
+        this.editor.enhanceSelection();
+      },
+      "sparkles"
+    );
+    this.contextGroup.appendChild(this.enhanceBtn);
+
     // Align & Distribute
     this.alignBtn = this.createButton(
       "Align & Distribute Selected Nodes",
@@ -1255,6 +1267,13 @@ export class Toolbar {
       // Auto-fit button (node selected)
       this.autoFitBtn.disabled = selectedNodeCount === 0;
       this.autoFitBtn.classList.toggle("is-hidden", selectedNodeCount === 0);
+
+      // Enhance button (visible when freehand nodes are selected)
+      const hasFreehandSelected = this.editor.diagram.nodes.some(
+        (n) => this.editor.selectedNodeIds.includes(n.id) && n.kind === "generic.freehand"
+      );
+      this.enhanceBtn.disabled = !hasFreehandSelected;
+      this.enhanceBtn.classList.toggle("is-hidden", !hasFreehandSelected);
 
       // Align & Distribute (2+ nodes selected)
       this.alignBtn.disabled = selectedNodeCount < 2;

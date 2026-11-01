@@ -79,6 +79,10 @@ import { defaultJsonCanvasImporter } from "../../infrastructure/persistence/Json
 import { Stereotype } from "../../domain/value-objects/Stereotype";
 import { Stroke, defaultShapeRecognizer } from "../../domain/services/ShapeRecognizer";
 import {
+  defaultHandwrittenFontDetector,
+  HandwrittenFontDetectionResult,
+} from "../../domain/services/HandwrittenFontDetector";
+import {
   SequenceLayoutOptions,
   SequenceLayoutResult,
 } from "../../domain/services/SequenceLayoutEngine";
@@ -238,6 +242,16 @@ export class DiagramEditor {
       this.selectedGroupIdSet.clear();
     }
     this.selectedNodeIdSet.add(id);
+    this.notify();
+  }
+
+  selectNodes(ids: string[]): void {
+    this.selectedNodeIdSet.clear();
+    this.selectedEdgeIdSet.clear();
+    this.selectedGroupIdSet.clear();
+    for (const id of ids) {
+      this.selectedNodeIdSet.add(id);
+    }
     this.notify();
   }
 
@@ -1618,6 +1632,137 @@ export class DiagramEditor {
     return this.addFreehandNode(stroke);
   }
 
+  // --- Handwritten Font & Text Detection (F-074) ---
+
+  recognizeHandwrittenText(strokes: Stroke | Stroke[]): HandwrittenFontDetectionResult {
+    return defaultHandwrittenFontDetector.detect(strokes);
+  }
+
+  enhanceStrokes(
+    strokes: Stroke[],
+    options?: { confidenceThreshold?: number }
+  ): DiagramNode | DiagramEdge | null {
+    if (!strokes || strokes.length === 0) return null;
+
+    const confidenceThreshold = options?.confidenceThreshold ?? 0.65;
+    const fontResult = defaultHandwrittenFontDetector.detect(strokes);
+
+    if (
+      fontResult.isText &&
+      fontResult.confidence >= confidenceThreshold &&
+      fontResult.text.trim().length > 0
+    ) {
+      const paddingX = 24;
+      const paddingY = 16;
+      const width = Math.max(70, Math.round(fontResult.bounds.size.width + paddingX));
+      const height = Math.max(34, Math.round(fontResult.bounds.size.height + paddingY));
+
+      const node = this.addNode({
+        kind: "generic.text",
+        title: fontResult.text,
+        position: {
+          x: Math.round(fontResult.bounds.position.x),
+          y: Math.round(fontResult.bounds.position.y),
+        },
+        size: { width, height },
+        style: {
+          fontFamily: fontResult.fontFamily,
+          fontSize: fontResult.estimatedFontSize,
+        },
+      });
+
+      return node;
+    }
+
+    if (strokes.length === 1) {
+      return this.snapStrokeToShape(strokes[0], { confidenceThreshold });
+    }
+
+    return null;
+  }
+
+  enhanceSelection(): DiagramNode | DiagramNode[] | DiagramEdge | null {
+    if (this.selectedNodeIds.length === 0) return null;
+
+    const freehandNodes = this.diagram.nodes.filter(
+      (n) => this.selectedNodeIds.includes(n.id) && n.kind === "generic.freehand"
+    );
+
+    if (freehandNodes.length === 0) return null;
+
+    const strokes: Stroke[] = freehandNodes.map((n) => {
+      const pts = (n.customData?.points as Point[]) || [];
+      return {
+        id: n.id,
+        points: pts.map((p) => ({
+          x: n.position.x + p.x,
+          y: n.position.y + p.y,
+        })),
+      };
+    });
+
+    const fontResult = defaultHandwrittenFontDetector.detect(strokes);
+
+    if (fontResult.isText && fontResult.text.trim().length > 0) {
+      const paddingX = 24;
+      const paddingY = 16;
+      const width = Math.max(70, Math.round(fontResult.bounds.size.width + paddingX));
+      const height = Math.max(34, Math.round(fontResult.bounds.size.height + paddingY));
+
+      const newNode = createDiagramNode({
+        id: `text-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        kind: "generic.text",
+        title: fontResult.text,
+        position: {
+          x: Math.round(fontResult.bounds.position.x),
+          y: Math.round(fontResult.bounds.position.y),
+        },
+        size: { width, height },
+        labels: [
+          {
+            id: `label-${Date.now()}`,
+            text: fontResult.text,
+            anchor: "node",
+            position: { x: 0, y: 0 },
+            style: {
+              fontFamily: fontResult.fontFamily,
+              fontSize: fontResult.estimatedFontSize,
+            },
+          },
+        ],
+        style: {
+          fontFamily: fontResult.fontFamily,
+          fontSize: fontResult.estimatedFontSize,
+        },
+      });
+
+      const deleteCmd = new DeleteNodesAndEdgesCommand(
+        this.diagram,
+        freehandNodes.map((n) => n.id)
+      );
+      const addCmd = new AddNodeCommand(this.diagram, newNode);
+      const compound = new CompoundCommand([deleteCmd, addCmd], "Enhance handwriting to text");
+      this.commandStack.execute(compound);
+
+      this.selectNode(newNode.id, false);
+      this.notify();
+      return newNode;
+    }
+
+    // If single stroke that is a shape
+    if (strokes.length === 1) {
+      const shapeResult = this.snapStrokeToShape(strokes[0]);
+      if (shapeResult) {
+        const deleteCmd = new DeleteNodesAndEdgesCommand(this.diagram, [freehandNodes[0].id]);
+        this.commandStack.execute(deleteCmd);
+        this.notify();
+        return shapeResult;
+      }
+    }
+
+    return null;
+  }
+
   snapStrokeToShape(
     stroke: Stroke,
     optionsOrThreshold: {
@@ -1744,6 +1889,36 @@ export class DiagramEditor {
           toPortId: toPort?.id,
         });
       }
+    }
+
+    // 2. Check for handwritten letter/word detection when not connecting components
+    const fontResult = defaultHandwrittenFontDetector.detect(stroke);
+    if (
+      fontResult.isText &&
+      fontResult.confidence >= confidenceThreshold &&
+      fontResult.text.trim().length > 0 &&
+      fontResult.text !== "O" &&
+      result.shape !== "line" &&
+      result.shape !== "arrow"
+    ) {
+      const paddingX = 20;
+      const paddingY = 14;
+      const width = Math.max(50, Math.round(fontResult.bounds.size.width + paddingX));
+      const height = Math.max(30, Math.round(fontResult.bounds.size.height + paddingY));
+
+      return this.addNode({
+        kind: "generic.text",
+        title: fontResult.text,
+        position: {
+          x: Math.round(fontResult.bounds.position.x),
+          y: Math.round(fontResult.bounds.position.y),
+        },
+        size: { width, height },
+        style: {
+          fontFamily: fontResult.fontFamily,
+          fontSize: fontResult.estimatedFontSize,
+        },
+      });
     }
 
     if (result.confidence < confidenceThreshold || result.shape === "none") {

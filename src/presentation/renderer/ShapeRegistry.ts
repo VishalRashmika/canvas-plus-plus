@@ -194,6 +194,9 @@ export class ShapeRegistry {
     // Freehand Stroke (F-073)
     this.register(this.createGenericFreehandShape());
 
+    // Text Shape (Handwriting & Typography)
+    this.register(this.createGenericTextShape());
+
     // Common Shapes (General-purpose)
     this.register(this.createGenericCircleShape());
     this.register(this.createGenericEllipseShape());
@@ -3766,6 +3769,87 @@ export class ShapeRegistry {
             getNodeFontStyle(node),
             svgNS
           );
+        }
+
+        return group;
+      },
+    };
+  }
+
+  private createGenericTextShape(): ShapeDefinition {
+    return {
+      kind: "generic.text",
+      displayName: "Text",
+      defaultSize: { width: 140, height: 40 },
+      getPorts(node: DiagramNode): Port[] {
+        if (node.ports && node.ports.length > 0) return node.ports;
+        const sides: Side[] = ["top", "right", "bottom", "left"];
+        return sides.map((side) => ({
+          id: `${node.id}-port-${side}`,
+          ownerNodeId: node.id,
+          name: side,
+          side,
+          offset: 0.5,
+          direction: "inout",
+        }));
+      },
+      getBoundaryPoint(node: DiagramNode, targetPoint: Point): Point {
+        return getRectPerimeterIntersection(
+          { position: node.position, size: node.size },
+          targetPoint
+        );
+      },
+      renderSvg(node: DiagramNode, context: RenderContext): SVGElement {
+        const svgNS = "http://www.w3.org/2000/svg";
+        const group = document.createElementNS(svgNS, "g");
+        group.setAttribute("class", "umlcanvas-shape-text");
+
+        const w = node.size.width;
+        const h = node.size.height;
+
+        // Transparent background rectangle with selection border
+        const rect = document.createElementNS(svgNS, "rect");
+        rect.setAttribute("x", "0");
+        rect.setAttribute("y", "0");
+        rect.setAttribute("width", String(w));
+        rect.setAttribute("height", String(h));
+        rect.setAttribute(
+          "class",
+          context.isSelected
+            ? "umlcanvas-text-hitbox umlcanvas-node-selected"
+            : "umlcanvas-text-hitbox"
+        );
+        rect.setAttribute("fill", "transparent");
+        if (context.isSelected) {
+          rect.setAttribute("stroke", "var(--interactive-accent, #3b82f6)");
+          rect.setAttribute("stroke-width", "1.5");
+          rect.setAttribute("stroke-dasharray", "4 3");
+        } else {
+          rect.setAttribute("stroke", "none");
+        }
+        group.appendChild(rect);
+
+        // Render text
+        const textContent = node.labels[0]?.text ?? node.title ?? "";
+        if (textContent) {
+          const nodeFont = getNodeFontStyle(node);
+          const fontSize = nodeFont.fontSize ?? 16;
+          const lineSpacing = Math.round(fontSize * 1.35);
+          const lines = textContent.split("\n");
+          let lineY = Math.max(fontSize, Math.round(fontSize * 1.05));
+
+          for (let i = 0; i < lines.length; i++) {
+            const textEl = document.createElementNS(svgNS, "text");
+            textEl.setAttribute("x", "4");
+            textEl.setAttribute("y", String(lineY));
+            textEl.setAttribute("class", "umlcanvas-text-body");
+            textEl.textContent = lines[i] || " ";
+            const strokeColor = node.style?.strokeColor || node.style?.color || "currentColor";
+            textEl.setAttribute("fill", strokeColor);
+            applyFontToSvgElement(textEl, nodeFont);
+            group.appendChild(textEl);
+            lineY += lineSpacing;
+          }
         }
 
         return group;

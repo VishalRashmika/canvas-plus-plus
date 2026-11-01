@@ -348,7 +348,7 @@ export class SvgSceneRenderer {
             y: Math.round(canvasPoint.y - shapeDef.defaultSize.height / 2),
           },
           size: { ...shapeDef.defaultSize },
-          title: shapeDef.displayName,
+          title: shapeDef.defaultTitle ?? shapeDef.displayName,
         });
         this.editor.selectNode(node.id, false);
         return;
@@ -371,7 +371,7 @@ export class SvgSceneRenderer {
             y: Math.round(canvasPoint.y - shapeDef.defaultSize.height / 2),
           },
           size: { ...shapeDef.defaultSize },
-          title: shapeDef.displayName,
+          title: shapeDef.defaultTitle ?? shapeDef.displayName,
         });
         this.editor.selectNode(node.id, false);
       }
@@ -3114,7 +3114,7 @@ export class SvgSceneRenderer {
         x: Math.round(canvasPoint.x - 80),
         y: Math.round(canvasPoint.y - 50),
       },
-      title: "New Class",
+      title: "Node",
     });
 
     // Auto-containment: if double-clicked inside an expanded group, add to group

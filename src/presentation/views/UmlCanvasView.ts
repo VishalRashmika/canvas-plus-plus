@@ -492,7 +492,7 @@ export class UmlCanvasView extends TextFileView {
                 const dataUrl = reader.result as string;
                 void this.addImageToCanvas({
                   src: dataUrl,
-                  title: "Pasted Photo",
+                  title: "Image",
                 });
               };
               reader.readAsDataURL(blob);
@@ -1313,7 +1313,7 @@ export class UmlCanvasView extends TextFileView {
                 x: Math.round(canvasPoint.x - 70),
                 y: Math.round(canvasPoint.y - 40),
               },
-              title: "New Node",
+              title: "Node",
             });
           });
       });
@@ -1329,7 +1329,7 @@ export class UmlCanvasView extends TextFileView {
                 y: Math.round(canvasPoint.y - 100),
               },
               size: { width: 300, height: 200 },
-              name: "New Group",
+              name: "Group",
             });
           });
       });

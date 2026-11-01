@@ -329,7 +329,7 @@ export class Toolbar {
     }
   }
 
-  public addImageAtCenter(src = "", title = "Photo Title"): void {
+  public addImageAtCenter(src = "", title = "Image"): void {
     const transform = this.renderer.currentTransform;
     const centerScreen = {
       x: this.container.clientWidth / 2,
@@ -1052,7 +1052,7 @@ export class Toolbar {
       "Rectangle (R)",
       "",
       () => {
-        this.addShapeAtCenter("generic.rectangle", "Rectangle", {
+        this.addShapeAtCenter("generic.rectangle", "Node", {
           width: 140,
           height: 80,
         });

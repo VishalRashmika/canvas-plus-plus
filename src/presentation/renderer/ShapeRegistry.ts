@@ -72,6 +72,7 @@ export interface RenderContext {
 export interface ShapeDefinition {
   kind: string;
   displayName: string;
+  defaultTitle?: string;
   defaultSize: Size;
   getPorts(node: DiagramNode): Port[];
   getBoundaryPoint(node: DiagramNode, targetPoint: Point): Point;
@@ -227,6 +228,7 @@ export class ShapeRegistry {
     return {
       kind: "generic.rectangle",
       displayName: "Rectangle",
+      defaultTitle: "Node",
       defaultSize: { width: 140, height: 80 },
       getPorts(node: DiagramNode): Port[] {
         if (node.ports && node.ports.length > 0) {
@@ -302,12 +304,15 @@ export class ShapeRegistry {
     kind?: string;
     displayName?: string;
     defaultStereotype?: string;
+    defaultTitle?: string;
   }): ShapeDefinition {
     const kind = options?.kind ?? "uml.class";
     const displayName = options?.displayName ?? "Class";
+    const defaultTitle = options?.defaultTitle ?? displayName;
     return {
       kind,
       displayName,
+      defaultTitle,
       defaultSize: { width: 160, height: 100 },
       getPorts(node: DiagramNode): Port[] {
         if (node.ports && node.ports.length > 0) {
@@ -1045,6 +1050,7 @@ export class ShapeRegistry {
     return {
       kind: "generic.image",
       displayName: "Photo Frame Image",
+      defaultTitle: "Image",
       defaultSize: { width: 220, height: 260 },
       getPorts(node: DiagramNode): Port[] {
         if (node.ports && node.ports.length > 0) return node.ports;
@@ -2259,6 +2265,7 @@ export class ShapeRegistry {
     return {
       kind: "uml.lollipop",
       displayName: "Interface (Provided)",
+      defaultTitle: "Interface",
       defaultSize: { width: 28, height: 28 },
       getPorts(node: DiagramNode): Port[] {
         if (node.ports && node.ports.length > 0) return node.ports;
@@ -2323,6 +2330,7 @@ export class ShapeRegistry {
     return {
       kind: "uml.socket",
       displayName: "Interface (Required)",
+      defaultTitle: "Interface",
       defaultSize: { width: 28, height: 28 },
       getPorts(node: DiagramNode): Port[] {
         if (node.ports && node.ports.length > 0) return node.ports;
@@ -2389,6 +2397,7 @@ export class ShapeRegistry {
     return {
       kind: "uml.componentPort",
       displayName: "Port",
+      defaultTitle: "Port",
       defaultSize: { width: 16, height: 16 },
       getPorts(node: DiagramNode): Port[] {
         if (node.ports && node.ports.length > 0) return node.ports;
@@ -2444,14 +2453,17 @@ export class ShapeRegistry {
     kind?: string;
     displayName?: string;
     defaultStereotype?: string;
+    defaultTitle?: string;
   }): ShapeDefinition {
     const kind = options?.kind ?? "uml.node3d";
     const displayName = options?.displayName ?? "Node (3D Box)";
+    const defaultTitle = options?.defaultTitle ?? (kind === "uml.node3d" ? "Node" : displayName);
     const defStereotype = options?.defaultStereotype ?? "device";
 
     return {
       kind,
       displayName,
+      defaultTitle,
       defaultSize: { width: 160, height: 110 },
       getPorts(node: DiagramNode): Port[] {
         if (node.ports && node.ports.length > 0) return node.ports;
@@ -3056,6 +3068,7 @@ export class ShapeRegistry {
     return {
       kind: "uml.compositeClassifier",
       displayName: "Composite Classifier",
+      defaultTitle: "Classifier",
       defaultSize: { width: 280, height: 180 },
       getPorts: (node: DiagramNode): Port[] => this.getDefaultPorts(node),
       getBoundaryPoint: (node: DiagramNode, targetPoint: Point): Point =>
@@ -3166,6 +3179,7 @@ export class ShapeRegistry {
     return {
       kind: "interaction.frame",
       displayName: "Interaction Frame",
+      defaultTitle: "Frame",
       defaultSize: { width: 240, height: 160 },
       getPorts: (node: DiagramNode): Port[] => this.getDefaultPorts(node),
       getBoundaryPoint: (node: DiagramNode, targetPoint: Point): Point =>
@@ -3264,6 +3278,7 @@ export class ShapeRegistry {
     return {
       kind: "interaction.occurrence",
       displayName: "Interaction Occurrence",
+      defaultTitle: "Occurrence",
       defaultSize: { width: 140, height: 70 },
       getPorts: (node: DiagramNode): Port[] => this.getDefaultPorts(node),
       getBoundaryPoint: (node: DiagramNode, targetPoint: Point): Point =>
@@ -3864,6 +3879,7 @@ export class ShapeRegistry {
     return {
       kind: "generic.table",
       displayName: "Table",
+      defaultTitle: "",
       defaultSize: { width: 300, height: 180 },
       getPorts(node: DiagramNode): Port[] {
         if (node.ports && node.ports.length > 0) return node.ports;

@@ -857,7 +857,7 @@ export class PalettePanel {
         y: Math.round(canvasY - shapeDef.defaultSize.height / 2),
       },
       size: { ...shapeDef.defaultSize },
-      title: shapeDef.displayName,
+      title: shapeDef.defaultTitle ?? shapeDef.displayName,
     });
     this.editor.selectNode(node.id, false);
   }

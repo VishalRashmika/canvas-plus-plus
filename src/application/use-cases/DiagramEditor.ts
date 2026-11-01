@@ -386,12 +386,109 @@ export class DiagramEditor {
 
   // --- Node CRUD ---
 
+  public getDefaultTitleForKind(kind: string): string {
+    switch (kind) {
+      case "generic.rectangle":
+        return "Node";
+      case "uml.class":
+        return "Class";
+      case "uml.interface":
+        return "Interface";
+      case "uml.abstractClass":
+        return "Abstract Class";
+      case "uml.enumeration":
+        return "Enumeration";
+      case "uml.object":
+        return "Object";
+      case "uml.actor":
+        return "Actor";
+      case "uml.useCase":
+      case "uml.usecase":
+        return "Use Case";
+      case "uml.systemBoundary":
+        return "System Boundary";
+      case "uml.component":
+        return "Component";
+      case "uml.package":
+        return "Package";
+      case "uml.node3d":
+        return "Node";
+      case "uml.device":
+        return "Device";
+      case "uml.executionEnvironment":
+        return "Execution Environment";
+      case "uml.artifact":
+        return "Artifact";
+      case "uml.compositeClassifier":
+        return "Classifier";
+      case "uml.part":
+        return "Part";
+      case "uml.stereotype":
+        return "Stereotype";
+      case "uml.metaclass":
+        return "Metaclass";
+      case "uml.lollipop":
+      case "uml.socket":
+        return "Interface";
+      case "uml.componentPort":
+        return "Port";
+      case "activity.action":
+        return "Action";
+      case "activity.decision":
+        return "Decision";
+      case "activity.swimlane":
+        return "Swimlane";
+      case "activity.initial":
+      case "activity.final":
+        return "";
+      case "state.simple":
+        return "State";
+      case "state.composite":
+        return "Composite State";
+      case "state.initial":
+      case "state.final":
+      case "state.choice":
+        return "";
+      case "sequence.lifeline":
+        return "Lifeline";
+      case "sequence.activation":
+        return "";
+      case "timing.lane":
+        return "Timing Lane";
+      case "timing.stateSegment":
+        return "State";
+      case "schematic.chip":
+        return "Chip";
+      case "generic.note":
+        return "Note";
+      case "generic.stickyNote":
+        return "Sticky Note";
+      case "generic.circle":
+        return "Circle";
+      case "generic.ellipse":
+        return "Ellipse";
+      case "generic.triangle":
+        return "Triangle";
+      case "generic.diamond":
+        return "Diamond";
+      case "generic.text":
+        return "Text";
+      case "generic.table":
+        return "";
+      case "generic.image":
+        return "Image";
+      default:
+        return "Node";
+    }
+  }
+
   addNode(options?: AddNodeOptions): DiagramNode {
     const id = options?.id ?? `node-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
     const kind = options?.kind ?? "generic.rectangle";
     const position = options?.position ?? { x: 100, y: 100 };
     const size = options?.size ?? { width: 140, height: 80 };
-    const title = options?.title ?? options?.labels?.[0]?.text ?? "New Node";
+    const defaultTitle = this.getDefaultTitleForKind(kind);
+    const title = options?.title ?? options?.labels?.[0]?.text ?? defaultTitle;
 
     const hasActiveFont =
       this.activeFontStyle.fontSize !== undefined ||

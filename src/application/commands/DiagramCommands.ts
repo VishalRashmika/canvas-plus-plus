@@ -438,6 +438,8 @@ export class UpdateTableCellCommand implements Command {
   readonly description = "Update table cell";
   private oldCells: string[][] = [];
   private newCells: string[][] = [];
+  private oldRows?: number;
+  private oldCols?: number;
 
   constructor(
     private readonly diagram: Diagram,
@@ -450,6 +452,8 @@ export class UpdateTableCellCommand implements Command {
   execute(): void {
     const node = this.diagram.nodes.find((n) => n.id === this.nodeId);
     if (!node) return;
+    this.oldRows = node.customData?.rows as number | undefined;
+    this.oldCols = node.customData?.cols as number | undefined;
     const currentCells = (node.customData?.cells as string[][]) || [];
     this.oldCells = currentCells.map((r) => [...r]);
     const nextCells = currentCells.map((r) => [...r]);
@@ -457,8 +461,12 @@ export class UpdateTableCellCommand implements Command {
     while (nextCells[this.row].length <= this.col) nextCells[this.row].push("");
     nextCells[this.row][this.col] = this.text;
     this.newCells = nextCells;
+    const newRows = Math.max((this.oldRows as number) || 0, nextCells.length);
+    const newCols = Math.max((this.oldCols as number) || 0, nextCells[this.row].length);
     node.customData = {
       ...node.customData,
+      rows: newRows,
+      cols: newCols,
       cells: nextCells,
     };
   }
@@ -468,6 +476,8 @@ export class UpdateTableCellCommand implements Command {
     if (!node) return;
     node.customData = {
       ...node.customData,
+      rows: this.oldRows ?? node.customData?.rows,
+      cols: this.oldCols ?? node.customData?.cols,
       cells: this.oldCells.map((r) => [...r]),
     };
   }

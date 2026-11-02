@@ -4178,6 +4178,7 @@ export class ShapeRegistry {
           line.setAttribute("x2", String(w));
           line.setAttribute("y2", String(y));
           line.setAttribute("class", "umlcanvas-table-grid-line");
+          line.setAttribute("pointer-events", "none");
           group.appendChild(line);
         }
 
@@ -4190,6 +4191,7 @@ export class ShapeRegistry {
           line.setAttribute("x2", String(x));
           line.setAttribute("y2", String(h));
           line.setAttribute("class", "umlcanvas-table-grid-line");
+          line.setAttribute("pointer-events", "none");
           group.appendChild(line);
         }
 
@@ -4216,6 +4218,7 @@ export class ShapeRegistry {
             cellHitbox.setAttribute("height", String(rowHeight));
             cellHitbox.setAttribute("class", "umlcanvas-table-cell-hitbox");
             cellHitbox.setAttribute("fill", "transparent");
+            cellHitbox.setAttribute("pointer-events", "all");
             cellG.appendChild(cellHitbox);
 
             if (cellText) {
@@ -4225,6 +4228,7 @@ export class ShapeRegistry {
               textEl.setAttribute("text-anchor", "middle");
               textEl.setAttribute("dominant-baseline", "central");
               textEl.setAttribute("class", "umlcanvas-table-cell-text");
+              textEl.setAttribute("pointer-events", "none");
               applyFontToSvgElement(textEl, {
                 ...nodeFont,
                 fontSize,

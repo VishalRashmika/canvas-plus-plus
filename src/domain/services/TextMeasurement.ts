@@ -120,6 +120,31 @@ export function calculateNodeFitSize(node: DiagramNode): Size {
     };
   }
 
+  if (kind === "generic.table") {
+    const rows = Math.max(1, (node.customData?.rows as number) || 3);
+    const cols = Math.max(1, (node.customData?.cols as number) || 3);
+    const cells = (node.customData?.cells as string[][]) || [];
+
+    let maxColWidth = 60;
+    let maxRowHeight = 32;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const text = cells[r]?.[c] ?? "";
+        if (text) {
+          const lines = text.split(/\r?\n/);
+          const maxLineChars = lines.reduce((m, l) => Math.max(m, l.length), 0);
+          const cellNeededW = Math.ceil(maxLineChars * 8 * scale * boldMult + 24);
+          maxColWidth = Math.max(maxColWidth, cellNeededW);
+          const cellNeededH = Math.ceil(lines.length * Math.round(baseSize * 1.35) + 16);
+          maxRowHeight = Math.max(maxRowHeight, cellNeededH);
+        }
+      }
+    }
+    const neededW = Math.max(node.size.width, cols * maxColWidth);
+    const neededH = Math.max(node.size.height, rows * maxRowHeight);
+    return { width: neededW, height: neededH };
+  }
+
   if (kind === "generic.image") {
     const titleText = node.labels[0]?.text ?? "";
     const minW = Math.max(160, titleText.length * 8.5 * scale * boldMult + 32);

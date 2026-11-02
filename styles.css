@@ -1101,6 +1101,7 @@ body .umlcanvas-moving * {
 .umlcanvas-table-grid-line {
   stroke: var(--background-modifier-border, #7c7c7c);
   stroke-width: 1px;
+  pointer-events: none;
 }
 
 .umlcanvas-table-cell {
@@ -1110,6 +1111,8 @@ body .umlcanvas-moving * {
 .umlcanvas-table-cell-hitbox {
   cursor: text;
   pointer-events: all;
+  fill: transparent;
+  stroke: none;
 }
 
 .umlcanvas-table-cell-text {

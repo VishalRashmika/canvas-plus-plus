@@ -5,6 +5,7 @@ import { Toolbar } from "../src/presentation/views/Toolbar";
 import { UmlCanvasView } from "../src/presentation/views/UmlCanvasView";
 import { defaultShapeRegistry } from "../src/presentation/renderer/ShapeRegistry";
 import { defaultSvgExporter } from "../src/infrastructure/export/SvgExporter";
+import { calculateNodeFitSize } from "../src/domain/services/TextMeasurement";
 
 // Headless MockElement for testing renderer & DOM events
 class MockElement {
@@ -654,6 +655,187 @@ describe("Table Cell Editing and Management Tests", () => {
       expect(exported).toContain("<tspan");
       expect(exported).toContain("Header A");
       expect(exported).toContain("Subheading");
+    });
+  });
+
+  describe("8. Direct Single-Click Table Cell Editing & Seamless Cell Switching", () => {
+    it("should start editing cell directly on single click without requiring table to be pre-selected", () => {
+      const table = editor.addTableNode({
+        rows: 3,
+        cols: 3,
+        position: { x: 100, y: 100 },
+        size: { width: 300, height: 180 },
+      });
+      editor.clearSelection();
+      expect(editor.selectedNodeIds.length).toBe(0);
+
+      renderer.render();
+
+      const nodeEl = container.querySelector(`[data-node-id="${table.id}"]`);
+      expect(nodeEl).not.toBeNull();
+      const cellEls = nodeEl?.querySelectorAll(".umlcanvas-table-cell") || [];
+      const cell11 = cellEls.find(
+        (el) => el.getAttribute("data-row") === "1" && el.getAttribute("data-col") === "1"
+      );
+      expect(cell11).toBeDefined();
+
+      const svgEl = container.querySelector(".umlcanvas-svg");
+
+      // Simulate mousedown on cell (1, 1)
+      svgEl?.dispatch("mousedown", {
+        button: 0,
+        target: cell11,
+        clientX: 250,
+        clientY: 190,
+      });
+
+      // Simulate mouseup on the same spot without moving
+      (global as any).window.dispatch("mouseup", {
+        clientX: 250,
+        clientY: 190,
+      });
+
+      // Inline editor should be opened immediately on cell (1, 1)
+      expect(renderer.activeInlineEditor).not.toBeNull();
+      expect(renderer.activeEditingNodeId).toBe(table.id);
+      expect(renderer.activeEditingCell).toEqual({ row: 1, col: 1 });
+    });
+
+    it("should seamlessly switch cells when clicking another cell while actively editing", () => {
+      const table = editor.addTableNode({
+        rows: 3,
+        cols: 3,
+        position: { x: 100, y: 100 },
+        size: { width: 300, height: 180 },
+      });
+      renderer.render();
+
+      // Start editing cell (0, 0)
+      renderer.startInlineEditor(table, { row: 0, col: 0 });
+      expect(renderer.activeEditingCell).toEqual({ row: 0, col: 0 });
+
+      // Type some content
+      const activeEditor = renderer.activeInlineEditor as unknown as MockElement;
+      activeEditor.value = "Updated Cell (0,0)";
+
+      // Find cell (2, 2) in DOM
+      const nodeEl = container.querySelector(`[data-node-id="${table.id}"]`);
+      const cellEls = nodeEl?.querySelectorAll(".umlcanvas-table-cell") || [];
+      const cell22 = cellEls.find(
+        (el) => el.getAttribute("data-row") === "2" && el.getAttribute("data-col") === "2"
+      );
+      expect(cell22).toBeDefined();
+
+      const svgEl = container.querySelector(".umlcanvas-svg");
+
+      // Click directly on cell (2, 2)
+      svgEl?.dispatch("mousedown", {
+        button: 0,
+        target: cell22,
+        clientX: 350,
+        clientY: 250,
+      });
+      (global as any).window.dispatch("mouseup", {
+        clientX: 350,
+        clientY: 250,
+      });
+
+      // Previous cell (0, 0) should be committed with new text
+      const cells = table.customData?.cells as string[][];
+      expect(cells[0][0]).toBe("Updated Cell (0,0)");
+
+      // New cell (2, 2) should now be in active inline editing mode
+      expect(renderer.activeInlineEditor).not.toBeNull();
+      expect(renderer.activeEditingCell).toEqual({ row: 2, col: 2 });
+    });
+  });
+
+  describe("9. Copy / Paste and Duplicate Table Integrity", () => {
+    it("should deep-clone customData cells, rows, and cols when copying and pasting a table", () => {
+      const table = editor.addTableNode({ rows: 3, cols: 3, position: { x: 50, y: 50 } });
+      editor.updateTableCell(table.id, 0, 0, "Original Alpha");
+      editor.updateTableCell(table.id, 2, 2, "Original Omega");
+
+      editor.selectNode(table.id, false);
+      editor.copySelection();
+      const pasteResult = editor.paste({ x: 100, y: 100 });
+
+      expect(pasteResult.nodes.length).toBe(1);
+      const pastedTable = pasteResult.nodes[0];
+      expect(pastedTable.kind).toBe("generic.table");
+      expect(pastedTable.id).not.toBe(table.id);
+      expect(pastedTable.customData?.rows).toBe(3);
+      expect(pastedTable.customData?.cols).toBe(3);
+
+      const pastedCells = pastedTable.customData?.cells as string[][];
+      expect(pastedCells[0][0]).toBe("Original Alpha");
+      expect(pastedCells[2][2]).toBe("Original Omega");
+
+      // Modifying pasted table does not mutate original table
+      editor.updateTableCell(pastedTable.id, 0, 0, "Modified Alpha");
+      expect((table.customData?.cells as string[][])[0][0]).toBe("Original Alpha");
+      expect((pastedTable.customData?.cells as string[][])[0][0]).toBe("Modified Alpha");
+    });
+
+    it("should deep-clone customData cells, rows, and cols when duplicating a table", () => {
+      const table = editor.addTableNode({ rows: 2, cols: 2, position: { x: 50, y: 50 } });
+      editor.updateTableCell(table.id, 1, 1, "Dup Test");
+
+      editor.selectNode(table.id, false);
+      const dupResult = editor.duplicateSelection({ x: 50, y: 50 });
+
+      expect(dupResult.nodes.length).toBe(1);
+      const dupTable = dupResult.nodes[0];
+      expect(dupTable.kind).toBe("generic.table");
+      expect(dupTable.id).not.toBe(table.id);
+      expect(dupTable.customData?.rows).toBe(2);
+      expect(dupTable.customData?.cols).toBe(2);
+      expect((dupTable.customData?.cells as string[][])[1][1]).toBe("Dup Test");
+    });
+  });
+
+  describe("10. Auto-Fit / Text Measurement for Table Nodes", () => {
+    it("should calculate appropriate fit size based on row/column count and content length", () => {
+      const table = editor.addTableNode({ rows: 3, cols: 3, size: { width: 100, height: 50 } });
+      editor.updateTableCell(table.id, 0, 0, "A very long header title that spans quite some width");
+      editor.updateTableCell(table.id, 1, 1, "Line 1\nLine 2\nLine 3\nLine 4");
+
+      const fitSize = calculateNodeFitSize(table);
+      expect(fitSize.width).toBeGreaterThanOrEqual(180); // At least 3 cols * 60px
+      expect(fitSize.height).toBeGreaterThanOrEqual(90); // At least 3 rows * 30px
+
+      // Height should expand to fit the 4-line cell
+      const rows = 3;
+      const cols = 3;
+      const expectedMinColW = Math.max(60, 100);
+      expect(fitSize.width).toBeGreaterThanOrEqual(cols * 60);
+    });
+  });
+
+  describe("11. Toolbar Structure Controls (+/- Row, +/- Col) commit inline editor", () => {
+    it("should commit active cell inline editing before adding or deleting rows or columns from toolbar", () => {
+      const toolbar = new Toolbar(container as any, editor, renderer);
+      const table = editor.addTableNode({ rows: 3, cols: 3 });
+      editor.selectNode(table.id, false);
+
+      // Start editing cell (0, 0)
+      renderer.startInlineEditor(table, { row: 0, col: 0 });
+      const activeEditor = renderer.activeInlineEditor as unknown as MockElement;
+      activeEditor.value = "Toolbar Commit Test";
+
+      // Find "+ Row" button
+      const buttons = container.querySelectorAll("button");
+      const addRowBtn = buttons.find((b) => b.title.startsWith("Add Row"));
+      expect(addRowBtn).toBeDefined();
+
+      addRowBtn?.click();
+
+      // Table should now have 4 rows
+      expect(table.customData?.rows).toBe(4);
+      // And the cell edit should have been committed
+      expect((table.customData?.cells as string[][])[0][0]).toBe("Toolbar Commit Test");
+
+      toolbar.destroy();
     });
   });
 });

@@ -2113,18 +2113,34 @@ export class DiagramEditor {
     this.notify();
   }
 
+  normalizeTableData(node: DiagramNode): { rows: number; cols: number; cells: string[][] } {
+    const rawRows = (node.customData?.rows as number) || (node.customData?.cells as string[][])?.length || 3;
+    const rawCols = (node.customData?.cols as number) || (node.customData?.cells as string[][])?.[0]?.length || 3;
+    const rows = Math.max(1, rawRows);
+    const cols = Math.max(1, rawCols);
+    const rawCells = (node.customData?.cells as string[][]) || [];
+    const cells: string[][] = [];
+    for (let r = 0; r < rows; r++) {
+      const row: string[] = [];
+      for (let c = 0; c < cols; c++) {
+        row.push(rawCells[r]?.[c] ?? "");
+      }
+      cells.push(row);
+    }
+    return { rows, cols, cells };
+  }
+
   addTableRow(nodeId: string, atIndex?: number): void {
     const node = this.diagram.nodes.find((n) => n.id === nodeId);
     if (!node || node.kind !== "generic.table") return;
-    const rows = Math.max(1, (node.customData?.rows as number) || 3);
-    const cols = Math.max(1, (node.customData?.cols as number) || 3);
-    const cells = ((node.customData?.cells as string[][]) || []).map((r) => [...r]);
+    const { rows, cols, cells } = this.normalizeTableData(node);
     const insertIdx = atIndex !== undefined ? Math.max(0, Math.min(rows, atIndex)) : rows;
     const newRow = Array.from({ length: cols }, () => "");
     cells.splice(insertIdx, 0, newRow);
     const nextCustomData = {
       ...node.customData,
       rows: rows + 1,
+      cols,
       cells,
     };
     const rowH = Math.max(28, Math.round(node.size.height / rows));
@@ -2140,17 +2156,16 @@ export class DiagramEditor {
   deleteTableRow(nodeId: string, rowIndex?: number): void {
     const node = this.diagram.nodes.find((n) => n.id === nodeId);
     if (!node || node.kind !== "generic.table") return;
-    const rows = Math.max(1, (node.customData?.rows as number) || 3);
+    const { rows, cols, cells } = this.normalizeTableData(node);
     if (rows <= 1) return;
-    const cols = Math.max(1, (node.customData?.cols as number) || 3);
-    const cells = ((node.customData?.cells as string[][]) || []).map((r) => [...r]);
-    const targetIdx = rowIndex !== undefined ? rowIndex : rows - 1;
+    const targetIdx = rowIndex !== undefined ? Math.max(0, Math.min(cells.length - 1, rowIndex)) : cells.length - 1;
     if (targetIdx >= 0 && targetIdx < cells.length) {
       cells.splice(targetIdx, 1);
     }
     const nextCustomData = {
       ...node.customData,
       rows: rows - 1,
+      cols,
       cells,
     };
     const rowH = Math.max(28, Math.round(node.size.height / rows));
@@ -2166,16 +2181,14 @@ export class DiagramEditor {
   addTableColumn(nodeId: string, atIndex?: number): void {
     const node = this.diagram.nodes.find((n) => n.id === nodeId);
     if (!node || node.kind !== "generic.table") return;
-    const rows = Math.max(1, (node.customData?.rows as number) || 3);
-    const cols = Math.max(1, (node.customData?.cols as number) || 3);
-    const cells = ((node.customData?.cells as string[][]) || []).map((r) => [...r]);
+    const { rows, cols, cells } = this.normalizeTableData(node);
     const insertIdx = atIndex !== undefined ? Math.max(0, Math.min(cols, atIndex)) : cols;
     for (let r = 0; r < rows; r++) {
-      if (!cells[r]) cells[r] = [];
       cells[r].splice(insertIdx, 0, "");
     }
     const nextCustomData = {
       ...node.customData,
+      rows,
       cols: cols + 1,
       cells,
     };
@@ -2192,18 +2205,17 @@ export class DiagramEditor {
   deleteTableColumn(nodeId: string, colIndex?: number): void {
     const node = this.diagram.nodes.find((n) => n.id === nodeId);
     if (!node || node.kind !== "generic.table") return;
-    const rows = Math.max(1, (node.customData?.rows as number) || 3);
-    const cols = Math.max(1, (node.customData?.cols as number) || 3);
+    const { rows, cols, cells } = this.normalizeTableData(node);
     if (cols <= 1) return;
-    const cells = ((node.customData?.cells as string[][]) || []).map((r) => [...r]);
-    const targetIdx = colIndex !== undefined ? colIndex : cols - 1;
+    const targetIdx = colIndex !== undefined ? Math.max(0, Math.min(cols - 1, colIndex)) : cols - 1;
     for (let r = 0; r < rows; r++) {
-      if (cells[r] && targetIdx >= 0 && targetIdx < cells[r].length) {
+      if (targetIdx >= 0 && targetIdx < cells[r].length) {
         cells[r].splice(targetIdx, 1);
       }
     }
     const nextCustomData = {
       ...node.customData,
+      rows,
       cols: cols - 1,
       cells,
     };
@@ -3017,6 +3029,10 @@ export class DiagramEditor {
         labels: clonedLabels,
         childDiagramId: node.childDiagramId,
         metadata: node.metadata ? { ...node.metadata } : {},
+        style: node.style ? { ...node.style } : undefined,
+        customData: node.customData
+          ? (JSON.parse(JSON.stringify(node.customData)) as Record<string, unknown>)
+          : undefined,
       });
 
       newNodes.push(clonedNode);

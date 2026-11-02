@@ -706,6 +706,9 @@ export class UmlCanvasView extends TextFileView {
             .setTitle(`Edit cell (${clickR + 1}, ${clickC + 1})`)
             .setIcon("edit")
             .onClick(() => {
+              if (this.renderer?.activeInlineEditor) {
+                this.renderer.commitInlineEditor();
+              }
               this.renderer?.startInlineEditor(node, { row: clickR, col: clickC });
             });
         });
@@ -715,6 +718,9 @@ export class UmlCanvasView extends TextFileView {
             .setTitle("Add row above")
             .setIcon("arrow-up")
             .onClick(() => {
+              if (this.renderer?.activeInlineEditor) {
+                this.renderer.commitInlineEditor();
+              }
               this.editor?.addTableRow(node.id, clickR);
             });
         });
@@ -724,6 +730,9 @@ export class UmlCanvasView extends TextFileView {
             .setTitle("Add row below")
             .setIcon("arrow-down")
             .onClick(() => {
+              if (this.renderer?.activeInlineEditor) {
+                this.renderer.commitInlineEditor();
+              }
               this.editor?.addTableRow(node.id, clickR + 1);
             });
         });
@@ -734,6 +743,9 @@ export class UmlCanvasView extends TextFileView {
               .setTitle(`Delete row (${clickR + 1})`)
               .setIcon("trash")
               .onClick(() => {
+                if (this.renderer?.activeInlineEditor) {
+                  this.renderer.commitInlineEditor();
+                }
                 this.editor?.deleteTableRow(node.id, clickR);
               });
           });
@@ -744,6 +756,9 @@ export class UmlCanvasView extends TextFileView {
             .setTitle("Add column left")
             .setIcon("arrow-left")
             .onClick(() => {
+              if (this.renderer?.activeInlineEditor) {
+                this.renderer.commitInlineEditor();
+              }
               this.editor?.addTableColumn(node.id, clickC);
             });
         });
@@ -753,6 +768,9 @@ export class UmlCanvasView extends TextFileView {
             .setTitle("Add column right")
             .setIcon("arrow-right")
             .onClick(() => {
+              if (this.renderer?.activeInlineEditor) {
+                this.renderer.commitInlineEditor();
+              }
               this.editor?.addTableColumn(node.id, clickC + 1);
             });
         });
@@ -763,6 +781,9 @@ export class UmlCanvasView extends TextFileView {
               .setTitle(`Delete column (${clickC + 1})`)
               .setIcon("trash")
               .onClick(() => {
+                if (this.renderer?.activeInlineEditor) {
+                  this.renderer.commitInlineEditor();
+                }
                 this.editor?.deleteTableColumn(node.id, clickC);
               });
           });

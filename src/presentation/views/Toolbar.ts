@@ -256,6 +256,7 @@ export class Toolbar {
     btn.addEventListener("mousedown", (e) => {
       markEventHandled(e);
       e.stopPropagation();
+      e.preventDefault();
     });
 
     btn.addEventListener("click", (e) => {
@@ -470,6 +471,16 @@ export class Toolbar {
     }
     if (node && typeof this.renderer.startInlineEditor === "function") {
       this.renderer.startInlineEditor(node, { row: 0, col: 0 });
+      if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+        window.requestAnimationFrame(() => {
+          if (this.renderer.activeInlineEditor) {
+            this.renderer.activeInlineEditor.focus();
+            if (typeof this.renderer.activeInlineEditor.select === "function") {
+              this.renderer.activeInlineEditor.select();
+            }
+          }
+        });
+      }
     }
     return node;
   }
@@ -833,7 +844,12 @@ export class Toolbar {
       "+ Row",
       () => {
         const id = this.editor.selectedNodeIds[0];
-        if (id) this.editor.addTableRow(id);
+        if (id) {
+          if (this.renderer.activeInlineEditor) {
+            this.renderer.commitInlineEditor();
+          }
+          this.editor.addTableRow(id);
+        }
       },
       "rows"
     );
@@ -844,7 +860,12 @@ export class Toolbar {
       "− Row",
       () => {
         const id = this.editor.selectedNodeIds[0];
-        if (id) this.editor.deleteTableRow(id);
+        if (id) {
+          if (this.renderer.activeInlineEditor) {
+            this.renderer.commitInlineEditor();
+          }
+          this.editor.deleteTableRow(id);
+        }
       },
       "minus-circle"
     );
@@ -855,7 +876,12 @@ export class Toolbar {
       "+ Col",
       () => {
         const id = this.editor.selectedNodeIds[0];
-        if (id) this.editor.addTableColumn(id);
+        if (id) {
+          if (this.renderer.activeInlineEditor) {
+            this.renderer.commitInlineEditor();
+          }
+          this.editor.addTableColumn(id);
+        }
       },
       "columns"
     );
@@ -866,7 +892,12 @@ export class Toolbar {
       "− Col",
       () => {
         const id = this.editor.selectedNodeIds[0];
-        if (id) this.editor.deleteTableColumn(id);
+        if (id) {
+          if (this.renderer.activeInlineEditor) {
+            this.renderer.commitInlineEditor();
+          }
+          this.editor.deleteTableColumn(id);
+        }
       },
       "minus"
     );

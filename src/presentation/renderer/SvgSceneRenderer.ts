@@ -2020,6 +2020,13 @@ export class SvgSceneRenderer {
 
     (e as HandledMouseEvent)._umlHandled = true;
 
+    // Detect if click landed on a table cell before commitInlineEditor potentially re-renders
+    const preCellEl = target?.closest(".umlcanvas-table-cell");
+    const preCellRow = preCellEl?.getAttribute("data-row");
+    const preCellCol = preCellEl?.getAttribute("data-col");
+    const preNodeEl = target?.closest(".umlcanvas-node");
+    const preNodeId = preNodeEl?.getAttribute("data-node-id");
+
     if (this.inlineEditorEl) {
       this.commitInlineEditor();
     }
@@ -2388,32 +2395,40 @@ export class SvgSceneRenderer {
     }
 
     // Node click -> Select & start move
-    const nodeEl = target.closest(".umlcanvas-node");
-    if (nodeEl) {
-      const nodeId = nodeEl.getAttribute("data-node-id");
-      if (nodeId) {
-        if (this.editor.isNodeLocked(nodeId)) {
-          return;
-        }
+    let nodeEl = target ? (target.closest(".umlcanvas-node") as SVGGElement | null) : null;
+    let nodeId = nodeEl?.getAttribute("data-node-id") ?? preNodeId;
+    if (nodeId) {
+      if (!nodeEl) {
+        nodeEl = this.nodesLayerEl.querySelector<SVGGElement>(`[data-node-id="${nodeId}"]`);
+      }
+      if (this.editor.isNodeLocked(nodeId)) {
+        return;
+      }
 
-        const isMulti = e.shiftKey || e.metaKey || e.ctrlKey;
-        const wasAlreadySingleSelected =
-          !isMulti &&
-          this.editor.selectedNodeIds.length === 1 &&
-          this.editor.selectedNodeIds[0] === nodeId;
+      const isMulti = e.shiftKey || e.metaKey || e.ctrlKey;
+      const wasAlreadySingleSelected =
+        !isMulti &&
+        this.editor.selectedNodeIds.length === 1 &&
+        this.editor.selectedNodeIds[0] === nodeId;
 
-        if (isMulti) {
-          this.editor.toggleNodeSelection(nodeId);
-        } else if (!this.editor.isNodeSelected(nodeId)) {
-          this.editor.selectNode(nodeId, false);
-        }
+      if (isMulti) {
+        this.editor.toggleNodeSelection(nodeId);
+      } else if (!this.editor.isNodeSelected(nodeId)) {
+        this.editor.selectNode(nodeId, false);
+      }
 
-        // Calculate clicked table cell if applicable
-        let clickedCell: { row: number; col: number } | undefined = undefined;
-        const clickedNode = this.editor.diagram.nodes.find((n) => n.id === nodeId);
-        if (clickedNode && clickedNode.kind === "generic.table") {
-          const rows = Math.max(1, (clickedNode.customData?.rows as number) || 3);
-          const cols = Math.max(1, (clickedNode.customData?.cols as number) || 3);
+      // Calculate clicked table cell if applicable
+      let clickedCell: { row: number; col: number } | undefined = undefined;
+      const clickedNode = this.editor.diagram.nodes.find((n) => n.id === nodeId);
+      if (clickedNode && clickedNode.kind === "generic.table") {
+        const rows = Math.max(1, (clickedNode.customData?.rows as number) || 3);
+        const cols = Math.max(1, (clickedNode.customData?.cols as number) || 3);
+        if (preCellRow !== null && preCellRow !== undefined && preCellCol !== null && preCellCol !== undefined) {
+          clickedCell = {
+            row: Math.max(0, Math.min(rows - 1, parseInt(preCellRow, 10))),
+            col: Math.max(0, Math.min(cols - 1, parseInt(preCellCol, 10))),
+          };
+        } else {
           const cellEl = target ? target.closest(".umlcanvas-table-cell") : null;
           if (cellEl) {
             const r = parseInt(cellEl.getAttribute("data-row") || "0", 10);
@@ -2422,13 +2437,21 @@ export class SvgSceneRenderer {
           } else {
             const relX = canvasPoint.x - clickedNode.position.x;
             const relY = canvasPoint.y - clickedNode.position.y;
-            const colW = clickedNode.size.width / cols;
-            const rowH = clickedNode.size.height / rows;
-            const r = Math.max(0, Math.min(rows - 1, Math.floor(relY / rowH)));
-            const c = Math.max(0, Math.min(cols - 1, Math.floor(relX / colW)));
-            clickedCell = { row: r, col: c };
+            if (
+              relX >= 0 &&
+              relX <= clickedNode.size.width &&
+              relY >= 0 &&
+              relY <= clickedNode.size.height
+            ) {
+              const colW = clickedNode.size.width / cols;
+              const rowH = clickedNode.size.height / rows;
+              const r = Math.max(0, Math.min(rows - 1, Math.floor(relY / rowH)));
+              const c = Math.max(0, Math.min(cols - 1, Math.floor(relX / colW)));
+              clickedCell = { row: r, col: c };
+            }
           }
         }
+      }
 
         // If clicking on PDF placeholder (no PDF loaded yet), prompt to pick file
         if (target.closest(".umlcanvas-pdf-placeholder")) {
@@ -2486,7 +2509,6 @@ export class SvgSceneRenderer {
         this.container.classList.add("umlcanvas-moving");
         return;
       }
-    }
 
     // Group Color Dot click -> Cycle color preset
     const colorDot = target.closest(".umlcanvas-group-color-dot");
@@ -2989,7 +3011,7 @@ export class SvgSceneRenderer {
         }
         this.editor.moveNodes(moves);
       } else if (
-        moveState.wasAlreadySingleSelected &&
+        (moveState.wasAlreadySingleSelected || (moveState.clickedCell !== undefined && moveState.clickedNodeId)) &&
         moveState.clickedNodeId
       ) {
         const node = this.editor.diagram.nodes.find(
@@ -3597,6 +3619,12 @@ export class SvgSceneRenderer {
           lineHeight: `${lineHeight}px`,
           textAlign: bounds.textAlign,
         };
+        if (node.kind === "generic.table") {
+          const textLines = (this.inlineEditorEl.value || "").split(/\r?\n/).length;
+          const totalTextH = textLines * lineHeight;
+          const padTop = Math.max(2, Math.floor((screenH - totalTextH) / 2));
+          styles.paddingTop = `${padTop}px`;
+        }
         styles.fontWeight = nodeFont.bold ? "bold" : "normal";
         styles.fontStyle = nodeFont.italic ? "italic" : "normal";
         if (nodeFont.fontFamily) {
@@ -3810,6 +3838,12 @@ export class SvgSceneRenderer {
       lineHeight: `${lineHeight}px`,
       textAlign: bounds.textAlign,
     };
+    if (node.kind === "generic.table") {
+      const textLines = (currentText || "").split(/\r?\n/).length;
+      const totalTextH = textLines * lineHeight;
+      const padTop = Math.max(2, Math.floor((screenH - totalTextH) / 2));
+      styles.paddingTop = `${padTop}px`;
+    }
     styles.fontWeight = nodeFont.bold ? "bold" : "normal";
     styles.fontStyle = nodeFont.italic ? "italic" : "normal";
     if (nodeFont.fontFamily) {
@@ -4202,6 +4236,8 @@ export class SvgSceneRenderer {
     const groupId = this.inlineEditorEl.getAttribute("data-group-id");
     const cellRowAttr = this.inlineEditorEl.getAttribute("data-cell-row");
     const cellColAttr = this.inlineEditorEl.getAttribute("data-cell-col");
+    const r = cellRowAttr !== null && cellRowAttr !== "" ? parseInt(cellRowAttr, 10) : (this.editingCellRow ?? 0);
+    const c = cellColAttr !== null && cellColAttr !== "" ? parseInt(cellColAttr, 10) : (this.editingCellCol ?? 0);
     const newText = this.inlineEditorEl.value.trim();
 
     this.cleanupInlineEditor();
@@ -4210,11 +4246,7 @@ export class SvgSceneRenderer {
       const node = this.editor.diagram.nodes.find((n) => n.id === nodeId);
       if (node) {
         if (node.kind === "generic.table") {
-          const r = cellRowAttr !== null ? parseInt(cellRowAttr, 10) : (this.editingCellRow ?? 0);
-          const c = cellColAttr !== null ? parseInt(cellColAttr, 10) : (this.editingCellCol ?? 0);
           this.editor.updateTableCell(node.id, r, c, newText);
-          this.editingCellRow = undefined;
-          this.editingCellCol = undefined;
           this.renderNodes();
           this.renderInteractions();
           return;

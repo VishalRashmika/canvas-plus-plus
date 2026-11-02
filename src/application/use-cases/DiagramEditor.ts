@@ -2125,27 +2125,38 @@ export class DiagramEditor {
       rows: rows + 1,
       cells,
     };
-    const cmd = new UpdateTableStructureCommand(this.diagram, nodeId, nextCustomData);
+    const rowH = Math.max(28, Math.round(node.size.height / rows));
+    const nextSize = {
+      width: node.size.width,
+      height: node.size.height + rowH,
+    };
+    const cmd = new UpdateTableStructureCommand(this.diagram, nodeId, nextCustomData, nextSize);
     this.commandStack.execute(cmd);
     this.notify();
   }
 
-  deleteTableRow(nodeId: string, rowIndex: number): void {
+  deleteTableRow(nodeId: string, rowIndex?: number): void {
     const node = this.diagram.nodes.find((n) => n.id === nodeId);
     if (!node || node.kind !== "generic.table") return;
     const rows = Math.max(1, (node.customData?.rows as number) || 3);
     if (rows <= 1) return;
     const cols = Math.max(1, (node.customData?.cols as number) || 3);
     const cells = ((node.customData?.cells as string[][]) || []).map((r) => [...r]);
-    if (rowIndex >= 0 && rowIndex < cells.length) {
-      cells.splice(rowIndex, 1);
+    const targetIdx = rowIndex !== undefined ? rowIndex : rows - 1;
+    if (targetIdx >= 0 && targetIdx < cells.length) {
+      cells.splice(targetIdx, 1);
     }
     const nextCustomData = {
       ...node.customData,
       rows: rows - 1,
       cells,
     };
-    const cmd = new UpdateTableStructureCommand(this.diagram, nodeId, nextCustomData);
+    const rowH = Math.max(28, Math.round(node.size.height / rows));
+    const nextSize = {
+      width: node.size.width,
+      height: Math.max(40, node.size.height - rowH),
+    };
+    const cmd = new UpdateTableStructureCommand(this.diagram, nodeId, nextCustomData, nextSize);
     this.commandStack.execute(cmd);
     this.notify();
   }
@@ -2166,21 +2177,27 @@ export class DiagramEditor {
       cols: cols + 1,
       cells,
     };
-    const cmd = new UpdateTableStructureCommand(this.diagram, nodeId, nextCustomData);
+    const colW = Math.max(40, Math.round(node.size.width / cols));
+    const nextSize = {
+      width: node.size.width + colW,
+      height: node.size.height,
+    };
+    const cmd = new UpdateTableStructureCommand(this.diagram, nodeId, nextCustomData, nextSize);
     this.commandStack.execute(cmd);
     this.notify();
   }
 
-  deleteTableColumn(nodeId: string, colIndex: number): void {
+  deleteTableColumn(nodeId: string, colIndex?: number): void {
     const node = this.diagram.nodes.find((n) => n.id === nodeId);
     if (!node || node.kind !== "generic.table") return;
     const rows = Math.max(1, (node.customData?.rows as number) || 3);
     const cols = Math.max(1, (node.customData?.cols as number) || 3);
     if (cols <= 1) return;
     const cells = ((node.customData?.cells as string[][]) || []).map((r) => [...r]);
+    const targetIdx = colIndex !== undefined ? colIndex : cols - 1;
     for (let r = 0; r < rows; r++) {
-      if (cells[r] && colIndex >= 0 && colIndex < cells[r].length) {
-        cells[r].splice(colIndex, 1);
+      if (cells[r] && targetIdx >= 0 && targetIdx < cells[r].length) {
+        cells[r].splice(targetIdx, 1);
       }
     }
     const nextCustomData = {
@@ -2188,7 +2205,12 @@ export class DiagramEditor {
       cols: cols - 1,
       cells,
     };
-    const cmd = new UpdateTableStructureCommand(this.diagram, nodeId, nextCustomData);
+    const colW = Math.max(40, Math.round(node.size.width / cols));
+    const nextSize = {
+      width: Math.max(60, node.size.width - colW),
+      height: node.size.height,
+    };
+    const cmd = new UpdateTableStructureCommand(this.diagram, nodeId, nextCustomData, nextSize);
     this.commandStack.execute(cmd);
     this.notify();
   }

@@ -477,24 +477,36 @@ export class UpdateTableStructureCommand implements Command {
   readonly description = "Update table structure";
   private oldCustomData: Record<string, unknown> = {};
   private newCustomData: Record<string, unknown> = {};
+  private oldSize?: Size;
+  private newSize?: Size;
 
   constructor(
     private readonly diagram: Diagram,
     private readonly nodeId: string,
-    private readonly nextCustomData: Record<string, unknown>
-  ) {}
+    private readonly nextCustomData: Record<string, unknown>,
+    nextSize?: Size
+  ) {
+    this.newSize = nextSize ? { ...nextSize } : undefined;
+  }
 
   execute(): void {
     const node = this.diagram.nodes.find((n) => n.id === this.nodeId);
     if (!node) return;
     this.oldCustomData = JSON.parse(JSON.stringify(node.customData || {})) as Record<string, unknown>;
     this.newCustomData = JSON.parse(JSON.stringify(this.nextCustomData)) as Record<string, unknown>;
+    if (this.newSize) {
+      this.oldSize = { ...node.size };
+      node.size = { ...this.newSize };
+    }
     node.customData = { ...this.newCustomData };
   }
 
   undo(): void {
     const node = this.diagram.nodes.find((n) => n.id === this.nodeId);
     if (!node) return;
+    if (this.oldSize) {
+      node.size = { ...this.oldSize };
+    }
     node.customData = { ...this.oldCustomData };
   }
 }

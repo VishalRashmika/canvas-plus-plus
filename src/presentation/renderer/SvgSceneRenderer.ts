@@ -75,6 +75,7 @@ type DragMode =
       activeGuides?: AlignmentGuides;
       wasAlreadySingleSelected?: boolean;
       clickedNodeId?: string;
+      clickedCell?: { row: number; col: number };
     }
   | {
       type: "group-move";
@@ -1595,6 +1596,112 @@ export class SvgSceneRenderer {
           handle.setAttribute("data-handle", h);
           this.interactionLayerEl.appendChild(handle);
         }
+
+        // On-canvas interactive table controls for generic.table
+        if (node.kind === "generic.table") {
+          const rows = Math.max(1, (node.customData?.rows as number) || 3);
+          const cols = Math.max(1, (node.customData?.cols as number) || 3);
+
+          // Add Column (+) button at right border
+          const addColG = document.createElementNS(svgNS, "g");
+          addColG.setAttribute("class", "umlcanvas-table-canvas-btn umlcanvas-table-add-col-btn");
+          addColG.setAttribute("data-node-id", node.id);
+          addColG.setAttribute("title", "Add Column");
+          const addColCx = node.position.x + node.size.width + 16;
+          const addColCy = cols > 1
+            ? node.position.y + node.size.height / 2 - 14
+            : node.position.y + node.size.height / 2;
+          const addColCircle = document.createElementNS(svgNS, "circle");
+          addColCircle.setAttribute("cx", String(addColCx));
+          addColCircle.setAttribute("cy", String(addColCy));
+          addColCircle.setAttribute("r", "11");
+          addColCircle.setAttribute("class", "umlcanvas-table-btn-circle");
+          const addColText = document.createElementNS(svgNS, "text");
+          addColText.setAttribute("x", String(addColCx));
+          addColText.setAttribute("y", String(addColCy));
+          addColText.setAttribute("text-anchor", "middle");
+          addColText.setAttribute("dominant-baseline", "central");
+          addColText.setAttribute("class", "umlcanvas-table-btn-text");
+          addColText.textContent = "+";
+          addColG.appendChild(addColCircle);
+          addColG.appendChild(addColText);
+          this.interactionLayerEl.appendChild(addColG);
+
+          // Delete Column (-) button at right border (only if cols > 1)
+          if (cols > 1) {
+            const delColG = document.createElementNS(svgNS, "g");
+            delColG.setAttribute("class", "umlcanvas-table-canvas-btn umlcanvas-table-del-col-btn");
+            delColG.setAttribute("data-node-id", node.id);
+            delColG.setAttribute("title", "Delete Column");
+            const delColCx = node.position.x + node.size.width + 16;
+            const delColCy = node.position.y + node.size.height / 2 + 14;
+            const delColCircle = document.createElementNS(svgNS, "circle");
+            delColCircle.setAttribute("cx", String(delColCx));
+            delColCircle.setAttribute("cy", String(delColCy));
+            delColCircle.setAttribute("r", "11");
+            delColCircle.setAttribute("class", "umlcanvas-table-btn-circle is-delete");
+            const delColText = document.createElementNS(svgNS, "text");
+            delColText.setAttribute("x", String(delColCx));
+            delColText.setAttribute("y", String(delColCy));
+            delColText.setAttribute("text-anchor", "middle");
+            delColText.setAttribute("dominant-baseline", "central");
+            delColText.setAttribute("class", "umlcanvas-table-btn-text");
+            delColText.textContent = "−";
+            delColG.appendChild(delColCircle);
+            delColG.appendChild(delColText);
+            this.interactionLayerEl.appendChild(delColG);
+          }
+
+          // Add Row (+) button at bottom border
+          const addRowG = document.createElementNS(svgNS, "g");
+          addRowG.setAttribute("class", "umlcanvas-table-canvas-btn umlcanvas-table-add-row-btn");
+          addRowG.setAttribute("data-node-id", node.id);
+          addRowG.setAttribute("title", "Add Row");
+          const addRowCx = rows > 1
+            ? node.position.x + node.size.width / 2 - 14
+            : node.position.x + node.size.width / 2;
+          const addRowCy = node.position.y + node.size.height + 16;
+          const addRowCircle = document.createElementNS(svgNS, "circle");
+          addRowCircle.setAttribute("cx", String(addRowCx));
+          addRowCircle.setAttribute("cy", String(addRowCy));
+          addRowCircle.setAttribute("r", "11");
+          addRowCircle.setAttribute("class", "umlcanvas-table-btn-circle");
+          const addRowText = document.createElementNS(svgNS, "text");
+          addRowText.setAttribute("x", String(addRowCx));
+          addRowText.setAttribute("y", String(addRowCy));
+          addRowText.setAttribute("text-anchor", "middle");
+          addRowText.setAttribute("dominant-baseline", "central");
+          addRowText.setAttribute("class", "umlcanvas-table-btn-text");
+          addRowText.textContent = "+";
+          addRowG.appendChild(addRowCircle);
+          addRowG.appendChild(addRowText);
+          this.interactionLayerEl.appendChild(addRowG);
+
+          // Delete Row (-) button at bottom border (only if rows > 1)
+          if (rows > 1) {
+            const delRowG = document.createElementNS(svgNS, "g");
+            delRowG.setAttribute("class", "umlcanvas-table-canvas-btn umlcanvas-table-del-row-btn");
+            delRowG.setAttribute("data-node-id", node.id);
+            delRowG.setAttribute("title", "Delete Row");
+            const delRowCx = node.position.x + node.size.width / 2 + 14;
+            const delRowCy = node.position.y + node.size.height + 16;
+            const delRowCircle = document.createElementNS(svgNS, "circle");
+            delRowCircle.setAttribute("cx", String(delRowCx));
+            delRowCircle.setAttribute("cy", String(delRowCy));
+            delRowCircle.setAttribute("r", "11");
+            delRowCircle.setAttribute("class", "umlcanvas-table-btn-circle is-delete");
+            const delRowText = document.createElementNS(svgNS, "text");
+            delRowText.setAttribute("x", String(delRowCx));
+            delRowText.setAttribute("y", String(delRowCy));
+            delRowText.setAttribute("text-anchor", "middle");
+            delRowText.setAttribute("dominant-baseline", "central");
+            delRowText.setAttribute("class", "umlcanvas-table-btn-text");
+            delRowText.textContent = "−";
+            delRowG.appendChild(delRowCircle);
+            delRowG.appendChild(delRowText);
+            this.interactionLayerEl.appendChild(delRowG);
+          }
+        }
       }
     }
 
@@ -1957,6 +2064,40 @@ export class SvgSceneRenderer {
 
     if (!target) return;
 
+    // Table Action Buttons (+ / − for Rows and Columns)
+    const tableAddCol = target.closest(".umlcanvas-table-add-col-btn");
+    if (tableAddCol) {
+      e.stopPropagation();
+      e.preventDefault();
+      const nodeId = tableAddCol.getAttribute("data-node-id");
+      if (nodeId) this.editor.addTableColumn(nodeId);
+      return;
+    }
+    const tableDelCol = target.closest(".umlcanvas-table-del-col-btn");
+    if (tableDelCol) {
+      e.stopPropagation();
+      e.preventDefault();
+      const nodeId = tableDelCol.getAttribute("data-node-id");
+      if (nodeId) this.editor.deleteTableColumn(nodeId);
+      return;
+    }
+    const tableAddRow = target.closest(".umlcanvas-table-add-row-btn");
+    if (tableAddRow) {
+      e.stopPropagation();
+      e.preventDefault();
+      const nodeId = tableAddRow.getAttribute("data-node-id");
+      if (nodeId) this.editor.addTableRow(nodeId);
+      return;
+    }
+    const tableDelRow = target.closest(".umlcanvas-table-del-row-btn");
+    if (tableDelRow) {
+      e.stopPropagation();
+      e.preventDefault();
+      const nodeId = tableDelRow.getAttribute("data-node-id");
+      if (nodeId) this.editor.deleteTableRow(nodeId);
+      return;
+    }
+
     // Edge endpoint handle click -> start reconnecting (F-007)
     if (target.classList.contains("umlcanvas-edge-endpoint-handle")) {
       const edgeId = target.getAttribute("data-edge-id")!;
@@ -2246,6 +2387,28 @@ export class SvgSceneRenderer {
           this.editor.selectNode(nodeId, false);
         }
 
+        // Calculate clicked table cell if applicable
+        let clickedCell: { row: number; col: number } | undefined = undefined;
+        const clickedNode = this.editor.diagram.nodes.find((n) => n.id === nodeId);
+        if (clickedNode && clickedNode.kind === "generic.table") {
+          const rows = Math.max(1, (clickedNode.customData?.rows as number) || 3);
+          const cols = Math.max(1, (clickedNode.customData?.cols as number) || 3);
+          const cellEl = target ? target.closest(".umlcanvas-table-cell") : null;
+          if (cellEl) {
+            const r = parseInt(cellEl.getAttribute("data-row") || "0", 10);
+            const c = parseInt(cellEl.getAttribute("data-col") || "0", 10);
+            clickedCell = { row: r, col: c };
+          } else {
+            const relX = canvasPoint.x - clickedNode.position.x;
+            const relY = canvasPoint.y - clickedNode.position.y;
+            const colW = clickedNode.size.width / cols;
+            const rowH = clickedNode.size.height / rows;
+            const r = Math.max(0, Math.min(rows - 1, Math.floor(relY / rowH)));
+            const c = Math.max(0, Math.min(cols - 1, Math.floor(relX / colW)));
+            clickedCell = { row: r, col: c };
+          }
+        }
+
         // If clicking inside the scrollable note body or PDF container, allow text selection and internal interactions without initiating card dragging
         if (
           target.closest(
@@ -2267,6 +2430,7 @@ export class SvgSceneRenderer {
               startClient: clientPoint,
               initialPositions,
               moved: true,
+              clickedCell,
             };
             this.container.classList.add("umlcanvas-moving");
             return;
@@ -2288,6 +2452,7 @@ export class SvgSceneRenderer {
           moved: false,
           wasAlreadySingleSelected,
           clickedNodeId: nodeId,
+          clickedCell,
         };
         this.container.classList.add("umlcanvas-moving");
         return;
@@ -2801,9 +2966,16 @@ export class SvgSceneRenderer {
           node.kind !== "generic.freehand"
         ) {
           if (node.kind === "generic.table") {
-            const cellEl = (e.target as HTMLElement | null)?.closest(".umlcanvas-table-cell");
-            const r = cellEl ? parseInt(cellEl.getAttribute("data-row") || "0", 10) : 0;
-            const c = cellEl ? parseInt(cellEl.getAttribute("data-col") || "0", 10) : 0;
+            let r = 0;
+            let c = 0;
+            if (moveState.clickedCell) {
+              r = moveState.clickedCell.row;
+              c = moveState.clickedCell.col;
+            } else {
+              const cellEl = (e.target as HTMLElement | null)?.closest(".umlcanvas-table-cell");
+              r = cellEl ? parseInt(cellEl.getAttribute("data-row") || "0", 10) : 0;
+              c = cellEl ? parseInt(cellEl.getAttribute("data-col") || "0", 10) : 0;
+            }
             this.dragMode = { type: "none" };
             this.renderInteractions();
             this.startInlineEditor(node, { row: r, col: c });
@@ -3093,9 +3265,24 @@ export class SvgSceneRenderer {
             return;
           }
           if (node.kind === "generic.table") {
-            const cellEl = target.closest(".umlcanvas-table-cell");
-            const r = cellEl ? parseInt(cellEl.getAttribute("data-row") || "0", 10) : 0;
-            const c = cellEl ? parseInt(cellEl.getAttribute("data-col") || "0", 10) : 0;
+            const rows = Math.max(1, (node.customData?.rows as number) || 3);
+            const cols = Math.max(1, (node.customData?.cols as number) || 3);
+            const cellEl = target ? target.closest(".umlcanvas-table-cell") : null;
+            let r = 0;
+            let c = 0;
+            if (cellEl) {
+              r = parseInt(cellEl.getAttribute("data-row") || "0", 10);
+              c = parseInt(cellEl.getAttribute("data-col") || "0", 10);
+            } else {
+              const clientPoint = this.getClientCoords(e);
+              const canvasPoint = screenToCanvas(clientPoint, this.transform);
+              const relX = canvasPoint.x - node.position.x;
+              const relY = canvasPoint.y - node.position.y;
+              const colW = node.size.width / cols;
+              const rowH = node.size.height / rows;
+              r = Math.max(0, Math.min(rows - 1, Math.floor(relY / rowH)));
+              c = Math.max(0, Math.min(cols - 1, Math.floor(relX / colW)));
+            }
             this.startInlineEditor(node, { row: r, col: c });
             return;
           }
@@ -3308,7 +3495,7 @@ export class SvgSceneRenderer {
     }
 
     if (nodeFont.fontSize !== undefined && nodeFont.fontSize > 13) {
-      if (node.kind !== "generic.stickyNote") {
+      if (node.kind !== "generic.stickyNote" && node.kind !== "generic.table") {
         const maxLineChars = lines.reduce((max, l) => Math.max(max, l.length), 0);
         const estimatedW = Math.ceil(maxLineChars * baseFontSize * 0.65 + 24);
         if (estimatedW > inPlaceW) {
@@ -3485,8 +3672,10 @@ export class SvgSceneRenderer {
 
     this.editingNodeId = node.id;
     if (node.kind === "generic.table") {
-      this.editingCellRow = cell?.row ?? 0;
-      this.editingCellCol = cell?.col ?? 0;
+      const rows = Math.max(1, (node.customData?.rows as number) || 3);
+      const cols = Math.max(1, (node.customData?.cols as number) || 3);
+      this.editingCellRow = Math.max(0, Math.min(rows - 1, cell?.row ?? 0));
+      this.editingCellCol = Math.max(0, Math.min(cols - 1, cell?.col ?? 0));
     } else {
       this.editingCellRow = undefined;
       this.editingCellCol = undefined;
@@ -3497,6 +3686,18 @@ export class SvgSceneRenderer {
     );
     if (nodeEl) {
       nodeEl.classList.add("umlcanvas-node-editing");
+      if (node.kind === "generic.table") {
+        const cellEls = nodeEl.querySelectorAll(".umlcanvas-table-cell");
+        cellEls.forEach((el) => {
+          const r = parseInt(el.getAttribute("data-row") || "0", 10);
+          const c = parseInt(el.getAttribute("data-col") || "0", 10);
+          if (r === this.editingCellRow && c === this.editingCellCol) {
+            el.classList.add("is-editing");
+          } else {
+            el.classList.remove("is-editing");
+          }
+        });
+      }
     }
 
     let currentText = node.labels[0]?.text ?? "";
@@ -3576,6 +3777,12 @@ export class SvgSceneRenderer {
         if (e.key === "Tab") {
           e.preventDefault();
           this.commitInlineEditor();
+          if (!e.shiftKey && r === rows - 1 && c === cols - 1) {
+            // Auto-expand table by appending a new row on Tab from the last cell
+            this.editor.addTableRow(node.id);
+            this.startInlineEditor(node, { row: rows, col: 0 });
+            return;
+          }
           const nextC = e.shiftKey ? (c > 0 ? c - 1 : cols - 1) : (c + 1 < cols ? c + 1 : 0);
           const nextR = e.shiftKey
             ? (c > 0 ? r : (r > 0 ? r - 1 : rows - 1))
@@ -4011,15 +4218,15 @@ export class SvgSceneRenderer {
   }
 
   public cleanupInlineEditor(): void {
-    if (this.editingNodeId) {
-      const nodeEl = this.nodesLayerEl.querySelector<SVGGElement>(
-        `[data-node-id="${this.editingNodeId}"]`
-      );
-      if (nodeEl) {
-        nodeEl.classList.remove("umlcanvas-node-editing");
-      }
-      this.editingNodeId = null;
+    if (this.nodesLayerEl) {
+      const editingCells = this.nodesLayerEl.querySelectorAll(".is-editing");
+      editingCells.forEach((el) => el.classList.remove("is-editing"));
+      const editingNodes = this.nodesLayerEl.querySelectorAll(".umlcanvas-node-editing");
+      editingNodes.forEach((el) => el.classList.remove("umlcanvas-node-editing"));
     }
+    this.editingNodeId = null;
+    this.editingCellRow = undefined;
+    this.editingCellCol = undefined;
     if (this.editingGroupId) {
       const groupEl = this.groupsLayerEl.querySelector<SVGGElement>(
         `[data-group-id="${this.editingGroupId}"]`
@@ -4047,6 +4254,13 @@ export class SvgSceneRenderer {
     return this.inlineEditorEl;
   }
 
+  public get activeEditingCell(): { row: number; col: number } | null {
+    if (this.editingCellRow !== undefined && this.editingCellCol !== undefined) {
+      return { row: this.editingCellRow, col: this.editingCellCol };
+    }
+    return null;
+  }
+
   private handleKeyDown(e: KeyboardEvent): void {
     if (e.code === "Space" && !this.inlineEditorEl) {
       this.isSpacePressed = true;
@@ -4063,7 +4277,10 @@ export class SvgSceneRenderer {
         );
         if (node && !this.editor.isNodeLocked(node.id)) {
           e.preventDefault();
-          this.startInlineEditor(node);
+          this.startInlineEditor(
+            node,
+            node.kind === "generic.table" ? { row: 0, col: 0 } : undefined
+          );
           return;
         }
       } else if (this.editor.selectedEdgeIds.length === 1) {

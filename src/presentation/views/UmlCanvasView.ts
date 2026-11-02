@@ -814,14 +814,92 @@ export class UmlCanvasView extends TextFileView {
         });
       }
 
-      menu.addItem((item) => {
-        item
-          .setTitle("Edit text")
-          .setIcon("edit")
-          .onClick(() => {
-            this.renderer?.startInlineEditor(node);
+      if (node.kind === "generic.table") {
+        const rows = Math.max(1, (node.customData?.rows as number) || 3);
+        const cols = Math.max(1, (node.customData?.cols as number) || 3);
+        const relX = canvasPoint.x - node.position.x;
+        const relY = canvasPoint.y - node.position.y;
+        const colW = node.size.width / cols;
+        const rowH = node.size.height / rows;
+        const clickR = Math.max(0, Math.min(rows - 1, Math.floor(relY / rowH)));
+        const clickC = Math.max(0, Math.min(cols - 1, Math.floor(relX / colW)));
+
+        menu.addItem((item) => {
+          item
+            .setTitle(`Edit cell (${clickR + 1}, ${clickC + 1})`)
+            .setIcon("edit")
+            .onClick(() => {
+              this.renderer?.startInlineEditor(node, { row: clickR, col: clickC });
+            });
+        });
+
+        menu.addItem((item) => {
+          item
+            .setTitle("Add row above")
+            .setIcon("arrow-up")
+            .onClick(() => {
+              this.editor?.addTableRow(node.id, clickR);
+            });
+        });
+
+        menu.addItem((item) => {
+          item
+            .setTitle("Add row below")
+            .setIcon("arrow-down")
+            .onClick(() => {
+              this.editor?.addTableRow(node.id, clickR + 1);
+            });
+        });
+
+        if (rows > 1) {
+          menu.addItem((item) => {
+            item
+              .setTitle(`Delete row (${clickR + 1})`)
+              .setIcon("trash")
+              .onClick(() => {
+                this.editor?.deleteTableRow(node.id, clickR);
+              });
           });
-      });
+        }
+
+        menu.addItem((item) => {
+          item
+            .setTitle("Add column left")
+            .setIcon("arrow-left")
+            .onClick(() => {
+              this.editor?.addTableColumn(node.id, clickC);
+            });
+        });
+
+        menu.addItem((item) => {
+          item
+            .setTitle("Add column right")
+            .setIcon("arrow-right")
+            .onClick(() => {
+              this.editor?.addTableColumn(node.id, clickC + 1);
+            });
+        });
+
+        if (cols > 1) {
+          menu.addItem((item) => {
+            item
+              .setTitle(`Delete column (${clickC + 1})`)
+              .setIcon("trash")
+              .onClick(() => {
+                this.editor?.deleteTableColumn(node.id, clickC);
+              });
+          });
+        }
+      } else {
+        menu.addItem((item) => {
+          item
+            .setTitle("Edit text")
+            .setIcon("edit")
+            .onClick(() => {
+              this.renderer?.startInlineEditor(node);
+            });
+        });
+      }
 
       menu.addItem((item) => {
         item

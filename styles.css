@@ -1119,6 +1119,58 @@ body .umlcanvas-moving * {
   pointer-events: none;
 }
 
+/* Table Cell Active In-Place Editing */
+.umlcanvas-table-cell.is-editing .umlcanvas-table-cell-text {
+  opacity: 0 !important;
+  visibility: hidden !important;
+}
+
+.umlcanvas-table-cell.is-editing .umlcanvas-table-cell-hitbox {
+  stroke: var(--interactive-accent, #7c3aed);
+  stroke-width: 1.5px;
+  stroke-dasharray: 3 3;
+}
+
+/* On-canvas Interactive Table Controls */
+.umlcanvas-table-canvas-btn {
+  cursor: pointer;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.umlcanvas-table-canvas-btn:hover {
+  transform: scale(1.18);
+}
+
+.umlcanvas-table-btn-circle {
+  fill: var(--background-secondary, #2a2a2a);
+  stroke: var(--interactive-accent, #7c3aed);
+  stroke-width: 1.5;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.25));
+  transition: fill 0.15s ease, stroke 0.15s ease;
+}
+
+.umlcanvas-table-canvas-btn:hover .umlcanvas-table-btn-circle {
+  fill: var(--interactive-accent, #7c3aed);
+}
+
+.umlcanvas-table-btn-circle.is-delete {
+  stroke: var(--text-muted, #888);
+}
+
+.umlcanvas-table-canvas-btn:hover .umlcanvas-table-btn-circle.is-delete {
+  fill: var(--text-error, #e53e3e);
+  stroke: var(--text-error, #e53e3e);
+}
+
+.umlcanvas-table-btn-text {
+  fill: var(--text-normal, #ffffff);
+  font-family: var(--font-text, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+  font-size: 13px;
+  font-weight: 700;
+  pointer-events: none;
+  user-select: none;
+}
+
 .umlcanvas-shape-image {
   filter: drop-shadow(0 3px 10px rgba(0, 0, 0, 0.16));
 }

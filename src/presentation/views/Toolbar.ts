@@ -72,6 +72,10 @@ export class Toolbar {
   private colorIndicatorEl!: HTMLElement;
   private labelBtn!: HTMLButtonElement;
   private autoFitBtn!: HTMLButtonElement;
+  private addTableRowBtn!: HTMLButtonElement;
+  private deleteTableRowBtn!: HTMLButtonElement;
+  private addTableColBtn!: HTMLButtonElement;
+  private deleteTableColBtn!: HTMLButtonElement;
   private enhanceBtn!: HTMLButtonElement;
   private alignBtn!: HTMLButtonElement;
   private groupBtn!: HTMLButtonElement;
@@ -463,6 +467,9 @@ export class Toolbar {
       this.renderer.setFreehandMode(false);
       this.updateToolMode();
     }
+    if (node && typeof this.renderer.startInlineEditor === "function") {
+      this.renderer.startInlineEditor(node, { row: 0, col: 0 });
+    }
     return node;
   }
 
@@ -818,6 +825,51 @@ export class Toolbar {
       "scaling"
     );
     this.contextGroup.appendChild(this.autoFitBtn);
+
+    // Table Structure Controls (visible when table is selected)
+    this.addTableRowBtn = this.createButton(
+      "Add Row to Table",
+      "+ Row",
+      () => {
+        const id = this.editor.selectedNodeIds[0];
+        if (id) this.editor.addTableRow(id);
+      },
+      "rows"
+    );
+    this.contextGroup.appendChild(this.addTableRowBtn);
+
+    this.deleteTableRowBtn = this.createButton(
+      "Delete Row from Table",
+      "− Row",
+      () => {
+        const id = this.editor.selectedNodeIds[0];
+        if (id) this.editor.deleteTableRow(id);
+      },
+      "minus-circle"
+    );
+    this.contextGroup.appendChild(this.deleteTableRowBtn);
+
+    this.addTableColBtn = this.createButton(
+      "Add Column to Table",
+      "+ Col",
+      () => {
+        const id = this.editor.selectedNodeIds[0];
+        if (id) this.editor.addTableColumn(id);
+      },
+      "columns"
+    );
+    this.contextGroup.appendChild(this.addTableColBtn);
+
+    this.deleteTableColBtn = this.createButton(
+      "Delete Column from Table",
+      "− Col",
+      () => {
+        const id = this.editor.selectedNodeIds[0];
+        if (id) this.editor.deleteTableColumn(id);
+      },
+      "minus"
+    );
+    this.contextGroup.appendChild(this.deleteTableColBtn);
 
     // Enhance Handwriting to Text / Shape
     this.enhanceBtn = this.createButton(
@@ -1235,7 +1287,11 @@ export class Toolbar {
         (n) => n.id === this.editor.selectedNodeIds[0]
       );
       if (node) {
-        this.renderer.startInlineEditor(node);
+        if (node.kind === "generic.table") {
+          this.renderer.startInlineEditor(node, { row: 0, col: 0 });
+        } else {
+          this.renderer.startInlineEditor(node);
+        }
       }
     } else if (this.editor.selectedEdgeIds.length === 1) {
       const edge = this.editor.diagram.edges.find(
@@ -1369,6 +1425,35 @@ export class Toolbar {
       // Auto-fit button (node selected)
       this.autoFitBtn.disabled = selectedNodeCount === 0;
       this.autoFitBtn.classList.toggle("is-hidden", selectedNodeCount === 0);
+
+      // Table context controls
+      const isSingleTable =
+        selectedNodeCount === 1 &&
+        totalSelected === 1 &&
+        this.editor.diagram.nodes.find((n) => n.id === this.editor.selectedNodeIds[0])?.kind === "generic.table";
+
+      if (this.addTableRowBtn) {
+        this.addTableRowBtn.classList.toggle("is-hidden", !isSingleTable);
+      }
+      if (this.deleteTableRowBtn) {
+        this.deleteTableRowBtn.classList.toggle("is-hidden", !isSingleTable);
+        if (isSingleTable) {
+          const tableNode = this.editor.diagram.nodes.find((n) => n.id === this.editor.selectedNodeIds[0]);
+          const rows = (tableNode?.customData?.rows as number) || 1;
+          this.deleteTableRowBtn.disabled = rows <= 1;
+        }
+      }
+      if (this.addTableColBtn) {
+        this.addTableColBtn.classList.toggle("is-hidden", !isSingleTable);
+      }
+      if (this.deleteTableColBtn) {
+        this.deleteTableColBtn.classList.toggle("is-hidden", !isSingleTable);
+        if (isSingleTable) {
+          const tableNode = this.editor.diagram.nodes.find((n) => n.id === this.editor.selectedNodeIds[0]);
+          const cols = (tableNode?.customData?.cols as number) || 1;
+          this.deleteTableColBtn.disabled = cols <= 1;
+        }
+      }
 
       // Enhance button (visible when freehand nodes are selected)
       const hasFreehandSelected = this.editor.diagram.nodes.some(

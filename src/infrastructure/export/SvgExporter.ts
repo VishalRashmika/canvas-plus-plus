@@ -823,7 +823,18 @@ export class SvgExporter {
             if (cellText) {
               const cx = c * colWidth + colWidth / 2;
               const cy = r * rowHeight + rowHeight / 2 + 4;
-              out += `    <text x="${cx}" y="${cy}" text-anchor="middle" class="node-title"${fontAttrs}>${escapeXml(cellText)}</text>\n`;
+              if (cellText.includes("\n")) {
+                const lines = cellText.split(/\r?\n/);
+                const lineH = Math.round((nodeFont.fontSize ?? 12) * 1.35);
+                const startY = cy - ((lines.length - 1) * lineH) / 2;
+                out += `    <text x="${cx}" y="${startY}" text-anchor="middle" class="node-title"${fontAttrs}>\n`;
+                for (let i = 0; i < lines.length; i++) {
+                  out += `      <tspan x="${cx}" y="${Math.round(startY + i * lineH)}">${escapeXml(lines[i])}</tspan>\n`;
+                }
+                out += `    </text>\n`;
+              } else {
+                out += `    <text x="${cx}" y="${cy}" text-anchor="middle" class="node-title"${fontAttrs}>${escapeXml(cellText)}</text>\n`;
+              }
             }
           }
         }

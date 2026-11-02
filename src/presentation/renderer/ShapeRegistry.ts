@@ -4218,11 +4218,27 @@ export class ShapeRegistry {
               textEl.setAttribute("text-anchor", "middle");
               textEl.setAttribute("dominant-baseline", "central");
               textEl.setAttribute("class", "umlcanvas-table-cell-text");
-              textEl.textContent = cellText;
               applyFontToSvgElement(textEl, {
                 ...nodeFont,
                 fontSize,
               });
+
+              if (cellText.includes("\n")) {
+                const lines = cellText.split(/\r?\n/);
+                const lineH = Math.round(fontSize * 1.35);
+                const startY = cellY + rowHeight / 2 - ((lines.length - 1) * lineH) / 2;
+                lines.forEach((lineStr, idx) => {
+                  const tspan = document.createElementNS(svgNS, "tspan");
+                  tspan.setAttribute("x", String(cellX + colWidth / 2));
+                  tspan.setAttribute("y", String(Math.round(startY + idx * lineH)));
+                  tspan.setAttribute("text-anchor", "middle");
+                  tspan.setAttribute("dominant-baseline", "central");
+                  tspan.textContent = lineStr;
+                  textEl.appendChild(tspan);
+                });
+              } else {
+                textEl.textContent = cellText;
+              }
               cellG.appendChild(textEl);
             }
 

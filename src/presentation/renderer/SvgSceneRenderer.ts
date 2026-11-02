@@ -2012,7 +2012,7 @@ export class SvgSceneRenderer {
       target &&
       typeof target.closest === "function" &&
       target.closest(
-        ".umlcanvas-main-toolbar, .umlcanvas-floating-bottom-toolbar, .umlcanvas-toolbar, .umlcanvas-menu-dropdown, .umlcanvas-palette-panel, .umlcanvas-minimap, .umlcanvas-color-palette-popover, .umlcanvas-align-popover, .umlcanvas-font-size-popover, .umlcanvas-font-size-dropdown, .umlcanvas-font-family-dropdown, .umlcanvas-connector-popover, .umlcanvas-line-popover, .umlcanvas-breadcrumbs, .umlcanvas-inline-editor, .modal, .menu, [class*='popover'], [class*='dropdown']"
+        ".umlcanvas-main-toolbar, .umlcanvas-floating-bottom-toolbar, .umlcanvas-toolbar, .umlcanvas-menu-dropdown, .umlcanvas-palette-panel, .umlcanvas-palette-toggle-tab, .umlcanvas-minimap, .umlcanvas-color-palette-popover, .umlcanvas-align-popover, .umlcanvas-font-size-popover, .umlcanvas-font-size-dropdown, .umlcanvas-font-family-dropdown, .umlcanvas-connector-popover, .umlcanvas-line-popover, .umlcanvas-breadcrumbs, .umlcanvas-inline-editor, .modal, .menu, [class*='popover'], [class*='dropdown']"
       )
     ) {
       return;
@@ -2395,7 +2395,7 @@ export class SvgSceneRenderer {
     }
 
     // Node click -> Select & start move
-    let nodeEl = target ? (target.closest(".umlcanvas-node") as SVGGElement | null) : null;
+    let nodeEl = target ? target.closest<SVGGElement>(".umlcanvas-node") : null;
     let nodeId = nodeEl?.getAttribute("data-node-id") ?? preNodeId;
     if (nodeId) {
       if (!nodeEl) {

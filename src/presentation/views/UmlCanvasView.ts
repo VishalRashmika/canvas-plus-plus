@@ -386,7 +386,7 @@ export class UmlCanvasView extends TextFileView {
       if (!target) return;
       if (
         target.closest(
-          ".umlcanvas-toolbar, .umlcanvas-main-toolbar, .umlcanvas-floating-bottom-toolbar, .umlcanvas-menu-dropdown, .umlcanvas-palette-panel, .umlcanvas-minimap, .umlcanvas-color-palette-popover, .umlcanvas-align-popover, .umlcanvas-font-size-popover, .umlcanvas-font-size-dropdown, .umlcanvas-font-family-dropdown, .umlcanvas-connector-popover, .umlcanvas-line-popover, .umlcanvas-breadcrumbs, .umlcanvas-inline-editor, .modal, .menu, [class*='popover'], [class*='dropdown']"
+          ".umlcanvas-toolbar, .umlcanvas-main-toolbar, .umlcanvas-floating-bottom-toolbar, .umlcanvas-menu-dropdown, .umlcanvas-palette-panel, .umlcanvas-palette-toggle-tab, .umlcanvas-minimap, .umlcanvas-color-palette-popover, .umlcanvas-align-popover, .umlcanvas-font-size-popover, .umlcanvas-font-size-dropdown, .umlcanvas-font-family-dropdown, .umlcanvas-connector-popover, .umlcanvas-line-popover, .umlcanvas-breadcrumbs, .umlcanvas-inline-editor, .modal, .menu, [class*='popover'], [class*='dropdown']"
         )
       ) {
         return;
@@ -403,6 +403,15 @@ export class UmlCanvasView extends TextFileView {
       const mod = isMac ? e.metaKey : e.ctrlKey;
       const target = e.target as HTMLElement | null;
       const isInput = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable || Boolean(target.closest(".umlcanvas-inline-editor")));
+
+      if (e.key === "Escape") {
+        if (this.palette?.isOpen) {
+          e.preventDefault();
+          e.stopPropagation();
+          this.palette.close();
+          return;
+        }
+      }
 
       if (mod && e.key.toLowerCase() === "c" && !isInput) {
         e.preventDefault();

@@ -1746,6 +1746,7 @@ export class Toolbar {
   updatePaletteButtonState(isOpen: boolean): void {
     if (this.paletteBtn) {
       this.paletteBtn.classList.toggle("is-active", isOpen);
+      this.paletteBtn.setAttribute("aria-pressed", String(isOpen));
     }
   }
 

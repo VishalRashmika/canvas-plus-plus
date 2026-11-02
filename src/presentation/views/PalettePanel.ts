@@ -1,4 +1,4 @@
-import { App } from "obsidian";
+import { App, setIcon } from "obsidian";
 import { DiagramEditor } from "../../application/use-cases/DiagramEditor";
 import { SvgSceneRenderer } from "../renderer/SvgSceneRenderer";
 import { ShapeRegistry, ShapeDefinition } from "../renderer/ShapeRegistry";
@@ -6,6 +6,14 @@ import { defaultEdgeStyleRegistry, EdgeStyleDefinition } from "../renderer/EdgeS
 import { createDiagramNode } from "../../domain/entities/DiagramNode";
 import { ChipInterfaceDefinition } from "../../domain/entities/ChipInterfaceDefinition";
 import { defaultCustomChipRegistry } from "../../domain/services/CustomChipRegistry";
+
+interface HandledEvent extends Event {
+  _umlHandled?: boolean;
+}
+
+function markEventHandled(e: Event): void {
+  (e as HandledEvent)._umlHandled = true;
+}
 
 export interface ShapeCategory {
   id: string;
@@ -153,6 +161,7 @@ export class PalettePanel {
   private startWidth = 0;
   private boundOnMouseMove: ((e: MouseEvent) => void) | null = null;
   private boundOnMouseUp: ((e: MouseEvent) => void) | null = null;
+  private boundWindowPointerUp: (() => void) | null = null;
 
   constructor(
     private readonly container: HTMLElement,
@@ -169,7 +178,17 @@ export class PalettePanel {
     // 1. Right side drawer container
     this.panelEl = this.container.createDiv({ cls: "umlcanvas-palette-panel is-collapsed" });
     this.panelEl.setCssStyles({ width: `${this.currentWidth}px` });
-    this.panelEl.addEventListener("mousedown", (e) => e.stopPropagation());
+    this.panelEl.addEventListener("mousedown", (e) => {
+      markEventHandled(e);
+      e.stopPropagation();
+    });
+    this.panelEl.addEventListener("keydown", (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        this.close();
+      }
+    });
 
     // 1b. Left edge resize handle
     this.resizeHandleEl = this.panelEl.createDiv({
@@ -185,9 +204,41 @@ export class PalettePanel {
     });
     this.toggleTabEl.createSpan({ text: "‹" });
     this.toggleTabEl.createSpan({ cls: "umlcanvas-palette-tab-text", text: "Shapes" });
-    this.toggleTabEl.addEventListener("click", () => {
-      this.toggle(true);
+
+    // Protect against accidental drawer opening during canvas drag, pan, or freehand stroke
+    let pointerDownOnTab = false;
+    let tabStartX = 0;
+    let tabStartY = 0;
+
+    const onTabPointerDown = (e: MouseEvent | PointerEvent) => {
+      pointerDownOnTab = true;
+      tabStartX = e.clientX ?? 0;
+      tabStartY = e.clientY ?? 0;
+      markEventHandled(e);
+      e.stopPropagation();
+    };
+
+    this.toggleTabEl.addEventListener("pointerdown", onTabPointerDown);
+    this.toggleTabEl.addEventListener("mousedown", onTabPointerDown);
+
+    this.toggleTabEl.addEventListener("click", (e) => {
+      markEventHandled(e);
+      e.stopPropagation();
+      // If a drag/pan started on the canvas and released over the tab, ignore click
+      if (!pointerDownOnTab) return;
+      pointerDownOnTab = false;
+      const moved = Math.hypot((e.clientX ?? 0) - tabStartX, (e.clientY ?? 0) - tabStartY);
+      if (moved > 8) return;
+      this.open();
     });
+
+    this.boundWindowPointerUp = () => {
+      pointerDownOnTab = false;
+    };
+    if (typeof window !== "undefined") {
+      window.addEventListener("pointerup", this.boundWindowPointerUp);
+      window.addEventListener("mouseup", this.boundWindowPointerUp);
+    }
 
     // Default: expand category matching current diagram type, collapse others
     this.initDefaultExpandedState();
@@ -216,22 +267,49 @@ export class PalettePanel {
 
   private createHeader(): void {
     const header = this.panelEl.createDiv({ cls: "umlcanvas-palette-header-bar" });
+    header.addEventListener("mousedown", (e) => {
+      markEventHandled(e);
+      e.stopPropagation();
+    });
 
     const title = header.createDiv({ cls: "umlcanvas-palette-title" });
     title.createSpan({ text: "Shape Library" });
 
     const closeBtn = header.createEl("button", {
-      cls: "umlcanvas-palette-close-btn",
-      title: "Close Shape Library",
-      text: "✕",
+      cls: "umlcanvas-palette-close-btn clickable-icon",
+      title: "Close shape library (Esc)",
+      attr: { type: "button", "aria-label": "Close shape library" },
     });
-    closeBtn.addEventListener("click", () => {
-      this.toggle(false);
-    });
+
+    try {
+      setIcon(closeBtn, "x");
+    } catch {
+      // Graceful fallback for non-Obsidian environments
+    }
+    if (closeBtn.children.length === 0) {
+      closeBtn.createSpan({ cls: "umlcanvas-close-glyph", text: "✕" });
+    }
+
+    const handleClose = (e: Event) => {
+      markEventHandled(e);
+      e.stopPropagation();
+      if (typeof (e as MouseEvent).preventDefault === "function") {
+        (e as MouseEvent).preventDefault();
+      }
+      this.close();
+    };
+
+    closeBtn.addEventListener("pointerdown", handleClose);
+    closeBtn.addEventListener("mousedown", handleClose);
+    closeBtn.addEventListener("click", handleClose);
   }
 
   private createSearch(): void {
     const container = this.panelEl.createDiv({ cls: "umlcanvas-palette-search-container" });
+    container.addEventListener("mousedown", (e) => {
+      markEventHandled(e);
+      e.stopPropagation();
+    });
 
     const input = container.createEl("input", {
       cls: "umlcanvas-palette-search-input",
@@ -240,6 +318,13 @@ export class PalettePanel {
     });
     input.addEventListener("input", () => {
       this.filterShapes(input.value.trim().toLowerCase());
+    });
+    input.addEventListener("keydown", (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        this.close();
+      }
     });
 
     this.searchInput = input;
@@ -875,29 +960,45 @@ export class PalettePanel {
     });
   }
 
-  toggle(visible?: boolean): void {
-    if (visible === undefined) {
-      this.isOpenState = !this.isOpenState;
-    } else {
-      this.isOpenState = visible;
+  public open(): void {
+    if (this.isOpenState && !this.panelEl.classList.contains("is-collapsed")) {
+      return;
     }
-
-    if (this.isOpenState) {
-      this.panelEl.classList.remove("is-collapsed");
-      this.toggleTabEl.classList.add("is-hidden");
-      if (this.searchInput) {
-        window.setTimeout(() => this.searchInput?.focus(), 100);
-      }
-    } else {
-      this.panelEl.classList.add("is-collapsed");
-      this.toggleTabEl.classList.remove("is-hidden");
+    this.isOpenState = true;
+    this.panelEl.classList.remove("is-collapsed");
+    this.panelEl.classList.add("is-open");
+    this.toggleTabEl.classList.add("is-hidden");
+    if (this.searchInput) {
+      window.setTimeout(() => this.searchInput?.focus(), 50);
     }
+    this.onToggleChange?.(true);
+  }
 
-    this.onToggleChange?.(this.isOpenState);
+  public close(): void {
+    if (!this.isOpenState && this.panelEl.classList.contains("is-collapsed")) {
+      return;
+    }
+    this.isOpenState = false;
+    this.panelEl.classList.add("is-collapsed");
+    this.panelEl.classList.remove("is-open");
+    this.toggleTabEl.classList.remove("is-hidden");
+    if (this.searchInput && typeof document !== "undefined" && document.activeElement === this.searchInput) {
+      this.searchInput.blur();
+    }
+    this.onToggleChange?.(false);
+  }
+
+  public toggle(visible?: boolean): void {
+    const shouldBeOpen = visible !== undefined ? visible : !this.isOpen;
+    if (shouldBeOpen) {
+      this.open();
+    } else {
+      this.close();
+    }
   }
 
   get isOpen(): boolean {
-    return this.isOpenState;
+    return this.isOpenState || !this.panelEl.classList.contains("is-collapsed");
   }
 
   private initResizeHandle(): void {
@@ -1024,6 +1125,11 @@ export class PalettePanel {
   destroy(): void {
     if (this.isResizing) {
       this.stopResizing();
+    }
+    if (typeof window !== "undefined" && this.boundWindowPointerUp) {
+      window.removeEventListener("pointerup", this.boundWindowPointerUp);
+      window.removeEventListener("mouseup", this.boundWindowPointerUp);
+      this.boundWindowPointerUp = null;
     }
     if (this.unsubscribe) {
       this.unsubscribe();

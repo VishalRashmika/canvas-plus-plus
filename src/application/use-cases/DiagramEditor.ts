@@ -1787,6 +1787,7 @@ export class DiagramEditor {
           rowHeights: tableResult.rowHeights,
           colWidths: tableResult.colWidths,
         },
+        select: false,
       });
       return node;
     }
@@ -1815,13 +1816,14 @@ export class DiagramEditor {
           fontFamily: fontResult.fontFamily,
           fontSize: fontResult.estimatedFontSize,
         },
+        select: false,
       });
 
       return node;
     }
 
     if (strokes.length === 1) {
-      return this.snapStrokeToShape(strokes[0], { confidenceThreshold });
+      return this.snapStrokeToShape(strokes[0], { confidenceThreshold, select: false });
     }
 
     return null;
@@ -2464,7 +2466,7 @@ export class DiagramEditor {
         ? { confidenceThreshold: optionsOrThreshold }
         : optionsOrThreshold;
 
-    const select = opts.select;
+    const select = opts.select ?? false;
 
     if (opts.forceFreehand) {
       return this.addFreehandNode(stroke, { select: select ?? false });
@@ -2872,7 +2874,7 @@ export class DiagramEditor {
     }
 
     this.updateEdgeStyle(bestEdge.id, styleUpdates, newKind);
-    if (options?.select !== false) {
+    if (options?.select === true) {
       this.selectEdge(bestEdge.id, false);
     }
     this.notify();

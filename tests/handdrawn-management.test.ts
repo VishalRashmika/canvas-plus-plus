@@ -925,5 +925,120 @@ describe("Issue #17 & #18: Hand Drawn Shapes, Auto Connection & Object Managemen
       expect(node.position.x).toBe(90);
       expect(node.position.y).toBe(80);
     });
+
+    it("should NOT select and NOT show transform box when SvgSceneRenderer has no custom onStrokeComplete callback", () => {
+      const defaultEditor = new DiagramEditor(createDiagram({ id: "diag-default-stroke", diagramType: "general" }));
+      const defaultContainer = new MockElement("div", { cls: "umlcanvas-svg-container" });
+      const defaultRenderer = new SvgSceneRenderer(defaultContainer as any, defaultEditor, {
+        enableFreehand: true,
+        autoShapeDetection: false,
+      });
+
+      defaultRenderer.setFreehandMode(true);
+      const svgEl = defaultContainer.querySelector(".umlcanvas-svg");
+      const bgRect = defaultContainer.querySelector(".umlcanvas-bg");
+
+      svgEl?.dispatch("mousedown", { button: 0, target: bgRect, clientX: 30, clientY: 30 });
+      (window as any).dispatch("mousemove", { clientX: 60, clientY: 60 });
+      (window as any).dispatch("mousemove", { clientX: 90, clientY: 90 });
+      (window as any).dispatch("mousemove", { clientX: 120, clientY: 120 });
+      (window as any).dispatch("mouseup", { clientX: 120, clientY: 120 });
+
+      expect(defaultEditor.diagram.nodes.length).toBe(1);
+      expect(defaultEditor.hasSelection).toBe(false);
+      expect(defaultContainer.querySelectorAll(".umlcanvas-selection-outline").length).toBe(0);
+      expect(defaultContainer.querySelectorAll(".umlcanvas-resize-handle").length).toBe(0);
+
+      defaultRenderer.destroy();
+    });
+
+    it("should NOT select by default and NOT show transform box when auto-shape detection recognizes a shape", () => {
+      const autoEditor = new DiagramEditor(createDiagram({ id: "diag-auto-detect", diagramType: "general" }));
+      const autoContainer = new MockElement("div", { cls: "umlcanvas-svg-container" });
+      const autoRenderer = new SvgSceneRenderer(autoContainer as any, autoEditor, {
+        enableFreehand: true,
+        autoShapeDetection: true,
+      });
+
+      autoRenderer.setFreehandMode(true);
+      const svgEl = autoContainer.querySelector(".umlcanvas-svg");
+      const bgRect = autoContainer.querySelector(".umlcanvas-bg");
+
+      // Draw a circle stroke
+      const r = 40;
+      const cx = 150;
+      const cy = 150;
+      const numPts = 16;
+      svgEl?.dispatch("mousedown", { button: 0, target: bgRect, clientX: cx + r, clientY: cy });
+      for (let i = 1; i <= numPts; i++) {
+        const theta = (i / numPts) * 2 * Math.PI;
+        (window as any).dispatch("mousemove", {
+          clientX: cx + r * Math.cos(theta),
+          clientY: cy + r * Math.sin(theta),
+        });
+      }
+      (window as any).dispatch("mouseup", { clientX: cx + r, clientY: cy });
+
+      expect(autoEditor.diagram.nodes.length).toBe(1);
+      const recognized = autoEditor.diagram.nodes[0];
+      expect(recognized.kind).toBe("generic.circle");
+
+      // Critical: auto-detected shape must NOT be selected by default!
+      expect(autoEditor.hasSelection).toBe(false);
+      expect(autoContainer.querySelectorAll(".umlcanvas-selection-outline").length).toBe(0);
+      expect(autoContainer.querySelectorAll(".umlcanvas-resize-handle").length).toBe(0);
+
+      // Switch to select tool and manually select it
+      autoRenderer.setFreehandMode(false);
+      const nodeEl = autoContainer.querySelector(`[data-node-id="${recognized.id}"]`);
+      expect(nodeEl).not.toBeNull();
+
+      svgEl?.dispatch("mousedown", {
+        button: 0,
+        target: nodeEl,
+        clientX: cx,
+        clientY: cy,
+      });
+      (window as any).dispatch("mouseup", { clientX: cx, clientY: cy });
+
+      expect(autoEditor.hasSelection).toBe(true);
+      expect(autoEditor.selectedNodeIds).toEqual([recognized.id]);
+      expect(autoContainer.querySelectorAll(".umlcanvas-selection-outline").length).toBe(1);
+      expect(autoContainer.querySelectorAll(".umlcanvas-resize-handle").length).toBe(8);
+
+      autoRenderer.destroy();
+    });
+
+    it("snapStrokeToShape should NOT select newly added nodes or edges by default", () => {
+      const editor = new DiagramEditor(createDiagram({ id: "diag-snap-test", diagramType: "general" }));
+      const circleStroke = makeCircleStroke(100, 100, 40);
+
+      const node = editor.snapStrokeToShape(circleStroke);
+      expect(node).not.toBeNull();
+      expect(editor.hasSelection).toBe(false);
+      expect(editor.selectedNodeIds).toEqual([]);
+    });
+
+    it("snapStrokeToShape should NOT select newly added connection edge by default", () => {
+      const editor = new DiagramEditor(createDiagram({ id: "diag-conn-test", diagramType: "uml.class" }));
+      const n1 = editor.addNode({ kind: "uml.class", position: { x: 50, y: 50 }, size: { width: 100, height: 60 }, select: false });
+      const n2 = editor.addNode({ kind: "uml.class", position: { x: 300, y: 50 }, size: { width: 100, height: 60 }, select: false });
+      expect(editor.hasSelection).toBe(false);
+
+      const connStroke: Stroke = {
+        id: "s-conn",
+        points: [
+          { x: 155, y: 80 },
+          { x: 220, y: 80 },
+          { x: 295, y: 80 },
+        ],
+      };
+
+      const edge = editor.snapStrokeToShape(connStroke);
+      expect(edge).not.toBeNull();
+      expect(editor.diagram.edges.length).toBe(1);
+      expect(editor.hasSelection).toBe(false);
+      expect(editor.selectedEdgeIds).toEqual([]);
+    });
   });
 });

@@ -2939,10 +2939,18 @@ export class SvgSceneRenderer {
         const height = maxY - minY;
         const isMicroStroke = stroke.points.length < 4 || (width < 15 && height < 15);
 
-        if (!isMicroStroke && this.onStrokeComplete) {
+        if (!isMicroStroke) {
           const shiftKeyHeld = Boolean(e.shiftKey);
           const effectiveAutoDetect = shiftKeyHeld ? !this.autoShapeDetection : this.autoShapeDetection;
-          this.onStrokeComplete(stroke, { autoDetect: effectiveAutoDetect });
+          if (this.onStrokeComplete) {
+            this.onStrokeComplete(stroke, { autoDetect: effectiveAutoDetect });
+          } else {
+            if (effectiveAutoDetect) {
+              this.editor.snapStrokeToShape(stroke, { select: false, fallbackToFreehand: true });
+            } else {
+              this.editor.keepAsFreehand(stroke, { select: false });
+            }
+          }
           if (this.editor.hasSelection) {
             this.editor.clearSelection();
           }

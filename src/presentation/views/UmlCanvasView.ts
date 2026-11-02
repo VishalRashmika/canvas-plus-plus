@@ -287,10 +287,13 @@ export class UmlCanvasView extends TextFileView {
           });
           if (result) {
             const isText = (result as DiagramNode).kind === "generic.text";
-            this.showFreehandEscapeHatch(
-              stroke,
-              isText ? "Handwriting recognized" : "Shape recognized"
-            );
+            const isFreehand = (result as DiagramNode).kind === "generic.freehand";
+            if (!isFreehand) {
+              this.showFreehandEscapeHatch(
+                stroke,
+                isText ? "Handwriting recognized" : "Shape recognized"
+              );
+            }
           } else {
             this.editor.keepAsFreehand(stroke, { select: false });
           }

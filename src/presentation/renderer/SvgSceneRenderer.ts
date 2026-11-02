@@ -1,4 +1,5 @@
 import { DiagramEditor } from "../../application/use-cases/DiagramEditor";
+import { getDescendantGroups, isGroupInsideGroup } from "../../application/commands/DiagramCommands";
 import { DiagramNode } from "../../domain/entities/DiagramNode";
 import { DiagramEdge, EdgeStyle } from "../../domain/entities/DiagramEdge";
 import { Group } from "../../domain/entities/Group";
@@ -85,6 +86,7 @@ type DragMode =
       groupId: string;
       startClient: Point;
       initialGroupPos?: Point;
+      initialGroupPositions?: Map<string, Point>;
       initialMemberPositions: Map<string, Point>;
       moved: boolean;
       wasAlreadySingleSelected?: boolean;
@@ -948,7 +950,15 @@ export class SvgSceneRenderer {
       ? this.getVisibleCanvasRect()
       : null;
 
-    for (const group of this.editor.diagram.groups) {
+    const sortedGroups = [...this.editor.diagram.groups].sort((a, b) => {
+      const boundsA = this.getGroupBounds(a);
+      const boundsB = this.getGroupBounds(b);
+      const areaA = boundsA.size.width * boundsA.size.height;
+      const areaB = boundsB.size.width * boundsB.size.height;
+      return areaB - areaA;
+    });
+
+    for (const group of sortedGroups) {
       const bounds = this.getGroupBounds(group);
       const gx = bounds.position.x;
       const gy = bounds.position.y;
@@ -2554,21 +2564,28 @@ export class SvgSceneRenderer {
           }
 
           if (!group.locked) {
+            const descendants = getDescendantGroups(this.editor.diagram, group);
+            const allMovedGroupIds = new Set<string>([group.id, ...descendants.map((dg) => dg.id)]);
+
             if (group.position && group.size) {
               const groupBounds = rect(group.position, group.size);
               for (const node of this.editor.diagram.nodes) {
                 const nodeCenter = center(rect(node.position, node.size));
                 if (contains(groupBounds, nodeCenter) || contains(groupBounds, node.position)) {
-                  if (!group.nodeIds.includes(node.id)) {
-                    const otherSmallerGroup = this.editor.diagram.groups.find(
+                  const alreadyInMovedGroup = Array.from(allMovedGroupIds).some((gid) => {
+                    const g = this.editor.diagram.groups.find((grp) => grp.id === gid);
+                    return g && g.nodeIds.includes(node.id);
+                  });
+                  if (!alreadyInMovedGroup) {
+                    const otherSmallerOutsideGroup = this.editor.diagram.groups.find(
                       (og) =>
-                        og.id !== group.id &&
+                        !allMovedGroupIds.has(og.id) &&
                         og.position &&
                         og.size &&
                         (contains(rect(og.position, og.size), nodeCenter) || contains(rect(og.position, og.size), node.position)) &&
                         og.size.width * og.size.height < group.size!.width * group.size!.height
                     );
-                    if (!otherSmallerGroup) {
+                    if (!otherSmallerOutsideGroup) {
                       group.nodeIds.push(node.id);
                     }
                   }
@@ -2576,18 +2593,35 @@ export class SvgSceneRenderer {
               }
             }
 
+            const initialGroupPositions = new Map<string, Point>();
+            if (group.position) {
+              initialGroupPositions.set(group.id, { ...group.position });
+            }
+            for (const dg of descendants) {
+              if (dg.position) {
+                initialGroupPositions.set(dg.id, { ...dg.position });
+              }
+            }
+
             const initialMemberPositions = new Map<string, Point>();
-            for (const nid of group.nodeIds) {
+            const allNodeIds = new Set<string>();
+            for (const nid of group.nodeIds) allNodeIds.add(nid);
+            for (const dg of descendants) {
+              for (const nid of dg.nodeIds) allNodeIds.add(nid);
+            }
+            for (const nid of allNodeIds) {
               const n = this.editor.diagram.nodes.find((nd) => nd.id === nid);
               if (n) {
                 initialMemberPositions.set(nid, { ...n.position });
               }
             }
+
             this.dragMode = {
               type: "group-move",
               groupId: group.id,
               startClient: clientPoint,
               initialGroupPos: group.position ? { ...group.position } : undefined,
+              initialGroupPositions,
               initialMemberPositions,
               moved: false,
               wasAlreadySingleSelected,
@@ -2721,9 +2755,19 @@ export class SvgSceneRenderer {
             };
           }
         }
-        if (moveState.initialGroupPos) {
+        if (moveState.initialGroupPositions) {
+          for (const [gid, initialPos] of moveState.initialGroupPositions.entries()) {
+            const grp = this.editor.diagram.groups.find((g) => g.id === gid);
+            if (grp && grp.position) {
+              grp.position = {
+                x: Math.round(initialPos.x + dx),
+                y: Math.round(initialPos.y + dy),
+              };
+            }
+          }
+        } else if (moveState.initialGroupPos) {
           const group = this.editor.diagram.groups.find((g) => g.id === moveState.groupId);
-          if (group) {
+          if (group && group.position) {
             group.position = {
               x: Math.round(moveState.initialGroupPos.x + dx),
               y: Math.round(moveState.initialGroupPos.y + dy),
@@ -3075,9 +3119,16 @@ export class SvgSceneRenderer {
             node.position = { ...initPos };
           }
         }
-        if (moveState.initialGroupPos) {
+        if (moveState.initialGroupPositions) {
+          for (const [gid, initPos] of moveState.initialGroupPositions.entries()) {
+            const grp = this.editor.diagram.groups.find((g) => g.id === gid);
+            if (grp && grp.position) {
+              grp.position = { ...initPos };
+            }
+          }
+        } else if (moveState.initialGroupPos) {
           const group = this.editor.diagram.groups.find((g) => g.id === moveState.groupId);
-          if (group) {
+          if (group && group.position) {
             group.position = { ...moveState.initialGroupPos };
           }
         }
@@ -3404,6 +3455,8 @@ export class SvgSceneRenderer {
 
     // Auto-containment: if double-clicked inside an expanded group, add to group
     if (newNode) {
+      let targetGroup: Group | null = null;
+      let minArea = Infinity;
       for (const group of this.editor.diagram.groups) {
         if (group.collapsed) continue;
         const bounds = this.getGroupBounds(group);
@@ -3413,9 +3466,15 @@ export class SvgSceneRenderer {
           canvasPoint.y >= bounds.position.y &&
           canvasPoint.y <= bounds.position.y + bounds.size.height
         ) {
-          this.editor.addNodesToGroup(group.id, [newNode.id]);
-          break;
+          const area = bounds.size.width * bounds.size.height;
+          if (area < minArea) {
+            minArea = area;
+            targetGroup = group;
+          }
         }
+      }
+      if (targetGroup) {
+        this.editor.addNodesToGroup(targetGroup.id, [newNode.id]);
       }
     }
   }
@@ -4571,7 +4630,18 @@ export class SvgSceneRenderer {
         }
       } else if (this.editor.selectedGroupIds.length > 0) {
         e.preventDefault();
-        for (const groupId of this.editor.selectedGroupIds) {
+        const selectedGroupIds = this.editor.selectedGroupIds;
+        const topLevelSelectedGroupIds = selectedGroupIds.filter((gid) => {
+          const g = this.editor.diagram.groups.find((group) => group.id === gid);
+          if (!g) return false;
+          return !selectedGroupIds.some((otherId) => {
+            if (otherId === gid) return false;
+            const otherG = this.editor.diagram.groups.find((group) => group.id === otherId);
+            if (!otherG) return false;
+            return getDescendantGroups(this.editor.diagram, otherG).some((dg) => dg.id === gid);
+          });
+        });
+        for (const groupId of topLevelSelectedGroupIds) {
           const group = this.editor.diagram.groups.find((g) => g.id === groupId);
           if (group && !group.locked) {
             this.editor.moveGroup(groupId, { x: dx, y: dy });

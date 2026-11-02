@@ -526,4 +526,297 @@ describe("Group Containment and Component Moving (v2.0.7)", () => {
     expect(group.position).toEqual({ x: 180, y: 140 });
     expect(node.position).toEqual({ x: 230, y: 190 });
   });
+
+  test("moving a parent group moves child groups made inside the parent group", () => {
+    // 1. User makes a parent group
+    const parentGroup = editor.addGroup({
+      name: "Parent Group",
+      position: { x: 100, y: 100 },
+      size: { width: 600, height: 500 },
+    });
+
+    // 2. User makes a child group inside the parent group
+    const childGroup = editor.addGroup({
+      name: "Child Group",
+      position: { x: 150, y: 150 },
+      size: { width: 200, height: 200 },
+    });
+
+    // 3. User moves parent group by delta (x: 50, y: 80)
+    editor.moveGroup(parentGroup.id, { x: 50, y: 80 });
+
+    // Both the parent group and child group move together!
+    expect(parentGroup.position).toEqual({ x: 150, y: 180 });
+    expect(childGroup.position).toEqual({ x: 200, y: 230 });
+  });
+
+  test("moving child group moves only the child group, leaving parent group in place", () => {
+    const parentGroup = editor.addGroup({
+      name: "Parent Group",
+      position: { x: 100, y: 100 },
+      size: { width: 600, height: 500 },
+    });
+
+    const childGroup = editor.addGroup({
+      name: "Child Group",
+      position: { x: 150, y: 150 },
+      size: { width: 200, height: 200 },
+    });
+
+    // Move only the child group
+    editor.moveGroup(childGroup.id, { x: 30, y: 40 });
+
+    // Parent group remains where it was; child group moved
+    expect(parentGroup.position).toEqual({ x: 100, y: 100 });
+    expect(childGroup.position).toEqual({ x: 180, y: 190 });
+  });
+
+  test("moving parent group moves child group AND nodes inside the child group", () => {
+    const parentGroup = editor.addGroup({
+      name: "Parent Group",
+      position: { x: 100, y: 100 },
+      size: { width: 600, height: 500 },
+    });
+
+    const childGroup = editor.addGroup({
+      name: "Child Group",
+      position: { x: 150, y: 150 },
+      size: { width: 200, height: 200 },
+    });
+
+    const node = editor.addNode({
+      title: "Child Node",
+      position: { x: 180, y: 180 },
+      size: { width: 100, height: 50 },
+    });
+
+    expect(childGroup.nodeIds).toContain(node.id);
+
+    // Move parent group
+    editor.moveGroup(parentGroup.id, { x: 60, y: 40 });
+
+    expect(parentGroup.position).toEqual({ x: 160, y: 140 });
+    expect(childGroup.position).toEqual({ x: 210, y: 190 });
+    expect(node.position).toEqual({ x: 240, y: 220 });
+  });
+
+  test("moving parent group with both direct nodes and child groups with nodes moves all components consistently", () => {
+    const parentGroup = editor.addGroup({
+      name: "Parent Group",
+      position: { x: 100, y: 100 },
+      size: { width: 600, height: 500 },
+    });
+
+    const childGroup = editor.addGroup({
+      name: "Child Group",
+      position: { x: 150, y: 150 },
+      size: { width: 200, height: 200 },
+    });
+
+    const childNode = editor.addNode({
+      title: "Child Node",
+      position: { x: 180, y: 180 },
+      size: { width: 80, height: 40 },
+    });
+
+    const parentNode = editor.addNode({
+      title: "Parent Node",
+      position: { x: 450, y: 450 },
+      size: { width: 80, height: 40 },
+    });
+
+    // Move parent group
+    editor.moveGroup(parentGroup.id, { x: 40, y: 60 });
+
+    expect(parentGroup.position).toEqual({ x: 140, y: 160 });
+    expect(childGroup.position).toEqual({ x: 190, y: 210 });
+    expect(childNode.position).toEqual({ x: 220, y: 240 });
+    expect(parentNode.position).toEqual({ x: 490, y: 510 });
+  });
+
+  test("multi-level nesting (parent -> child -> grandchild): moving parent moves all descendants", () => {
+    const parent = editor.addGroup({
+      name: "Grandparent",
+      position: { x: 50, y: 50 },
+      size: { width: 800, height: 800 },
+    });
+
+    const child = editor.addGroup({
+      name: "Parent",
+      position: { x: 100, y: 100 },
+      size: { width: 500, height: 500 },
+    });
+
+    const grandchild = editor.addGroup({
+      name: "Grandchild",
+      position: { x: 150, y: 150 },
+      size: { width: 200, height: 200 },
+    });
+
+    const grandchildNode = editor.addNode({
+      title: "Leaf Node",
+      position: { x: 180, y: 180 },
+      size: { width: 80, height: 40 },
+    });
+
+    // Move parent (top-level)
+    editor.moveGroup(parent.id, { x: 100, y: 100 });
+
+    expect(parent.position).toEqual({ x: 150, y: 150 });
+    expect(child.position).toEqual({ x: 200, y: 200 });
+    expect(grandchild.position).toEqual({ x: 250, y: 250 });
+    expect(grandchildNode.position).toEqual({ x: 280, y: 280 });
+  });
+
+  test("moving child group out of parent group detaches it so subsequent parent group moves do not affect it", () => {
+    const parentGroup = editor.addGroup({
+      name: "Parent Group",
+      position: { x: 100, y: 100 },
+      size: { width: 500, height: 500 },
+    });
+
+    const childGroup = editor.addGroup({
+      name: "Child Group",
+      position: { x: 150, y: 150 },
+      size: { width: 200, height: 200 },
+    });
+
+    // Move child group completely outside parent group to (900, 900)
+    editor.moveGroup(childGroup.id, { x: 750, y: 750 });
+    expect(childGroup.position).toEqual({ x: 900, y: 900 });
+
+    // Moving parent group does NOT move the detached child group
+    editor.moveGroup(parentGroup.id, { x: 50, y: 50 });
+    expect(parentGroup.position).toEqual({ x: 150, y: 150 });
+    expect(childGroup.position).toEqual({ x: 900, y: 900 });
+  });
+
+  test("undo and redo cleanly restores positions of parent group and child groups", () => {
+    const parentGroup = editor.addGroup({
+      name: "Parent",
+      position: { x: 100, y: 100 },
+      size: { width: 500, height: 500 },
+    });
+
+    const childGroup = editor.addGroup({
+      name: "Child",
+      position: { x: 150, y: 150 },
+      size: { width: 200, height: 200 },
+    });
+
+    const node = editor.addNode({
+      title: "Node",
+      position: { x: 180, y: 180 },
+      size: { width: 80, height: 40 },
+    });
+
+    // Move parent
+    editor.moveGroup(parentGroup.id, { x: 50, y: 50 });
+    expect(parentGroup.position).toEqual({ x: 150, y: 150 });
+    expect(childGroup.position).toEqual({ x: 200, y: 200 });
+    expect(node.position).toEqual({ x: 230, y: 230 });
+
+    // Undo
+    editor.undo();
+    expect(parentGroup.position).toEqual({ x: 100, y: 100 });
+    expect(childGroup.position).toEqual({ x: 150, y: 150 });
+    expect(node.position).toEqual({ x: 180, y: 180 });
+
+    // Redo
+    editor.redo();
+    expect(parentGroup.position).toEqual({ x: 150, y: 150 });
+    expect(childGroup.position).toEqual({ x: 200, y: 200 });
+    expect(node.position).toEqual({ x: 230, y: 230 });
+  });
+
+  test("interactive visual drag of parent group in SvgSceneRenderer moves child group and its nodes in real time", () => {
+    const parentGroup = editor.addGroup({
+      name: "Parent Interactive",
+      position: { x: 100, y: 100 },
+      size: { width: 600, height: 500 },
+    });
+
+    const childGroup = editor.addGroup({
+      name: "Child Interactive",
+      position: { x: 150, y: 150 },
+      size: { width: 200, height: 200 },
+    });
+
+    const node = editor.addNode({
+      title: "Nested Node",
+      position: { x: 180, y: 180 },
+      size: { width: 80, height: 40 },
+    });
+
+    const container = new MockElement("div") as any;
+    const renderer = new SvgSceneRenderer(container, editor);
+    renderer.render();
+
+    // Query parent group header
+    const parentHeader = container.querySelectorAll(".umlcanvas-group-header-bg")
+      .find((el: any) => el.getAttribute("data-group-id") === parentGroup.id);
+    expect(parentHeader).toBeDefined();
+
+    // Mouse down on parent group header
+    container.querySelector(".umlcanvas-svg")?.dispatch("mousedown", {
+      button: 0,
+      target: parentHeader,
+      clientX: 120,
+      clientY: 110,
+    });
+
+    // Mouse move +70px horizontally, +30px vertically
+    (window as any).dispatch("mousemove", {
+      clientX: 190,
+      clientY: 140,
+    });
+
+    // During drag, parent, child group, and nested node all move!
+    expect(parentGroup.position?.x).toBe(100 + 70);
+    expect(parentGroup.position?.y).toBe(100 + 30);
+    expect(childGroup.position?.x).toBe(150 + 70);
+    expect(childGroup.position?.y).toBe(150 + 30);
+    expect(node.position.x).toBe(180 + 70);
+    expect(node.position.y).toBe(180 + 30);
+
+    // Mouse up to commit
+    (window as any).dispatch("mouseup", {
+      clientX: 190,
+      clientY: 140,
+    });
+
+    expect(parentGroup.position).toEqual({ x: 170, y: 130 });
+    expect(childGroup.position).toEqual({ x: 220, y: 180 });
+    expect(node.position).toEqual({ x: 250, y: 210 });
+  });
+
+  test("keyboard arrow keys moving parent group also moves child group without double-moving", () => {
+    const parentGroup = editor.addGroup({
+      name: "Parent Arrow Test",
+      position: { x: 100, y: 100 },
+      size: { width: 600, height: 500 },
+    });
+
+    const childGroup = editor.addGroup({
+      name: "Child Arrow Test",
+      position: { x: 150, y: 150 },
+      size: { width: 200, height: 200 },
+    });
+
+    const container = new MockElement("div") as any;
+    const renderer = new SvgSceneRenderer(container, editor);
+    renderer.render();
+
+    // Select parent group only
+    editor.selectGroup(parentGroup.id, false);
+
+    // Dispatch ArrowRight key
+    (window as any).dispatch("keydown", {
+      key: "ArrowRight",
+      preventDefault: jest.fn(),
+    });
+
+    expect(parentGroup.position).toEqual({ x: 105, y: 100 });
+    expect(childGroup.position).toEqual({ x: 155, y: 150 });
+  });
 });

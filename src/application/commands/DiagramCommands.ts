@@ -7,7 +7,7 @@ import { Group, createGroup } from "../../domain/entities/Group";
 import { Port } from "../../domain/entities/Port";
 import { Compartment } from "../../domain/entities/Compartment";
 import { Point, point } from "../../domain/value-objects/Point";
-import { Rect, Size, rect, size, contains, center } from "../../domain/value-objects/Rect";
+import { Rect, Size, rect, size, contains, center, right, bottom } from "../../domain/value-objects/Rect";
 import { EdgeRouting, DiagramTypeId, Side } from "../../domain/types";
 import { Command } from "./Command";
 import {
@@ -129,6 +129,63 @@ export interface NodeMove {
   newPos: Point;
 }
 
+export function isGroupInsideGroup(parentBounds: Rect, childBounds: Rect): boolean {
+  const pArea = parentBounds.size.width * parentBounds.size.height;
+  const cArea = childBounds.size.width * childBounds.size.height;
+  if (cArea >= pArea || pArea <= 0 || cArea <= 0) return false;
+
+  // Complete containment
+  if (
+    childBounds.position.x >= parentBounds.position.x &&
+    right(childBounds) <= right(parentBounds) &&
+    childBounds.position.y >= parentBounds.position.y &&
+    bottom(childBounds) <= bottom(parentBounds)
+  ) {
+    return true;
+  }
+
+  // Center check with significant overlap
+  const childCenter = center(childBounds);
+  if (contains(parentBounds, childCenter)) {
+    const ix1 = Math.max(parentBounds.position.x, childBounds.position.x);
+    const iy1 = Math.max(parentBounds.position.y, childBounds.position.y);
+    const ix2 = Math.min(right(parentBounds), right(childBounds));
+    const iy2 = Math.min(bottom(parentBounds), bottom(childBounds));
+    if (ix2 > ix1 && iy2 > iy1) {
+      const overlap = (ix2 - ix1) * (iy2 - iy1);
+      if (overlap >= 0.4 * cArea) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+export function getDescendantGroups(diagram: Diagram, parentGroup: Group): Group[] {
+  const descendants: Group[] = [];
+  const visited = new Set<string>([parentGroup.id]);
+
+  function findChildren(currentGroup: Group) {
+    const currentBounds = computeGroupBounds(diagram, currentGroup);
+    for (const otherGroup of diagram.groups) {
+      if (visited.has(otherGroup.id)) continue;
+
+      const otherBounds = computeGroupBounds(diagram, otherGroup);
+      const isInside = isGroupInsideGroup(currentBounds, otherBounds);
+
+      if (isInside) {
+        visited.add(otherGroup.id);
+        descendants.push(otherGroup);
+        findChildren(otherGroup);
+      }
+    }
+  }
+
+  findChildren(parentGroup);
+  return descendants;
+}
+
 export function computeGroupBounds(
   diagram: Diagram,
   group: Group,
@@ -140,10 +197,6 @@ export function computeGroupBounds(
 
   const padding = 20;
   const headerHeight = 28;
-
-  if (group.nodeIds.length === 0) {
-    return rect(point(100, 100), size(200, 120));
-  }
 
   let minX = Infinity;
   let minY = Infinity;
@@ -161,6 +214,18 @@ export function computeGroupBounds(
     minY = Math.min(minY, pos.y);
     maxX = Math.max(maxX, pos.x + node.size.width);
     maxY = Math.max(maxY, pos.y + node.size.height);
+  }
+
+  if (group.groupIds) {
+    for (const childId of group.groupIds) {
+      const child = diagram.groups.find((g) => g.id === childId);
+      if (!child) continue;
+      const childBounds = computeGroupBounds(diagram, child, moves);
+      minX = Math.min(minX, childBounds.position.x);
+      minY = Math.min(minY, childBounds.position.y);
+      maxX = Math.max(maxX, right(childBounds));
+      maxY = Math.max(maxY, bottom(childBounds));
+    }
   }
 
   if (!isFinite(minX)) {
@@ -551,9 +616,10 @@ export class GroupSelectionCommand implements Command {
     nodeIds: string[],
     position?: Point,
     size?: Size,
-    color?: string
+    color?: string,
+    groupIds?: string[]
   ) {
-    this.createdGroup = createGroup({ id: groupId, name, nodeIds, position, size, color });
+    this.createdGroup = createGroup({ id: groupId, name, nodeIds, groupIds, position, size, color });
   }
 
   execute(): void {
@@ -617,8 +683,12 @@ export class RenameGroupCommand implements Command {
 export class MoveGroupCommand implements Command {
   readonly description = "Move group";
   private oldNodePositions: Map<string, Point> = new Map();
+  private oldGroupPositions: Map<string, Point> = new Map();
   private oldGroupPosition?: Point;
-  private autoAddedNodeIds: string[] = [];
+  private descendantGroupIds: string[] = [];
+  private autoAddedNodeIds: { groupId: string; nodeId: string }[] = [];
+  private removedGroupMemberships: { parentGroupId: string; childGroupId: string }[] = [];
+  private addedGroupMemberships: { parentGroupId: string; childGroupId: string }[] = [];
 
   constructor(
     private readonly diagram: Diagram,
@@ -627,32 +697,79 @@ export class MoveGroupCommand implements Command {
   ) {
     const group = this.diagram.groups.find((g) => g.id === this.groupId);
     if (group) {
-      // Auto-include any nodes located within group boundary that are not yet in nodeIds
-      if (group.position && group.size) {
-        const groupBounds = rect(group.position, group.size);
-        for (const node of this.diagram.nodes) {
-          const nodeCenter = center(rect(node.position, node.size));
-          if (contains(groupBounds, nodeCenter) || contains(groupBounds, node.position)) {
-            if (!group.nodeIds.includes(node.id)) {
-              const otherSmallerGroup = this.diagram.groups.find(
-                (og) =>
-                  og.id !== group.id &&
-                  og.position &&
-                  og.size &&
-                  (contains(rect(og.position, og.size), nodeCenter) || contains(rect(og.position, og.size), node.position)) &&
-                  og.size.width * og.size.height < group.size!.width * group.size!.height
-              );
-              if (!otherSmallerGroup) {
-                group.nodeIds.push(node.id);
-                this.autoAddedNodeIds.push(node.id);
-              }
-            }
+      const descendants = getDescendantGroups(this.diagram, group);
+      this.descendantGroupIds = descendants.map((dg) => dg.id);
+
+      if (group.position) {
+        this.oldGroupPosition = { ...group.position };
+        this.oldGroupPositions.set(group.id, { ...group.position });
+      }
+      for (const dg of descendants) {
+        if (dg.position) {
+          this.oldGroupPositions.set(dg.id, { ...dg.position });
+        }
+      }
+
+      const allMovedGroupIds = new Set<string>([group.id, ...this.descendantGroupIds]);
+      const memberNodeIds = new Set<string>();
+
+      for (const gid of allMovedGroupIds) {
+        const g = this.diagram.groups.find((grp) => grp.id === gid);
+        if (g) {
+          for (const nid of g.nodeIds) {
+            memberNodeIds.add(nid);
           }
         }
       }
 
-      this.oldGroupPosition = group.position ? { ...group.position } : undefined;
-      for (const nid of group.nodeIds) {
+      // Auto-include any nodes located within group boundary or descendant boundaries
+      const allMovedBounds: { group: Group; bounds: Rect }[] = [];
+      if (group.position && group.size) {
+        allMovedBounds.push({ group, bounds: rect(group.position, group.size) });
+      }
+      for (const dg of descendants) {
+        if (dg.position && dg.size) {
+          allMovedBounds.push({ group: dg, bounds: rect(dg.position, dg.size) });
+        }
+      }
+
+      for (const node of this.diagram.nodes) {
+        if (memberNodeIds.has(node.id)) continue;
+        const nodeCenter = center(rect(node.position, node.size));
+        const insideAny = allMovedBounds.some(
+          (b) => contains(b.bounds, nodeCenter) || contains(b.bounds, node.position)
+        );
+
+        if (insideAny) {
+          const outsideSmallerGroup = this.diagram.groups.find(
+            (og) =>
+              !allMovedGroupIds.has(og.id) &&
+              og.position &&
+              og.size &&
+              (contains(rect(og.position, og.size), nodeCenter) || contains(rect(og.position, og.size), node.position)) &&
+              allMovedBounds.some((b) => og.size!.width * og.size!.height < b.bounds.size.width * b.bounds.size.height)
+          );
+
+          if (!outsideSmallerGroup) {
+            let bestTargetGroup = group;
+            let minArea = group.position && group.size ? group.size.width * group.size.height : Infinity;
+            for (const item of allMovedBounds) {
+              if (contains(item.bounds, nodeCenter) || contains(item.bounds, node.position)) {
+                const area = item.bounds.size.width * item.bounds.size.height;
+                if (area < minArea) {
+                  minArea = area;
+                  bestTargetGroup = item.group;
+                }
+              }
+            }
+            bestTargetGroup.nodeIds.push(node.id);
+            this.autoAddedNodeIds.push({ groupId: bestTargetGroup.id, nodeId: node.id });
+            memberNodeIds.add(node.id);
+          }
+        }
+      }
+
+      for (const nid of memberNodeIds) {
         const node = this.diagram.nodes.find((n) => n.id === nid);
         if (node) {
           this.oldNodePositions.set(nid, { ...node.position });
@@ -665,9 +782,10 @@ export class MoveGroupCommand implements Command {
     const group = this.diagram.groups.find((g) => g.id === this.groupId);
     if (!group) return;
 
-    for (const nid of this.autoAddedNodeIds) {
-      if (!group.nodeIds.includes(nid)) {
-        group.nodeIds.push(nid);
+    for (const entry of this.autoAddedNodeIds) {
+      const g = this.diagram.groups.find((grp) => grp.id === entry.groupId);
+      if (g && !g.nodeIds.includes(entry.nodeId)) {
+        g.nodeIds.push(entry.nodeId);
       }
     }
 
@@ -678,7 +796,17 @@ export class MoveGroupCommand implements Command {
       };
     }
 
-    for (const nid of group.nodeIds) {
+    for (const dgId of this.descendantGroupIds) {
+      const dg = this.diagram.groups.find((g) => g.id === dgId);
+      if (dg && dg.position) {
+        dg.position = {
+          x: dg.position.x + this.delta.x,
+          y: dg.position.y + this.delta.y,
+        };
+      }
+    }
+
+    for (const [nid] of this.oldNodePositions) {
       const node = this.diagram.nodes.find((n) => n.id === nid);
       if (node) {
         node.position = {
@@ -687,14 +815,49 @@ export class MoveGroupCommand implements Command {
         };
       }
     }
+
+    // Update group containment in parent groupIds
+    this.removedGroupMemberships = [];
+    this.addedGroupMemberships = [];
+    const allMovedGroupIds = new Set<string>([group.id, ...this.descendantGroupIds]);
+
+    for (const otherGroup of this.diagram.groups) {
+      if (allMovedGroupIds.has(otherGroup.id)) continue;
+      const otherBounds = computeGroupBounds(this.diagram, otherGroup);
+      const groupBounds = computeGroupBounds(this.diagram, group);
+      const isInside = isGroupInsideGroup(otherBounds, groupBounds);
+
+      if (!isInside && otherGroup.groupIds?.includes(group.id)) {
+        otherGroup.groupIds = otherGroup.groupIds.filter((id) => id !== group.id);
+        this.removedGroupMemberships.push({ parentGroupId: otherGroup.id, childGroupId: group.id });
+      } else if (isInside && !otherGroup.groupIds?.includes(group.id)) {
+        if (!otherGroup.groupIds) otherGroup.groupIds = [];
+        otherGroup.groupIds.push(group.id);
+        this.addedGroupMemberships.push({ parentGroupId: otherGroup.id, childGroupId: group.id });
+      }
+    }
   }
 
   undo(): void {
     const group = this.diagram.groups.find((g) => g.id === this.groupId);
     if (group) {
-      group.position = this.oldGroupPosition ? { ...this.oldGroupPosition } : undefined;
-      if (this.autoAddedNodeIds.length > 0) {
-        group.nodeIds = group.nodeIds.filter((id) => !this.autoAddedNodeIds.includes(id));
+      const oldPos = this.oldGroupPositions.get(this.groupId) ?? this.oldGroupPosition;
+      if (oldPos) {
+        group.position = { ...oldPos };
+      }
+      for (const entry of this.autoAddedNodeIds) {
+        const g = this.diagram.groups.find((grp) => grp.id === entry.groupId);
+        if (g) {
+          g.nodeIds = g.nodeIds.filter((id) => id !== entry.nodeId);
+        }
+      }
+    }
+
+    for (const dgId of this.descendantGroupIds) {
+      const dg = this.diagram.groups.find((g) => g.id === dgId);
+      const oldPos = this.oldGroupPositions.get(dgId);
+      if (dg && oldPos) {
+        dg.position = { ...oldPos };
       }
     }
 
@@ -702,6 +865,23 @@ export class MoveGroupCommand implements Command {
       const node = this.diagram.nodes.find((n) => n.id === nid);
       if (node) {
         node.position = { ...oldPos };
+      }
+    }
+
+    // Restore group memberships
+    for (const entry of this.removedGroupMemberships) {
+      const parent = this.diagram.groups.find((g) => g.id === entry.parentGroupId);
+      if (parent) {
+        if (!parent.groupIds) parent.groupIds = [];
+        if (!parent.groupIds.includes(entry.childGroupId)) {
+          parent.groupIds.push(entry.childGroupId);
+        }
+      }
+    }
+    for (const entry of this.addedGroupMemberships) {
+      const parent = this.diagram.groups.find((g) => g.id === entry.parentGroupId);
+      if (parent && parent.groupIds) {
+        parent.groupIds = parent.groupIds.filter((id) => id !== entry.childGroupId);
       }
     }
   }
@@ -712,6 +892,7 @@ export class ResizeGroupCommand implements Command {
   private oldPosition?: Point;
   private oldSize?: Size;
   private oldNodeIds?: string[];
+  private oldGroupIds?: string[];
 
   constructor(
     private readonly group: Group,
@@ -722,6 +903,7 @@ export class ResizeGroupCommand implements Command {
     this.oldPosition = group.position ? { ...group.position } : undefined;
     this.oldSize = group.size ? { ...group.size } : undefined;
     this.oldNodeIds = [...group.nodeIds];
+    this.oldGroupIds = group.groupIds ? [...group.groupIds] : undefined;
   }
 
   execute(): void {
@@ -738,8 +920,34 @@ export class ResizeGroupCommand implements Command {
       for (const n of this.diagram.nodes) {
         const nCenter = center(rect(n.position, n.size));
         if (contains(groupBounds, nCenter) || contains(groupBounds, n.position)) {
-          if (!this.group.nodeIds.includes(n.id)) {
+          const smallerGroup = this.diagram.groups.find(
+            (g) =>
+              g.id !== this.group.id &&
+              g.position &&
+              g.size &&
+              (contains(rect(g.position, g.size), nCenter) || contains(rect(g.position, g.size), n.position)) &&
+              g.size.width * g.size.height < this.group.size!.width * this.group.size!.height
+          );
+          if (!smallerGroup && !this.group.nodeIds.includes(n.id)) {
             this.group.nodeIds.push(n.id);
+          }
+        }
+      }
+
+      if (!this.group.groupIds) {
+        this.group.groupIds = [];
+      }
+      this.group.groupIds = this.group.groupIds.filter((gid) => {
+        const og = this.diagram!.groups.find((g) => g.id === gid);
+        if (!og || !og.position || !og.size) return false;
+        return isGroupInsideGroup(groupBounds, rect(og.position, og.size));
+      });
+      for (const og of this.diagram.groups) {
+        if (og.id !== this.group.id && og.position && og.size) {
+          if (isGroupInsideGroup(groupBounds, rect(og.position, og.size))) {
+            if (!this.group.groupIds.includes(og.id)) {
+              this.group.groupIds.push(og.id);
+            }
           }
         }
       }
@@ -752,6 +960,7 @@ export class ResizeGroupCommand implements Command {
     if (this.oldNodeIds) {
       this.group.nodeIds = [...this.oldNodeIds];
     }
+    this.group.groupIds = this.oldGroupIds ? [...this.oldGroupIds] : undefined;
   }
 }
 

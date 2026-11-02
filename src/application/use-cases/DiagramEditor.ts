@@ -26,6 +26,8 @@ import {
   UngroupSelectionCommand,
   RenameGroupCommand,
   computeGroupBounds,
+  isGroupInsideGroup,
+  getDescendantGroups,
   MoveGroupCommand,
   ResizeGroupCommand,
   ToggleGroupCollapseCommand,
@@ -825,21 +827,67 @@ export class DiagramEditor {
     position?: Point;
     size?: Size;
     nodeIds?: string[];
+    groupIds?: string[];
   }): Group {
     const groupId = `group-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
     const name = params?.name ?? "Group";
     const color = params?.color;
     const nodeIds = params?.nodeIds ? [...params.nodeIds] : [];
+    const groupIds = params?.groupIds ? [...params.groupIds] : [];
     const position = params?.position ?? { x: 100, y: 100 };
     const size = params?.size ?? { width: 300, height: 200 };
 
+    const groupRect = rect(position, size);
+
+    // Auto-detect existing child groups inside this new group
+    if (!params?.groupIds) {
+      for (const otherGroup of this.diagram.groups) {
+        if (otherGroup.position && otherGroup.size) {
+          const otherBounds = rect(otherGroup.position, otherGroup.size);
+          if (isGroupInsideGroup(groupRect, otherBounds)) {
+            if (!groupIds.includes(otherGroup.id)) {
+              groupIds.push(otherGroup.id);
+            }
+          }
+        }
+      }
+    }
+
     if (!params?.nodeIds) {
-      const groupRect = rect(position, size);
       for (const node of this.diagram.nodes) {
         const nodeCenter = center(rect(node.position, node.size));
         if (contains(groupRect, nodeCenter) || contains(groupRect, node.position)) {
-          if (!nodeIds.includes(node.id)) {
-            nodeIds.push(node.id);
+          // If node already belongs to a child group inside this group, don't duplicate it into parent nodeIds
+          const insideChildGroup = groupIds.some((cid) => {
+            const cg = this.diagram.groups.find((g) => g.id === cid);
+            return cg && cg.nodeIds.includes(node.id);
+          });
+          if (!insideChildGroup) {
+            const smallerGroup = this.diagram.groups.find(
+              (g) =>
+                g.position &&
+                g.size &&
+                (contains(rect(g.position, g.size), nodeCenter) || contains(rect(g.position, g.size), node.position)) &&
+                g.size.width * g.size.height < size.width * size.height
+            );
+            if (!smallerGroup && !nodeIds.includes(node.id)) {
+              nodeIds.push(node.id);
+            }
+          }
+        }
+      }
+    }
+
+    // If new group is inside an existing group, update parent's groupIds
+    for (const existingGroup of this.diagram.groups) {
+      if (existingGroup.position && existingGroup.size) {
+        const existingBounds = rect(existingGroup.position, existingGroup.size);
+        if (isGroupInsideGroup(existingBounds, groupRect)) {
+          if (!existingGroup.groupIds) {
+            existingGroup.groupIds = [];
+          }
+          if (!existingGroup.groupIds.includes(groupId)) {
+            existingGroup.groupIds.push(groupId);
           }
         }
       }
@@ -852,7 +900,8 @@ export class DiagramEditor {
       nodeIds,
       position,
       size,
-      color
+      color,
+      groupIds
     );
     this.commandStack.execute(cmd);
 
@@ -946,11 +995,19 @@ export class DiagramEditor {
 
   selectGroupMembers(groupId: string): void {
     const group = this.diagram.groups.find((g) => g.id === groupId);
-    if (!group || group.nodeIds.length === 0) return;
+    if (!group) return;
+    const descendants = getDescendantGroups(this.diagram, group);
+    const allNodeIds = new Set<string>(group.nodeIds);
+    for (const dg of descendants) {
+      for (const nid of dg.nodeIds) {
+        allNodeIds.add(nid);
+      }
+    }
+    if (allNodeIds.size === 0) return;
     this.selectedNodeIdSet.clear();
     this.selectedEdgeIdSet.clear();
     this.selectedGroupIdSet.clear();
-    for (const nid of group.nodeIds) {
+    for (const nid of allNodeIds) {
       this.selectedNodeIdSet.add(nid);
     }
     this.notify();

@@ -227,6 +227,10 @@
           "type": "array",
           "items": { "type": "string" }
         },
+        "groupIds": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
         "collapsed": { "type": "boolean" },
         "color": { "type": "string" }
       },

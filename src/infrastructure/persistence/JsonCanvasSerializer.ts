@@ -98,6 +98,7 @@ export class JsonCanvasSerializer {
         id: group.id,
         name: group.name,
         nodeIds: [...group.nodeIds],
+        groupIds: group.groupIds && group.groupIds.length > 0 ? [...group.groupIds] : undefined,
         collapsed: group.collapsed,
         color: group.color,
         position: group.position,
@@ -349,6 +350,7 @@ export class JsonCanvasSerializer {
                 id: gr.id,
                 name: gr.name,
                 nodeIds: Array.isArray(gr.nodeIds) ? (gr.nodeIds as string[]) : [],
+                groupIds: Array.isArray(gr.groupIds) ? (gr.groupIds as string[]) : undefined,
                 collapsed: gr.collapsed === true,
                 color: typeof gr.color === "string" ? gr.color : undefined,
                 position:

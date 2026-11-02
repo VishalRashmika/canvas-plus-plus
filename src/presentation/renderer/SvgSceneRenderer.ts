@@ -1,5 +1,5 @@
 import { DiagramEditor } from "../../application/use-cases/DiagramEditor";
-import { getDescendantGroups, isGroupInsideGroup } from "../../application/commands/DiagramCommands";
+import { getDescendantGroups } from "../../application/commands/DiagramCommands";
 import { DiagramNode } from "../../domain/entities/DiagramNode";
 import { DiagramEdge, EdgeStyle } from "../../domain/entities/DiagramEdge";
 import { Group } from "../../domain/entities/Group";

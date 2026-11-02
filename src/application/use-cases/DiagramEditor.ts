@@ -51,6 +51,7 @@ import {
   ReverseEdgeCommand,
   UpdateEdgeKindCommand,
   UpdateEdgeStyleCommand,
+  EnhanceHanddrawnNotesCommand,
   EdgeMove,
   SwitchDiagramTypeCommand,
   AutoResizeNodeCommand,
@@ -88,8 +89,8 @@ import {
 } from "../../domain/services/HandwrittenFontDetector";
 import {
   defaultTableDetector,
-  DetectedTable,
 } from "../../domain/services/TableDetector";
+import { defaultHanddrawnNoteEnhancer, EnhanceResult } from "../../domain/services/HanddrawnNoteEnhancer";
 import {
   SequenceLayoutOptions,
   SequenceLayoutResult,
@@ -1799,6 +1800,10 @@ export class DiagramEditor {
     });
   }
 
+  addStroke(stroke: Stroke): DiagramNode {
+    return this.addFreehandNode(stroke);
+  }
+
   keepAsFreehand(stroke: Stroke, options?: { select?: boolean }): DiagramNode {
     return this.addFreehandNode(stroke, options);
   }
@@ -2519,6 +2524,49 @@ export class DiagramEditor {
     this.selectEdge(newEdge.id, false);
     this.notify();
     return newEdge;
+  }
+
+  enhanceHanddrawnSelection(): boolean {
+    const freehandNodes = this.diagram.nodes.filter(
+      (n) =>
+        n.kind === "generic.freehand" &&
+        (this.selectedNodeIds.length === 0 || this.selectedNodeIds.includes(n.id))
+    );
+
+    if (freehandNodes.length === 0) {
+      return false;
+    }
+
+    const result: EnhanceResult = defaultHanddrawnNoteEnhancer.enhance(
+      freehandNodes,
+      this.diagram.nodes,
+      this.diagram.diagramType
+    );
+
+    if (result.nodesToAdd.length === 0 && result.edgesToAdd.length === 0) {
+      return false;
+    }
+
+    const command = new EnhanceHanddrawnNotesCommand(
+      this.diagram,
+      result.nodesToRemove,
+      result.nodesToAdd,
+      result.edgesToAdd
+    );
+
+    this.commandStack.execute(command);
+
+    // Select the newly created nodes
+    this.clearSelection();
+    for (const node of result.nodesToAdd) {
+      this.selectNode(node.id, true);
+    }
+    for (const edge of result.edgesToAdd) {
+      this.selectEdge(edge.id, true);
+    }
+    this.notify();
+
+    return true;
   }
 
   snapStrokeToShape(

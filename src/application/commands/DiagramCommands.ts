@@ -2388,3 +2388,51 @@ export class UpdateEdgeStyleCommand implements Command {
   }
 }
 
+export class EnhanceHanddrawnNotesCommand implements Command {
+  readonly description = "Enhance handdrawn note";
+
+  constructor(
+    private readonly diagram: Diagram,
+    private readonly removedNodes: DiagramNode[],
+    private readonly addedNodes: DiagramNode[],
+    private readonly addedEdges: DiagramEdge[]
+  ) {}
+
+  execute(): void {
+    // 1. Remove the original freehand nodes
+    const removeIds = new Set(this.removedNodes.map((n) => n.id));
+    this.diagram.nodes = this.diagram.nodes.filter((n) => !removeIds.has(n.id));
+
+    // 2. Add the standardized nodes
+    for (const node of this.addedNodes) {
+      if (!this.diagram.nodes.some((n) => n.id === node.id)) {
+        this.diagram.nodes.push(node);
+      }
+    }
+
+    // 3. Add the standardized edges
+    for (const edge of this.addedEdges) {
+      if (!this.diagram.edges.some((e) => e.id === edge.id)) {
+        this.diagram.edges.push(edge);
+      }
+    }
+  }
+
+  undo(): void {
+    // 1. Remove the added nodes
+    const addedNodeIds = new Set(this.addedNodes.map((n) => n.id));
+    this.diagram.nodes = this.diagram.nodes.filter((n) => !addedNodeIds.has(n.id));
+
+    // 2. Remove the added edges
+    const addedEdgeIds = new Set(this.addedEdges.map((e) => e.id));
+    this.diagram.edges = this.diagram.edges.filter((e) => !addedEdgeIds.has(e.id));
+
+    // 3. Restore the original freehand nodes
+    for (const node of this.removedNodes) {
+      if (!this.diagram.nodes.some((n) => n.id === node.id)) {
+        this.diagram.nodes.push(node);
+      }
+    }
+  }
+}
+

@@ -5,6 +5,7 @@ import { defaultEdgeStyleRegistry } from "../../presentation/renderer/EdgeStyleR
 import { defaultRoutingService } from "../../domain/services/RoutingService";
 import { resolveCanvasColorHex, resolveCanvasBgColor } from "../../domain/value-objects/CanvasColor";
 import { wrapTextToLines } from "../../domain/services/TextMeasurement";
+import { getTableDataFromNode } from "../../presentation/renderer/ShapeRegistry";
 import {
   getNodeFontStyle,
   getEdgeFontStyle,
@@ -795,52 +796,6 @@ export class SvgExporter {
         break;
       }
 
-      case "generic.table": {
-        const rows = Math.max(1, (node.customData?.rows as number) || 3);
-        const cols = Math.max(1, (node.customData?.cols as number) || 3);
-        const cells = (node.customData?.cells as string[][]) || [];
-        const colWidth = w / cols;
-        const rowHeight = h / rows;
-
-        out += `    <rect x="0" y="0" width="${w}" height="${h}" rx="3" class="node-body" fill="${nodeBg}" stroke="${strokeColor}" stroke-width="1.5" />\n`;
-
-        for (let r = 1; r < rows; r++) {
-          const y = Math.round(r * rowHeight);
-          out += `    <line x1="0" y1="${y}" x2="${w}" y2="${y}" stroke="${strokeColor}" stroke-width="1" />\n`;
-        }
-
-        for (let c = 1; c < cols; c++) {
-          const x = Math.round(c * colWidth);
-          out += `    <line x1="${x}" y1="0" x2="${x}" y2="${h}" stroke="${strokeColor}" stroke-width="1" />\n`;
-        }
-
-        const nodeFont = getNodeFontStyle(node);
-        const fontAttrs = this.getFontAttributes(nodeFont);
-
-        for (let r = 0; r < rows; r++) {
-          for (let c = 0; c < cols; c++) {
-            const cellText = cells[r]?.[c] ?? "";
-            if (cellText) {
-              const cx = c * colWidth + colWidth / 2;
-              const cy = r * rowHeight + rowHeight / 2 + 4;
-              if (cellText.includes("\n")) {
-                const lines = cellText.split(/\r?\n/);
-                const lineH = Math.round((nodeFont.fontSize ?? 12) * 1.35);
-                const startY = cy - ((lines.length - 1) * lineH) / 2;
-                out += `    <text x="${cx}" y="${startY}" text-anchor="middle" class="node-title"${fontAttrs}>\n`;
-                for (let i = 0; i < lines.length; i++) {
-                  out += `      <tspan x="${cx}" y="${Math.round(startY + i * lineH)}">${escapeXml(lines[i])}</tspan>\n`;
-                }
-                out += `    </text>\n`;
-              } else {
-                out += `    <text x="${cx}" y="${cy}" text-anchor="middle" class="node-title"${fontAttrs}>${escapeXml(cellText)}</text>\n`;
-              }
-            }
-          }
-        }
-        break;
-      }
-
       case "generic.freehand": {
         const pathData = (node.customData?.pathData as string) || "";
         out += `    <path class="umlcanvas-freehand-path" d="${escapeXml(pathData)}" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />\n`;
@@ -962,6 +917,59 @@ export class SvgExporter {
             curY += lineSpacing;
           }
           out += `    </g>\n`;
+        }
+        break;
+      }
+
+      case "generic.text": {
+        if (title) {
+          out += this.renderMultilineText(w / 2, h / 2, title, fontAttrs, "middle", "node-title", baseFontSize);
+        }
+        break;
+      }
+
+      case "generic.table": {
+        const tableData = getTableDataFromNode(node);
+        const rows = Math.max(1, tableData.rows || 3);
+        const cols = Math.max(1, tableData.cols || 3);
+        const cells = tableData.cells || [];
+        const hasHeader = tableData.hasHeaderRow !== false;
+        const rowHeight = h / rows;
+        const colWidth = w / cols;
+
+        out += `    <rect x="0" y="0" width="${w}" height="${h}" rx="3" class="node-body umlcanvas-table-bg"${bodyAttrs} />\n`;
+        if (hasHeader && rows > 1) {
+          out += `    <rect x="0" y="0" width="${w}" height="${rowHeight}" class="umlcanvas-table-header-bg" fill="rgba(128,128,128,0.08)" />\n`;
+        }
+        for (let r = 1; r < rows; r++) {
+          const yPos = Math.round(r * rowHeight);
+          out += `    <line x1="0" y1="${yPos}" x2="${w}" y2="${yPos}" stroke="${strokeColor}" stroke-width="${r === 1 && hasHeader ? "1.5" : "1"}" />\n`;
+        }
+        for (let c = 1; c < cols; c++) {
+          const xPos = Math.round(c * colWidth);
+          out += `    <line x1="${xPos}" y1="0" x2="${xPos}" y2="${h}" stroke="${strokeColor}" stroke-width="1" />\n`;
+        }
+        for (let r = 0; r < rows; r++) {
+          for (let c = 0; c < cols; c++) {
+            let cellText = cells[r]?.[c] ?? "";
+            if (!cellText && r === 0 && tableData.headers?.[c]) {
+              cellText = tableData.headers[c];
+            }
+            if (cellText) {
+              const cellCx = c * colWidth + colWidth / 2;
+              const cellCy = r * rowHeight + rowHeight / 2;
+              const isHdr = r === 0 && hasHeader;
+              out += this.renderMultilineText(
+                cellCx,
+                cellCy + 4,
+                cellText,
+                isHdr ? `${fontAttrs} font-weight="bold"` : fontAttrs,
+                "middle",
+                isHdr ? "umlcanvas-table-cell-header" : "umlcanvas-table-cell-text",
+                baseFontSize
+              );
+            }
+          }
         }
         break;
       }

@@ -727,6 +727,24 @@ export class UmlCanvasView extends TextFileView {
         this.editor?.selectNode(node.id, false);
       }
 
+      if (
+        node.kind === "generic.freehand" ||
+        this.editor?.selectedNodeIds.some((id) => {
+          const n = this.editor?.diagram.nodes.find((item) => item.id === id);
+          return n?.kind === "generic.freehand";
+        })
+      ) {
+        menu.addItem((item) => {
+          item
+            .setTitle("Enhance handdrawn note")
+            .setIcon("wand-2")
+            .onClick(() => {
+              this.editor?.enhanceHanddrawnSelection();
+            });
+        });
+        menu.addSeparator();
+      }
+
       if (node.kind === "schematic.chip") {
         menu.addItem((item) => {
           item

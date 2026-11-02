@@ -1,4 +1,3 @@
-import { Point } from "../value-objects/Point";
 import { Rect, rectFromBounds } from "../value-objects/Rect";
 import { Stroke, StrokePoint } from "./ShapeRecognizer";
 import { defaultHandwrittenFontDetector } from "./HandwrittenFontDetector";

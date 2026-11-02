@@ -207,6 +207,8 @@ export class ShapeRegistry {
     this.register(this.createGenericEllipseShape());
     this.register(this.createGenericTriangleShape());
     this.register(this.createDiamondShape("generic.diamond", "Diamond"));
+    this.register(this.createGenericTextShape());
+    this.register(this.createGenericTableShape());
   }
 
   register(shape: ShapeDefinition): void {
@@ -284,7 +286,7 @@ export class ShapeRegistry {
         group.appendChild(rect);
 
         // Label
-        const title = node.labels[0]?.text ?? "";
+        const title = node.labels?.[0]?.text ?? node.title ?? "";
         if (title) {
           appendMultilineText(
             group,
@@ -401,7 +403,7 @@ export class ShapeRegistry {
         }
 
         // Class Name
-        const title = node.labels[0]?.text ?? "";
+        const title = node.labels?.[0]?.text ?? node.title ?? "";
         const baseFontSize = nodeFont.fontSize ?? 13;
         const lineHeight = Math.round(baseFontSize * 1.35);
         const lines = title.split(/\r?\n/);
@@ -1181,7 +1183,7 @@ export class ShapeRegistry {
         }
 
         // 4. Title inside the frame (Polaroid / photo-frame caption style)
-        const title = node.labels[0]?.text ?? "";
+        const title = node.labels?.[0]?.text ?? node.title ?? "";
         const titleY = h - titleAreaH / 2 + 5;
         appendMultilineText(
           group,
@@ -1933,7 +1935,7 @@ export class ShapeRegistry {
         );
         group.appendChild(poly);
 
-        const title = node.labels[0]?.text ?? "";
+        const title = node.labels?.[0]?.text ?? node.title ?? "";
         if (title) {
           appendMultilineText(
             group,
@@ -3890,7 +3892,7 @@ export class ShapeRegistry {
         if (node.style?.strokeWidth) circle.setAttribute("stroke-width", String(node.style.strokeWidth));
         group.appendChild(circle);
 
-        const title = node.labels[0]?.text ?? "";
+        const title = node.labels?.[0]?.text ?? node.title ?? "";
         if (title) {
           appendMultilineText(
             group,
@@ -3954,7 +3956,7 @@ export class ShapeRegistry {
         if (node.style?.strokeWidth) ellipse.setAttribute("stroke-width", String(node.style.strokeWidth));
         group.appendChild(ellipse);
 
-        const title = node.labels[0]?.text ?? "";
+        const title = node.labels?.[0]?.text ?? node.title ?? "";
         if (title) {
           appendMultilineText(
             group,
@@ -4016,7 +4018,7 @@ export class ShapeRegistry {
         if (node.style?.strokeWidth) poly.setAttribute("stroke-width", String(node.style.strokeWidth));
         group.appendChild(poly);
 
-        const title = node.labels[0]?.text ?? "";
+        const title = node.labels?.[0]?.text ?? node.title ?? "";
         if (title) {
           appendMultilineText(
             group,
@@ -4064,49 +4066,53 @@ export class ShapeRegistry {
         const w = node.size.width;
         const h = node.size.height;
 
-        // Transparent background rectangle with selection border
-        const rect = document.createElementNS(svgNS, "rect");
-        rect.setAttribute("x", "0");
-        rect.setAttribute("y", "0");
-        rect.setAttribute("width", String(w));
-        rect.setAttribute("height", String(h));
-        rect.setAttribute(
+        // Transparent background rectangle / hitbox
+        const hitbox = document.createElementNS(svgNS, "rect");
+        hitbox.setAttribute("x", "0");
+        hitbox.setAttribute("y", "0");
+        hitbox.setAttribute("width", String(w));
+        hitbox.setAttribute("height", String(h));
+        hitbox.setAttribute("fill", "transparent");
+        hitbox.setAttribute(
           "class",
           context.isSelected
             ? "umlcanvas-text-hitbox umlcanvas-node-selected"
             : "umlcanvas-text-hitbox"
         );
-        rect.setAttribute("fill", "transparent");
         if (context.isSelected) {
-          rect.setAttribute("stroke", "var(--interactive-accent, #3b82f6)");
-          rect.setAttribute("stroke-width", "1.5");
-          rect.setAttribute("stroke-dasharray", "4 3");
+          hitbox.setAttribute("stroke", "var(--interactive-accent, #3b82f6)");
+          hitbox.setAttribute("stroke-width", "1.5");
+          hitbox.setAttribute("stroke-dasharray", "4 3");
         } else {
-          rect.setAttribute("stroke", "none");
+          hitbox.setAttribute("stroke", "none");
         }
-        group.appendChild(rect);
+        group.appendChild(hitbox);
 
         // Render text
-        const textContent = node.labels[0]?.text ?? node.title ?? "";
-        if (textContent) {
+        const textContent = node.labels?.[0]?.text ?? node.title ?? "";
+        const displayText = textContent || (context.isSelected ? "" : "Text");
+        if (displayText) {
           const nodeFont = getNodeFontStyle(node);
           const fontSize = nodeFont.fontSize ?? 16;
           const lineSpacing = Math.round(fontSize * 1.35);
-          const lines = textContent.split("\n");
-          let lineY = Math.max(fontSize, Math.round(fontSize * 1.05));
+          const lines = displayText.split(/\r?\n/);
 
-          for (let i = 0; i < lines.length; i++) {
-            const textEl = document.createElementNS(svgNS, "text");
-            textEl.setAttribute("x", "4");
-            textEl.setAttribute("y", String(lineY));
-            textEl.setAttribute("class", "umlcanvas-text-body");
-            textEl.textContent = lines[i] || " ";
-            const strokeColor = node.style?.strokeColor || node.style?.color || "currentColor";
-            textEl.setAttribute("fill", strokeColor);
-            applyFontToSvgElement(textEl, nodeFont);
-            group.appendChild(textEl);
-            lineY += lineSpacing;
-          }
+          const textEl = document.createElementNS(svgNS, "text");
+          textEl.setAttribute("x", "4");
+          textEl.setAttribute("y", String(Math.max(fontSize, Math.round(fontSize * 1.05))));
+          textEl.setAttribute("class", "umlcanvas-text-body umlcanvas-node-title umlcanvas-text-content");
+          const strokeColor = node.style?.strokeColor || node.style?.color || "currentColor";
+          textEl.setAttribute("fill", strokeColor);
+          applyFontToSvgElement(textEl, nodeFont);
+
+          lines.forEach((lineStr, idx) => {
+            const tspan = document.createElementNS(svgNS, "tspan");
+            tspan.setAttribute("x", "4");
+            tspan.setAttribute("y", String(Math.max(fontSize, Math.round(fontSize * 1.05)) + idx * lineSpacing));
+            tspan.textContent = lineStr || " ";
+            textEl.appendChild(tspan);
+          });
+          group.appendChild(textEl);
         }
 
         return group;
@@ -4143,67 +4149,88 @@ export class ShapeRegistry {
         const group = document.createElementNS(svgNS, "g");
         group.setAttribute("class", "umlcanvas-shape-table");
 
-        const w = node.size.width;
-        const h = node.size.height;
-        const rows = Math.max(1, (node.customData?.rows as number) || 3);
-        const cols = Math.max(1, (node.customData?.cols as number) || 3);
-        const cells = (node.customData?.cells as string[][]) || [];
+        const width = node.size.width;
+        const height = node.size.height;
+        const tableData = getTableDataFromNode(node);
+        const rows = Math.max(1, tableData.rows || 3);
+        const cols = Math.max(1, tableData.cols || 3);
+        const cells = tableData.cells || [];
+        const hasHeader = tableData.hasHeaderRow !== false;
 
-        // Outer background rectangle with selection styling
-        const rect = document.createElementNS(svgNS, "rect");
-        rect.setAttribute("x", "0");
-        rect.setAttribute("y", "0");
-        rect.setAttribute("width", String(w));
-        rect.setAttribute("height", String(h));
-        rect.setAttribute("rx", "3");
-        rect.setAttribute("ry", "3");
-        rect.setAttribute(
+        const rowHeight = height / rows;
+        const colWidth = width / cols;
+
+        // Outer background rectangle
+        const bgRect = document.createElementNS(svgNS, "rect");
+        bgRect.setAttribute("x", "0");
+        bgRect.setAttribute("y", "0");
+        bgRect.setAttribute("width", String(width));
+        bgRect.setAttribute("height", String(height));
+        bgRect.setAttribute("rx", "3");
+        bgRect.setAttribute("ry", "3");
+        bgRect.setAttribute(
           "class",
           context.isSelected
-            ? "umlcanvas-node-body umlcanvas-node-selected"
-            : "umlcanvas-node-body"
+            ? "umlcanvas-node-body umlcanvas-table-bg umlcanvas-node-selected"
+            : "umlcanvas-node-body umlcanvas-table-bg"
         );
-        group.appendChild(rect);
+        if (node.style?.fillColor) bgRect.setAttribute("fill", node.style.fillColor);
+        if (node.style?.strokeColor) bgRect.setAttribute("stroke", node.style.strokeColor);
+        if (node.style?.strokeWidth) bgRect.setAttribute("stroke-width", String(node.style.strokeWidth));
+        group.appendChild(bgRect);
 
-        // Row and column dimensions
-        const colWidth = w / cols;
-        const rowHeight = h / rows;
+        // Header row accent fill if hasHeader
+        if (hasHeader && rows > 1) {
+          const headerBg = document.createElementNS(svgNS, "rect");
+          headerBg.setAttribute("x", "0");
+          headerBg.setAttribute("y", "0");
+          headerBg.setAttribute("width", String(width));
+          headerBg.setAttribute("height", String(rowHeight));
+          headerBg.setAttribute("class", "umlcanvas-table-header-bg");
+          headerBg.setAttribute("fill", "var(--background-modifier-hover, rgba(125, 125, 125, 0.08))");
+          group.appendChild(headerBg);
+        }
 
-        // Render horizontal row divider lines
+        // Horizontal grid lines
         for (let r = 1; r < rows; r++) {
           const y = Math.round(r * rowHeight);
           const line = document.createElementNS(svgNS, "line");
           line.setAttribute("x1", "0");
           line.setAttribute("y1", String(y));
-          line.setAttribute("x2", String(w));
+          line.setAttribute("x2", String(width));
           line.setAttribute("y2", String(y));
           line.setAttribute("class", "umlcanvas-table-grid-line");
-          line.setAttribute("pointer-events", "none");
+          line.setAttribute("stroke", "var(--canvas-stroke-border, var(--background-modifier-border, #404654))");
+          line.setAttribute("stroke-width", r === 1 && hasHeader ? "1.5" : "1");
           group.appendChild(line);
         }
 
-        // Render vertical column divider lines
+        // Vertical grid lines
         for (let c = 1; c < cols; c++) {
           const x = Math.round(c * colWidth);
           const line = document.createElementNS(svgNS, "line");
           line.setAttribute("x1", String(x));
           line.setAttribute("y1", "0");
           line.setAttribute("x2", String(x));
-          line.setAttribute("y2", String(h));
+          line.setAttribute("y2", String(height));
           line.setAttribute("class", "umlcanvas-table-grid-line");
-          line.setAttribute("pointer-events", "none");
+          line.setAttribute("stroke", "var(--canvas-stroke-border, var(--background-modifier-border, #404654))");
+          line.setAttribute("stroke-width", "1");
           group.appendChild(line);
         }
 
         // Render cell contents
         const nodeFont = getNodeFontStyle(node);
-        const fontSize = nodeFont.fontSize ?? 12;
+        const fontSize = Math.max(10, (nodeFont.fontSize ?? 12) - (rows > 4 ? 2 : 0));
 
         for (let r = 0; r < rows; r++) {
           for (let c = 0; c < cols; c++) {
             const cellX = c * colWidth;
             const cellY = r * rowHeight;
-            const cellText = cells[r]?.[c] ?? "";
+            let cellText = cells[r]?.[c] ?? "";
+            if (!cellText && r === 0 && tableData.headers?.[c]) {
+              cellText = tableData.headers[c];
+            }
 
             const cellG = document.createElementNS(svgNS, "g");
             cellG.setAttribute("class", "umlcanvas-table-cell");
@@ -4222,15 +4249,22 @@ export class ShapeRegistry {
             cellG.appendChild(cellHitbox);
 
             if (cellText) {
+              const isHeaderCell = r === 0 && hasHeader;
               const textEl = document.createElementNS(svgNS, "text");
               textEl.setAttribute("x", String(cellX + colWidth / 2));
               textEl.setAttribute("y", String(cellY + rowHeight / 2));
               textEl.setAttribute("text-anchor", "middle");
               textEl.setAttribute("dominant-baseline", "central");
-              textEl.setAttribute("class", "umlcanvas-table-cell-text");
+              textEl.setAttribute(
+                "class",
+                isHeaderCell
+                  ? "umlcanvas-table-cell-header umlcanvas-table-cell-text"
+                  : "umlcanvas-table-cell-text"
+              );
               textEl.setAttribute("pointer-events", "none");
               applyFontToSvgElement(textEl, {
                 ...nodeFont,
+                bold: isHeaderCell ? true : nodeFont.bold,
                 fontSize,
               });
 
@@ -4261,6 +4295,77 @@ export class ShapeRegistry {
       },
     };
   }
+}
+
+export interface TableCustomData {
+  rows: number;
+  cols: number;
+  cells: string[][];
+  headers?: string[];
+  colWidths?: number[];
+  rowHeights?: number[];
+  hasHeaderRow?: boolean;
+}
+
+interface RawTableData {
+  rows?: unknown;
+  cols?: unknown;
+  cells?: unknown;
+  headers?: unknown;
+  colWidths?: unknown;
+  rowHeights?: unknown;
+  hasHeaderRow?: unknown;
+}
+
+export function getTableDataFromNode(node: DiagramNode): TableCustomData {
+  const custom = node.customData;
+  const cd: RawTableData | undefined =
+    custom && typeof custom.tableData === "object" && custom.tableData !== null
+      ? custom.tableData
+      : custom;
+
+  if (cd && typeof cd.rows === "number" && typeof cd.cols === "number") {
+    return {
+      rows: Math.max(1, cd.rows),
+      cols: Math.max(1, cd.cols),
+      cells: Array.isArray(cd.cells) ? (cd.cells as string[][]) : [],
+      headers: Array.isArray(cd.headers) ? (cd.headers as string[]) : undefined,
+      colWidths: Array.isArray(cd.colWidths) ? (cd.colWidths as number[]) : undefined,
+      rowHeights: Array.isArray(cd.rowHeights) ? (cd.rowHeights as number[]) : undefined,
+      hasHeaderRow: cd.hasHeaderRow !== false,
+    };
+  }
+
+  // Parse markdown table format from label if present
+  const rawText = node.labels?.[0]?.text ?? "";
+  if (rawText.includes("|")) {
+    const lines = rawText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const cellRows: string[][] = [];
+    for (const line of lines) {
+      if (/^\|?\s*[-:]+[-| :]*\s*\|?$/.test(line)) continue; // ignore |---|---|
+      const trimmed = line.replace(/^\|/, "").replace(/\|$/, "");
+      const rowCells = trimmed.split("|").map((c) => c.trim());
+      if (rowCells.length > 0) {
+        cellRows.push(rowCells);
+      }
+    }
+    if (cellRows.length > 0) {
+      const rows = cellRows.length;
+      const cols = Math.max(...cellRows.map((r) => r.length));
+      return { rows, cols, cells: cellRows, hasHeaderRow: true };
+    }
+  }
+
+  return {
+    rows: 3,
+    cols: 3,
+    cells: [
+      ["Header 1", "Header 2", "Header 3"],
+      ["Row 1, Col 1", "Row 1, Col 2", "Row 1, Col 3"],
+      ["Row 2, Col 1", "Row 2, Col 2", "Row 2, Col 3"],
+    ],
+    hasHeaderRow: true,
+  };
 }
 
 export const defaultShapeRegistry = new ShapeRegistry();

@@ -1,5 +1,6 @@
 import { setIcon } from "obsidian";
 import { DiagramEditor } from "../../application/use-cases/DiagramEditor";
+import { DiagramNode } from "../../domain/entities/DiagramNode";
 import { SvgSceneRenderer } from "../renderer/SvgSceneRenderer";
 import { ViewportTransform } from "../renderer/ViewportMath";
 import { EdgeRouting } from "../../domain/types";
@@ -18,7 +19,6 @@ import {
 } from "../theme/Typography";
 import { defaultEdgeStyleRegistry } from "../renderer/EdgeStyleRegistry";
 import { Group } from "../../domain/entities/Group";
-import { DiagramNode } from "../../domain/entities/DiagramNode";
 
 interface HandledEvent extends Event {
   _umlHandled?: boolean;
@@ -58,6 +58,7 @@ export class Toolbar {
   private diamondBtn!: HTMLButtonElement;
   private triangleBtn!: HTMLButtonElement;
   private noteBtn!: HTMLButtonElement;
+  private textBtn!: HTMLButtonElement;
   private vaultNoteBtn?: HTMLButtonElement;
   private imageBtn?: HTMLButtonElement;
   private pdfBtn?: HTMLButtonElement;
@@ -68,6 +69,7 @@ export class Toolbar {
   // Context-sensitive Component Controls
   private contextGroup!: HTMLElement;
   private selectionBadgeEl!: HTMLElement;
+  private enhanceBtn!: HTMLButtonElement;
   private colorBtn!: HTMLButtonElement;
   private colorIndicatorEl!: HTMLElement;
   private labelBtn!: HTMLButtonElement;
@@ -76,7 +78,6 @@ export class Toolbar {
   private deleteTableRowBtn!: HTMLButtonElement;
   private addTableColBtn!: HTMLButtonElement;
   private deleteTableColBtn!: HTMLButtonElement;
-  private enhanceBtn!: HTMLButtonElement;
   private alignBtn!: HTMLButtonElement;
   private groupBtn!: HTMLButtonElement;
   private ungroupBtn!: HTMLButtonElement;
@@ -335,6 +336,43 @@ export class Toolbar {
     if (node && typeof this.renderer.startInlineEditor === "function") {
       this.renderer.startInlineEditor(node);
     }
+  }
+
+  public addTextAtCenter(initialText = "Text"): DiagramNode {
+    const transform = this.renderer.currentTransform;
+    const centerScreen = {
+      x: this.container.clientWidth / 2,
+      y: this.container.clientHeight / 2,
+    };
+    const canvasX = (centerScreen.x - transform.panX) / transform.zoom;
+    const canvasY = (centerScreen.y - transform.panY) / transform.zoom;
+
+    const size = { width: 140, height: 40 };
+    const node = this.editor.addNode({
+      kind: "generic.text",
+      title: initialText,
+      position: {
+        x: Math.round(canvasX - size.width / 2),
+        y: Math.round(canvasY - size.height / 2),
+      },
+      size,
+    });
+
+    if (this.renderer.grabMode && typeof this.renderer.setGrabMode === "function") {
+      this.renderer.setGrabMode(false);
+      this.updateToolMode();
+    }
+    if (this.renderer.freehandMode) {
+      this.renderer.setFreehandMode(false);
+      this.updateToolMode();
+    }
+
+    this.editor.clearSelection();
+    this.editor.selectNode(node.id);
+    if (node && typeof this.renderer.startInlineEditor === "function") {
+      this.renderer.startInlineEditor(node);
+    }
+    return node;
   }
 
   public addImageAtCenter(src = "", title = "Image"): void {
@@ -912,12 +950,16 @@ export class Toolbar {
 
     // Enhance Handwriting to Text / Shape
     this.enhanceBtn = this.createButton(
-      "Enhance Handwriting / Shape (Shift+E)",
-      "",
+      "Enhance handdrawn note into standard components (Shift+E)",
+      "Enhance",
       () => {
-        this.editor.enhanceSelection();
+        const handled = this.editor.enhanceHanddrawnSelection();
+        if (!handled) {
+          this.editor.enhanceSelection();
+        }
       },
-      "sparkles"
+      "sparkles",
+      "umlcanvas-enhance-btn"
     );
     this.contextGroup.appendChild(this.enhanceBtn);
 
@@ -1249,6 +1291,28 @@ export class Toolbar {
       "sticky-note"
     );
     shapeGroup.appendChild(this.noteBtn);
+
+    // Direct Text on Canvas
+    this.textBtn = this.createButton(
+      "Text (X) - Add direct text on canvas",
+      "",
+      () => {
+        this.addTextAtCenter();
+      },
+      "type"
+    );
+    shapeGroup.appendChild(this.textBtn);
+
+    // Table
+    this.tableBtn = this.createButton(
+      "Table - Add structured table",
+      "",
+      () => {
+        this.addTableAtCenter();
+      },
+      "table"
+    );
+    shapeGroup.appendChild(this.tableBtn);
 
     // Image (Photo Frame)
     this.imageBtn = this.createButton(

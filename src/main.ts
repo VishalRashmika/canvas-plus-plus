@@ -218,6 +218,27 @@ export default class CanvasPlusPlusPlugin extends Plugin {
       },
     });
 
+    // Enhance handdrawn notes command
+    this.addCommand({
+      id: "enhance-handdrawn-note",
+      name: "Enhance handdrawn notes into standard note",
+      checkCallback: (checking: boolean) => {
+        const activeView = this.app.workspace.getActiveViewOfType(UmlCanvasView);
+        if (activeView && activeView.diagramEditor) {
+          if (!checking) {
+            const enhanced = activeView.diagramEditor.enhanceHanddrawnSelection();
+            if (enhanced) {
+              new Notice("Handdrawn notes enhanced into standard components");
+            } else {
+              new Notice("No handdrawn strokes found to enhance");
+            }
+          }
+          return true;
+        }
+        return false;
+      },
+    });
+
     // Right-click context menu in File Explorer (on folder or file)
     this.registerEvent(
       this.app.workspace.on("file-menu", (menu, file) => {

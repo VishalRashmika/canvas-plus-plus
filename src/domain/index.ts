@@ -21,3 +21,6 @@ export * from "./services/ChipService";
 export * from "./services/CustomChipRegistry";
 export * from "./services/ShapeRecognizer";
 export * from "./services/HandwrittenFontDetector";
+export * from "./services/TableDetector";
+export * from "./services/HandwritingRecognizer";
+export * from "./services/HanddrawnNoteEnhancer";

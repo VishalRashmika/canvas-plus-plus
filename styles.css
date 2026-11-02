@@ -5781,3 +5781,70 @@ body.umlcanvas-is-resizing-palette * {
 .umlcanvas-file-input-hidden {
   display: none !important;
 }
+
+/* --- Direct Text on Canvas --- */
+.umlcanvas-shape-text {
+  user-select: none;
+}
+
+.umlcanvas-text-hitbox {
+  cursor: pointer;
+}
+
+.umlcanvas-text-content {
+  fill: var(--text-normal);
+  font-family: var(--font-text);
+  user-select: none;
+}
+
+.umlcanvas-text-selection-box {
+  pointer-events: none;
+}
+
+/* --- Structured Tables --- */
+.umlcanvas-shape-table {
+  user-select: none;
+}
+
+.umlcanvas-table-bg {
+  fill: var(--background-primary);
+  stroke: var(--background-modifier-border);
+  stroke-width: 1.5px;
+}
+
+.umlcanvas-table-header-bg {
+  pointer-events: none;
+}
+
+.umlcanvas-table-grid-line {
+  pointer-events: none;
+}
+
+.umlcanvas-table-cell-header {
+  font-weight: 600;
+  fill: var(--text-normal);
+  font-size: 13px;
+  dominant-baseline: central;
+}
+
+.umlcanvas-table-cell-text {
+  fill: var(--text-normal);
+  font-size: 13px;
+  dominant-baseline: central;
+}
+
+/* --- Enhance Button in Context Toolbar --- */
+.umlcanvas-enhance-btn {
+  background: var(--interactive-accent) !important;
+  color: var(--text-on-accent, #ffffff) !important;
+  font-weight: 600 !important;
+  border-radius: var(--radius-s, 4px) !important;
+  gap: 6px !important;
+  padding: 4px 10px !important;
+}
+
+.umlcanvas-enhance-btn:hover {
+  background: var(--interactive-accent-hover, #6c5ce7) !important;
+  transform: translateY(-1px);
+}
+

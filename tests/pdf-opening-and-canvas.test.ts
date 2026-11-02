@@ -9,7 +9,7 @@ import { defaultSvgExporter } from "../src/infrastructure/export/SvgExporter";
 import { calculateNodeFitSize } from "../src/domain/services/TextMeasurement";
 import { isPdfFile, PdfSuggestModal } from "../src/presentation/views/PdfSuggestModal";
 import { UmlCanvasView } from "../src/presentation/views/UmlCanvasView";
-import { TFile, WorkspaceLeaf } from "./fakes/MockObsidian";
+import { TFile, WorkspaceLeaf, Menu } from "./fakes/MockObsidian";
 
 // Mock DOM element for headless Node / Jest environment
 class MockElement {
@@ -294,6 +294,15 @@ describe("Open PDF Files Inside Canvas Tests", () => {
       expect(isPdfFile("note.md")).toBe(false);
       expect(isPdfFile("diagram.canvas")).toBe(false);
       expect(isPdfFile(new TFile("notes/daily.md", "daily", "md"))).toBe(false);
+
+      // Subpaths, query strings, and duck-typed objects
+      expect(isPdfFile("Research/Paper.pdf#page=5")).toBe(true);
+      expect(isPdfFile("docs/Manual.PDF?v=2")).toBe(true);
+      expect(isPdfFile({ path: "docs/doc.pdf" })).toBe(true);
+      expect(isPdfFile({ name: "whitepaper.PDF" })).toBe(true);
+      expect(isPdfFile({ extension: "pdf" })).toBe(true);
+      expect(isPdfFile("document.pdf.png")).toBe(false);
+      expect(isPdfFile("note.md#page=1")).toBe(false);
     });
 
     it("should filter only PDF files in PdfSuggestModal and invoke callback on selection", () => {
@@ -430,6 +439,10 @@ describe("Open PDF Files Inside Canvas Tests", () => {
       const iframe = rendered.querySelector(".umlcanvas-pdf-frame");
       expect(iframe).not.toBeNull();
       expect(iframe?.getAttribute("src")).toBe("app://local/docs/Report.pdf#page=4");
+
+      // Open button data-file-path includes subpath
+      const openBtn = rendered.querySelector(".umlcanvas-pdf-open-btn");
+      expect(openBtn?.getAttribute("data-file-path")).toBe("docs/Report.pdf#page=4");
     });
 
     it("should render placeholder when no src is provided yet", () => {
@@ -538,6 +551,134 @@ describe("Open PDF Files Inside Canvas Tests", () => {
       expect(bounds.width).toBe(280);
       expect(bounds.height).toBe(24);
       expect(bounds.textAlign).toBe("left");
+    });
+
+    it("should include subpath when opening PDF via open button or double click", () => {
+      let openedPath: string | null = null;
+      (renderer as any).onNoteOpen = (path: string) => {
+        openedPath = path;
+      };
+
+      const pdfNode = editor.addNode({
+        kind: "generic.pdf",
+        title: "Manual",
+        position: { x: 40, y: 40 },
+        metadata: {
+          filePath: "docs/Manual.pdf",
+          subpath: "#page=8",
+        },
+        customData: {
+          filePath: "docs/Manual.pdf",
+          src: "app://local/docs/Manual.pdf",
+          subpath: "#page=8",
+        },
+      });
+
+      renderer.render();
+
+      const openBtn = container.querySelector(".umlcanvas-pdf-open-btn");
+      expect(openBtn).not.toBeNull();
+      (renderer as any).svgEl.dispatch("mousedown", { target: openBtn });
+      expect(openedPath).toBe("docs/Manual.pdf#page=8");
+
+      // Now test double clicking the header
+      openedPath = null;
+      const nodeEl = container.querySelector(`[data-node-id="${pdfNode.id}"]`);
+      const headerBg = nodeEl?.querySelector(".umlcanvas-pdf-header-bg");
+      (renderer as any).svgEl.dispatch("dblclick", { target: headerBg });
+      expect(openedPath).toBe("docs/Manual.pdf#page=8");
+    });
+
+    it("should trigger inline editor when double-clicking the PDF title directly", () => {
+      const pdfNode = editor.addNode({
+        kind: "generic.pdf",
+        title: "EditableTitle",
+        position: { x: 50, y: 50 },
+        customData: {
+          filePath: "docs/EditableTitle.pdf",
+        },
+      });
+
+      renderer.render();
+
+      const nodeEl = container.querySelector(`[data-node-id="${pdfNode.id}"]`);
+      const titleEl = nodeEl?.querySelector(".umlcanvas-pdf-title");
+      expect(titleEl).not.toBeNull();
+
+      (renderer as any).svgEl.dispatch("dblclick", { target: titleEl });
+      expect(renderer.activeInlineEditor).not.toBeNull();
+    });
+
+    it("should trigger onPdfPick when clicking on PDF placeholder", () => {
+      let pickedNode: any = null;
+      (renderer as any).onPdfPick = (node: any) => {
+        pickedNode = node;
+      };
+
+      const emptyPdf = editor.addNode({
+        kind: "generic.pdf",
+        title: "Empty",
+        position: { x: 60, y: 60 },
+      });
+
+      renderer.render();
+
+      const nodeEl = container.querySelector(`[data-node-id="${emptyPdf.id}"]`);
+      const placeholder = nodeEl?.querySelector(".umlcanvas-pdf-placeholder");
+      expect(placeholder).not.toBeNull();
+
+      (renderer as any).svgEl.dispatch("mousedown", { target: placeholder });
+      expect(pickedNode).toBe(emptyPdf);
+    });
+
+    it("should trigger onPdfChangePage when clicking page badge", () => {
+      let pageChangeNode: any = null;
+      (renderer as any).onPdfChangePage = (node: any) => {
+        pageChangeNode = node;
+      };
+
+      const pdfNode = editor.addNode({
+        kind: "generic.pdf",
+        title: "Report",
+        position: { x: 50, y: 50 },
+        size: { width: 340, height: 440 },
+        metadata: { filePath: "docs/Report.pdf", subpath: "#page=2" },
+        customData: { filePath: "docs/Report.pdf", src: "app://local/doc.pdf", subpath: "#page=2" },
+      });
+
+      renderer.render();
+
+      const pageBadge = container.querySelector(".umlcanvas-pdf-page-badge");
+      expect(pageBadge).not.toBeNull();
+
+      (renderer as any).svgEl.dispatch("mousedown", { target: pageBadge });
+      expect(pageChangeNode).toBe(pdfNode);
+    });
+
+    it("should enforce minimum dimensions (140x100) when resizing a generic.pdf node", () => {
+      const pdfNode = editor.addNode({
+        kind: "generic.pdf",
+        title: "Doc",
+        position: { x: 100, y: 100 },
+        size: { width: 340, height: 440 },
+      });
+
+      editor.selectNode(pdfNode.id, false);
+      renderer.render();
+
+      // Trigger resize from south-east handle to very small dimensions (-300, -400)
+      const seHandle = container.querySelector(".handle-se");
+      expect(seHandle).not.toBeNull();
+
+      (renderer as any).svgEl.dispatch("mousedown", { target: seHandle, clientX: 440, clientY: 540 });
+      expect(container.classList.contains("umlcanvas-resizing")).toBe(true);
+
+      (renderer as any).svgEl.dispatch("mousemove", { clientX: 100, clientY: 100 });
+      expect(pdfNode.size.width).toBeGreaterThanOrEqual(140);
+      expect(pdfNode.size.height).toBeGreaterThanOrEqual(100);
+
+      (global as any).window.dispatch("mouseup");
+      expect(container.classList.contains("umlcanvas-resizing")).toBe(false);
     });
   });
 
@@ -673,6 +814,55 @@ describe("Open PDF Files Inside Canvas Tests", () => {
       expect(plainNode.width).toBe(380);
       expect(plainNode.height).toBe(500);
     });
+
+    it("should import JSON Canvas file node when subpath is embedded in file string", () => {
+      const jsonCanvas = JSON.stringify({
+        nodes: [
+          {
+            id: "pdf-embedded-hash",
+            type: "file",
+            file: "Research/Paper.pdf#page=9",
+            x: 100,
+            y: 100,
+            width: 340,
+            height: 440,
+          },
+        ],
+        edges: [],
+      });
+
+      const diagram = defaultJsonCanvasImporter.importCanvas(jsonCanvas);
+      expect(diagram.nodes.length).toBe(1);
+      const imported = diagram.nodes[0];
+      expect(imported.kind).toBe("generic.pdf");
+      expect(imported.labels[0].text).toBe("Paper");
+      expect(imported.metadata?.filePath).toBe("Research/Paper.pdf");
+      expect(imported.metadata?.subpath).toBe("#page=9");
+    });
+
+    it("should import JSON Canvas link node pointing to PDF as generic.pdf", () => {
+      const jsonCanvas = JSON.stringify({
+        nodes: [
+          {
+            id: "pdf-link",
+            type: "link",
+            url: "https://example.com/handbook.pdf",
+            x: 50,
+            y: 50,
+            width: 340,
+            height: 440,
+          },
+        ],
+        edges: [],
+      });
+
+      const diagram = defaultJsonCanvasImporter.importCanvas(jsonCanvas);
+      expect(diagram.nodes.length).toBe(1);
+      const imported = diagram.nodes[0];
+      expect(imported.kind).toBe("generic.pdf");
+      expect(imported.labels[0].text).toBe("handbook");
+      expect(imported.customData?.filePath).toBe("https://example.com/handbook.pdf");
+    });
   });
 
   describe("Standalone SVG Export", () => {
@@ -777,6 +967,120 @@ describe("Open PDF Files Inside Canvas Tests", () => {
       expect(pdfNode.metadata?.filePath).toBe("docs/NewManual.pdf");
       expect(pdfNode.customData?.filePath).toBe("docs/NewManual.pdf");
       expect(pdfNode.customData?.src).toBe("app://local/docs/NewManual.pdf");
+    });
+
+    it("should handle external drop of Obsidian embed syntax ![[Sample.pdf#page=5]]", async () => {
+      const dropEvent = {
+        dataTransfer: {
+          getData: (type: string) => (type === "text/plain" ? "![[docs/Sample.pdf#page=5]]" : ""),
+        },
+      } as any;
+
+      const handled = await mockView.handleExternalDrop(dropEvent, { x: 150, y: 150 });
+      expect(handled).toBe(true);
+
+      const createdNode = editor.diagram.nodes.find((n) => n.kind === "generic.pdf");
+      expect(createdNode).toBeDefined();
+      expect(createdNode?.metadata?.filePath).toBe("docs/Sample.pdf");
+      expect(createdNode?.metadata?.subpath).toBe("#page=5");
+      expect(createdNode?.position).toEqual({ x: 150, y: 150 });
+    });
+
+    it("should handle paste event containing PDF wikilink or path", () => {
+      const pasteEvent = {
+        preventDefault: jest.fn(),
+        clipboardData: {
+          items: [],
+          getData: (type: string) => (type === "text/plain" ? "[[docs/Sample.pdf#page=7]]" : ""),
+        },
+      } as any;
+
+      mockView.handlePaste(pasteEvent);
+      expect(pasteEvent.preventDefault).toHaveBeenCalled();
+
+      const createdNode = editor.diagram.nodes.find((n) => n.metadata?.subpath === "#page=7");
+      expect(createdNode).toBeDefined();
+      expect(createdNode?.kind).toBe("generic.pdf");
+      expect(createdNode?.metadata?.filePath).toBe("docs/Sample.pdf");
+    });
+
+    it("should update existing PDF node when targetNodeId is provided without adding duplicate", async () => {
+      const initialNode = editor.addNode({
+        kind: "generic.pdf",
+        title: "OldPDF",
+        position: { x: 50, y: 50 },
+        metadata: { filePath: "docs/Old.pdf" },
+      });
+      const initialCount = editor.diagram.nodes.length;
+
+      const newFile = new TFile("docs/Sample.pdf", "Sample", "pdf");
+      await mockView.updatePdfNodeWithFile(initialNode.id, newFile);
+
+      expect(editor.diagram.nodes.length).toBe(initialCount);
+      expect(initialNode.labels[0].text).toBe("Sample");
+      expect(initialNode.metadata?.filePath).toBe("docs/Sample.pdf");
+      expect(initialNode.customData?.src).toBe("app://local/docs/Sample.pdf");
+    });
+
+    it("should change PDF target page via promptChangePdfPage", () => {
+      const pdfNode = editor.addNode({
+        kind: "generic.pdf",
+        title: "Sample",
+        position: { x: 50, y: 50 },
+        metadata: { filePath: "docs/Sample.pdf", src: "app://local/docs/Sample.pdf#page=1", subpath: "#page=1" },
+        customData: { filePath: "docs/Sample.pdf", src: "app://local/docs/Sample.pdf#page=1", subpath: "#page=1" },
+      });
+
+      const originalPrompt = (global as any).window.prompt;
+      (global as any).window.prompt = () => "15";
+
+      try {
+        mockView.promptChangePdfPage(pdfNode);
+        expect(pdfNode.metadata?.subpath).toBe("#page=15");
+        expect(pdfNode.customData?.subpath).toBe("#page=15");
+        expect(pdfNode.customData?.src).toBe("app://local/docs/Sample.pdf#page=15");
+      } finally {
+        (global as any).window.prompt = originalPrompt;
+      }
+    });
+
+    it("should provide context menu items for PDF: change, set page, edit title, and open in new tab", () => {
+      const pdfNode = editor.addNode({
+        kind: "generic.pdf",
+        title: "Specification",
+        metadata: { filePath: "docs/Sample.pdf", subpath: "#page=2" },
+        customData: { filePath: "docs/Sample.pdf", subpath: "#page=2" },
+      });
+
+      let lastMenu: Menu | null = null;
+      const origShow = Menu.prototype.showAtMouseEvent;
+      Menu.prototype.showAtMouseEvent = function () {
+        lastMenu = this;
+      };
+
+      try {
+        (mockView as any).showContextMenu(
+          { clientX: 10, clientY: 10, preventDefault: () => {} } as any,
+          { x: 0, y: 0 },
+          pdfNode
+        );
+
+        expect(lastMenu).not.toBeNull();
+        const titles = lastMenu!.items.map((i: any) => i.title);
+        expect(titles.some((t: string) => t.includes("Change PDF document..."))).toBe(true);
+        expect(titles.some((t: string) => t.includes("Set target page (subpath)..."))).toBe(true);
+        expect(titles.some((t: string) => t.includes("Edit title..."))).toBe(true);
+        expect(titles.some((t: string) => t.includes("Open PDF in Obsidian"))).toBe(true);
+        expect(titles.some((t: string) => t.includes("Open PDF in new tab"))).toBe(true);
+
+        // Verify Open in new tab opens with subpath and newLeaf: true
+        const openNewTabItem = lastMenu!.items.find((i: any) => i.title.includes("Open PDF in new tab"));
+        expect(openNewTabItem).toBeDefined();
+        openNewTabItem!.onClickHandler!();
+        expect(mockApp.workspace.openLinkText).toHaveBeenCalledWith("docs/Sample.pdf#page=2", "", true);
+      } finally {
+        Menu.prototype.showAtMouseEvent = origShow;
+      }
     });
   });
 });

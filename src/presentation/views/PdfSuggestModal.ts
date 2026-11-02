@@ -1,14 +1,27 @@
 import { App, FuzzySuggestModal, TFile } from "obsidian";
 
 /**
- * Checks if a given file or filename represents a PDF document.
+ * Checks if a given file, filename, or link represents a PDF document.
+ * Handles subpaths (#page=1), query strings (?v=1), and case-insensitive extensions (.PDF).
  */
-export function isPdfFile(fileOrExt: string | TFile): boolean {
-  const ext =
-    typeof fileOrExt === "string"
-      ? fileOrExt.split(".").pop()?.toLowerCase() ?? ""
-      : fileOrExt.extension?.toLowerCase() ?? "";
-  return ext === "pdf";
+export function isPdfFile(fileOrExt: string | TFile | { path?: string; name?: string; extension?: string }): boolean {
+  if (!fileOrExt) return false;
+  if (typeof fileOrExt === "string") {
+    const clean = fileOrExt.split(/[?#]/)[0].trim();
+    const ext = clean.split(".").pop()?.toLowerCase() ?? "";
+    return ext === "pdf";
+  }
+  if (fileOrExt.extension) {
+    const cleanExt = fileOrExt.extension.split(/[?#]/)[0].toLowerCase().trim();
+    if (cleanExt === "pdf") return true;
+  }
+  const rawPath = fileOrExt.path || fileOrExt.name || "";
+  if (rawPath) {
+    const clean = rawPath.split(/[?#]/)[0].trim();
+    const ext = clean.split(".").pop()?.toLowerCase() ?? "";
+    return ext === "pdf";
+  }
+  return false;
 }
 
 /**

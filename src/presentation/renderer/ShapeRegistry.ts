@@ -1349,7 +1349,10 @@ export class ShapeRegistry {
         openIcon.setAttribute("class", "umlcanvas-pdf-open-btn");
         const pdfFilePath =
           (node.metadata?.filePath as string) || (node.customData?.filePath as string) || "";
-        openIcon.setAttribute("data-file-path", pdfFilePath);
+        const targetPathWithSubpath = subpath
+          ? `${pdfFilePath}${subpath.startsWith("#") ? subpath : "#" + subpath}`
+          : pdfFilePath;
+        openIcon.setAttribute("data-file-path", targetPathWithSubpath);
         openIcon.textContent = "↗";
         openIcon.setAttribute("title", "Open PDF in Obsidian");
         group.appendChild(openIcon);
@@ -1374,8 +1377,12 @@ export class ShapeRegistry {
           "";
 
         let fullSrc = src;
-        if (src && subpath && !src.includes("#")) {
-          fullSrc = `${src}${subpath.startsWith("#") ? subpath : "#" + subpath}`;
+        if (src && subpath) {
+          if (src.includes("#")) {
+            fullSrc = `${src.split("#")[0]}${subpath.startsWith("#") ? subpath : "#" + subpath}`;
+          } else {
+            fullSrc = `${src}${subpath.startsWith("#") ? subpath : "#" + subpath}`;
+          }
         }
 
         if (fullSrc) {

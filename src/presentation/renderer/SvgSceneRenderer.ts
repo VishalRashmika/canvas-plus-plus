@@ -54,6 +54,8 @@ export interface SvgSceneRendererOptions {
     group?: Group
   ) => void;
   onNoteOpen?: (filePath: string) => void;
+  onPdfPick?: (node: DiagramNode) => void;
+  onPdfChangePage?: (node: DiagramNode) => void;
   onChipEdit?: (node: DiagramNode) => void;
   onExternalDrop?: (e: DragEvent, canvasPoint: Point) => boolean | Promise<boolean> | void;
   onRenderMarkdown?: (
@@ -221,6 +223,8 @@ export class SvgSceneRenderer {
     group?: Group
   ) => void;
   private onNoteOpen?: (filePath: string) => void;
+  private onPdfPick?: (node: DiagramNode) => void;
+  private onPdfChangePage?: (node: DiagramNode) => void;
   private onChipEdit?: (node: DiagramNode) => void;
   private onExternalDrop?: (e: DragEvent, canvasPoint: Point) => boolean | Promise<boolean> | void;
   private onRenderMarkdown?: (
@@ -246,6 +250,8 @@ export class SvgSceneRenderer {
     this.onModeChange = options?.onModeChange;
     this.onContextMenu = options?.onContextMenu;
     this.onNoteOpen = options?.onNoteOpen;
+    this.onPdfPick = options?.onPdfPick;
+    this.onPdfChangePage = options?.onPdfChangePage;
     this.onChipEdit = options?.onChipEdit;
     this.onExternalDrop = options?.onExternalDrop;
     this.onRenderMarkdown = options?.onRenderMarkdown;
@@ -2227,6 +2233,7 @@ export class SvgSceneRenderer {
           initialPosition: { ...bounds.position },
           initialSize: { ...bounds.size },
         };
+        this.container.classList.add("umlcanvas-resizing");
         return;
       }
     }
@@ -2253,6 +2260,7 @@ export class SvgSceneRenderer {
               ? node.customData.pathData
               : undefined,
         };
+        this.container.classList.add("umlcanvas-resizing");
         return;
       }
     }
@@ -2303,6 +2311,19 @@ export class SvgSceneRenderer {
       const filePath = openBtn.getAttribute("data-file-path");
       if (filePath && this.onNoteOpen) {
         this.onNoteOpen(filePath);
+        return;
+      }
+    }
+
+    // Click on PDF page badge in header (to change target page)
+    const pdfPageBadge = target.closest(".umlcanvas-pdf-page-badge");
+    if (pdfPageBadge) {
+      e.stopPropagation();
+      const nodeEl = target.closest(".umlcanvas-node");
+      const nodeId = nodeEl?.getAttribute("data-node-id");
+      const node = nodeId ? this.editor.diagram.nodes.find((n) => n.id === nodeId) : null;
+      if (node && this.onPdfChangePage) {
+        this.onPdfChangePage(node);
         return;
       }
     }
@@ -2406,6 +2427,14 @@ export class SvgSceneRenderer {
             const r = Math.max(0, Math.min(rows - 1, Math.floor(relY / rowH)));
             const c = Math.max(0, Math.min(cols - 1, Math.floor(relX / colW)));
             clickedCell = { row: r, col: c };
+          }
+        }
+
+        // If clicking on PDF placeholder (no PDF loaded yet), prompt to pick file
+        if (target.closest(".umlcanvas-pdf-placeholder")) {
+          if (clickedNode && clickedNode.kind === "generic.pdf" && this.onPdfPick) {
+            this.onPdfPick(clickedNode);
+            return;
           }
         }
 
@@ -2689,8 +2718,9 @@ export class SvgSceneRenderer {
       let newW = size.width;
       let newH = size.height;
 
-      const minW = 60;
-      const minH = 40;
+      const isCardNode = node.kind === "generic.pdf" || node.kind === "obsidian.note";
+      const minW = isCardNode ? 140 : 60;
+      const minH = isCardNode ? 100 : 40;
 
       if (handle.includes("e")) newW = Math.max(minW, size.width + dx);
       if (handle.includes("s")) newH = Math.max(minH, size.height + dy);
@@ -2961,7 +2991,7 @@ export class SvgSceneRenderer {
           node &&
           !this.editor.isNodeLocked(node.id) &&
           node.kind !== "obsidian.note" &&
-          node.kind !== "generic.pdf" &&
+          (node.kind !== "generic.pdf" || Boolean((e.target as HTMLElement | null)?.closest(".umlcanvas-pdf-title"))) &&
           node.kind !== "schematic.chip" &&
           node.kind !== "generic.freehand"
         ) {
@@ -3068,6 +3098,7 @@ export class SvgSceneRenderer {
           }
         );
       }
+      this.container.classList.remove("umlcanvas-resizing");
       this.dragMode = { type: "none" };
       return;
     }
@@ -3082,6 +3113,7 @@ export class SvgSceneRenderer {
         group.size = { ...resizeState.initialSize };
         this.editor.resizeGroup(resizeState.groupId, finalPos, finalSize);
       }
+      this.container.classList.remove("umlcanvas-resizing");
       this.dragMode = { type: "none" };
       this.render();
       return;
@@ -3247,6 +3279,10 @@ export class SvgSceneRenderer {
       if (nodeId) {
         const node = this.editor.diagram.nodes.find((n) => n.id === nodeId);
         if (node && !this.editor.isNodeLocked(node.id)) {
+          if (target && target.closest(".umlcanvas-pdf-title")) {
+            this.startInlineEditor(node);
+            return;
+          }
           if (
             (node.kind === "obsidian.note" ||
               node.kind === "generic.pdf" ||
@@ -3256,7 +3292,15 @@ export class SvgSceneRenderer {
               (node.metadata?.filePath as string) ||
               (node.customData?.filePath as string);
             if (filePath && this.onNoteOpen) {
-              this.onNoteOpen(filePath);
+              const subpath =
+                (node.metadata?.subpath as string) ||
+                (node.customData?.subpath as string) ||
+                "";
+              const fullTarget = filePath + (subpath ? (subpath.startsWith("#") ? subpath : "#" + subpath) : "");
+              this.onNoteOpen(fullTarget);
+              return;
+            } else if (!filePath && node.kind === "generic.pdf" && this.onPdfPick) {
+              this.onPdfPick(node);
               return;
             }
           }

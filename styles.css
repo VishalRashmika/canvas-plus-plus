@@ -1840,8 +1840,13 @@ body .umlcanvas-moving * {
   font-family: var(--font-text, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
   font-size: 11px;
   font-weight: 500;
-  pointer-events: none;
+  cursor: pointer;
   user-select: none;
+  transition: fill 0.15s ease;
+}
+
+.umlcanvas-pdf-page-badge:hover {
+  fill: var(--interactive-accent);
 }
 
 .umlcanvas-pdf-foreign {
@@ -1865,8 +1870,16 @@ body .umlcanvas-moving * {
   background-color: var(--background-primary);
 }
 
-/* Disable pointer-events inside the iframe while panning or moving nodes to avoid event swallowing */
-.umlcanvas-moving .umlcanvas-pdf-frame {
+/* Disable pointer-events inside the iframe while panning, moving, resizing, or selecting to avoid event swallowing */
+.umlcanvas-moving .umlcanvas-pdf-frame,
+.umlcanvas-panning .umlcanvas-pdf-frame,
+.umlcanvas-resizing .umlcanvas-pdf-frame,
+.umlcanvas-selecting .umlcanvas-pdf-frame,
+.umlcanvas-connecting .umlcanvas-pdf-frame,
+.umlcanvas-drawing .umlcanvas-pdf-frame,
+.umlcanvas-freehand-mode .umlcanvas-pdf-frame,
+.umlcanvas-grab-mode .umlcanvas-pdf-frame,
+.umlcanvas-space-pressed .umlcanvas-pdf-frame {
   pointer-events: none !important;
 }
 
@@ -1879,10 +1892,19 @@ body .umlcanvas-moving * {
   color: var(--text-muted);
   font-size: 13px;
   font-style: italic;
+  cursor: pointer;
+  user-select: none;
   background-color: var(--background-secondary);
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.umlcanvas-pdf-placeholder:hover {
+  background-color: var(--background-secondary-alt, var(--background-modifier-hover));
+  color: var(--interactive-accent);
 }
 
 .umlcanvas-pdf-svg-fallback {
+  display: none;
   pointer-events: none;
   user-select: none;
 }

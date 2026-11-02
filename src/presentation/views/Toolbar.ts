@@ -377,6 +377,7 @@ export class Toolbar {
     const canvasY = (centerScreen.y - transform.panY) / transform.zoom;
 
     const size = { width: 340, height: 440 };
+    const filePath = src && !src.startsWith("data:") && !src.startsWith("http") ? src : "";
     this.editor.addNode({
       kind: "generic.pdf",
       title,
@@ -385,8 +386,8 @@ export class Toolbar {
         y: Math.round(canvasY - size.height / 2),
       },
       size,
-      metadata: { src },
-      customData: { src },
+      metadata: { src, ...(filePath ? { filePath } : {}) },
+      customData: { src, ...(filePath ? { filePath } : {}) },
     });
 
     if (this.renderer.grabMode && typeof this.renderer.setGrabMode === "function") {

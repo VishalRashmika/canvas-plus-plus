@@ -187,34 +187,49 @@ export class JsonCanvasImporter {
     subpath?: string;
   } {
     if (raw.type === "file") {
-      const fileName = raw.file ? raw.file.replace(/\.[^/.]+$/, "").split("/").pop() ?? "File" : "File";
-      const isImg = raw.file && /\.(png|jpe?g|gif|svg|webp|bmp|avif)$/i.test(raw.file);
+      const rawFile = raw.file ? String(raw.file) : "";
+      const cleanFile = rawFile.split(/[?#]/)[0];
+      const extractedSubpath =
+        raw.subpath || (rawFile.includes("#") ? "#" + rawFile.split("#")[1] : undefined);
+      const fileName = cleanFile
+        ? cleanFile.replace(/\.[^/.]+$/, "").split("/").pop() ?? "File"
+        : "File";
+      const isImg = cleanFile && /\.(png|jpe?g|gif|svg|webp|bmp|avif)$/i.test(cleanFile);
       if (isImg) {
         return {
           title: fileName,
           kind: "generic.image",
-          filePath: raw.file,
-          subpath: raw.subpath,
+          filePath: cleanFile,
+          subpath: extractedSubpath,
         };
       }
-      const isPdf = raw.file && /\.pdf$/i.test(raw.file);
+      const isPdf = cleanFile && /\.pdf$/i.test(cleanFile);
       if (isPdf) {
         return {
           title: fileName,
           kind: "generic.pdf",
-          filePath: raw.file,
-          subpath: raw.subpath,
+          filePath: cleanFile,
+          subpath: extractedSubpath,
         };
       }
       return {
         title: fileName,
         kind: "obsidian.note",
-        filePath: raw.file,
-        subpath: raw.subpath,
+        filePath: cleanFile,
+        subpath: extractedSubpath,
       };
     }
 
     if (raw.type === "link") {
+      const url = raw.url ?? "";
+      const cleanUrl = url.split(/[?#]/)[0];
+      if (/\.pdf$/i.test(cleanUrl)) {
+        return {
+          title: cleanUrl.replace(/\.[^/.]+$/, "").split("/").pop() || "PDF Document",
+          kind: "generic.pdf",
+          filePath: url,
+        };
+      }
       return {
         title: raw.url ?? "Link",
         kind: "generic.rectangle",

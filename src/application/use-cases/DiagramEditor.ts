@@ -2949,6 +2949,15 @@ export class DiagramEditor {
 
   private static globalClipboard: CanvasClipboardData | null = null;
 
+  get canPaste(): boolean {
+    const data = DiagramEditor.globalClipboard;
+    return Boolean(
+      data &&
+        ((data.nodes && data.nodes.length > 0) ||
+          (data.edges && data.edges.length > 0))
+    );
+  }
+
   copySelection(): CanvasClipboardData {
     const selectedNodes = this.diagram.nodes.filter((n) =>
       this.selectedNodeIdSet.has(n.id)

@@ -156,7 +156,8 @@ export class Toolbar {
     private readonly onAddNoteRequested?: () => void,
     private readonly onToggleTheme?: () => void,
     private readonly onAddImageRequested?: () => void,
-    private readonly onAddPdfRequested?: () => void
+    private readonly onAddPdfRequested?: () => void,
+    private readonly onPasteRequested?: () => void
   ) {
     this.freehandEnabled = this.renderer.isFreehandEnabled;
 
@@ -546,7 +547,13 @@ export class Toolbar {
     this.pasteBtn = this.createButton(
       "Paste Selection (Ctrl+V)",
       "",
-      () => this.editor.paste(),
+      () => {
+        if (this.onPasteRequested) {
+          this.onPasteRequested();
+        } else {
+          this.editor.paste();
+        }
+      },
       "clipboard"
     );
     editGroup.appendChild(this.pasteBtn);

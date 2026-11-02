@@ -57,6 +57,7 @@ export interface SvgSceneRendererOptions {
   onPdfPick?: (node: DiagramNode) => void;
   onPdfChangePage?: (node: DiagramNode) => void;
   onChipEdit?: (node: DiagramNode) => void;
+  onPasteRequested?: (canvasPoint?: Point) => void;
   onExternalDrop?: (e: DragEvent, canvasPoint: Point) => boolean | Promise<boolean> | void;
   onRenderMarkdown?: (
     markdown: string,
@@ -226,7 +227,9 @@ export class SvgSceneRenderer {
   private onPdfPick?: (node: DiagramNode) => void;
   private onPdfChangePage?: (node: DiagramNode) => void;
   private onChipEdit?: (node: DiagramNode) => void;
+  private onPasteRequested?: (canvasPoint?: Point) => void;
   private onExternalDrop?: (e: DragEvent, canvasPoint: Point) => boolean | Promise<boolean> | void;
+  private lastMouseCanvasPos: Point | null = null;
   private onRenderMarkdown?: (
     markdown: string,
     el: HTMLElement,
@@ -253,6 +256,7 @@ export class SvgSceneRenderer {
     this.onPdfPick = options?.onPdfPick;
     this.onPdfChangePage = options?.onPdfChangePage;
     this.onChipEdit = options?.onChipEdit;
+    this.onPasteRequested = options?.onPasteRequested;
     this.onExternalDrop = options?.onExternalDrop;
     this.onRenderMarkdown = options?.onRenderMarkdown;
 
@@ -2608,9 +2612,14 @@ export class SvgSceneRenderer {
     };
   }
 
+  public get lastMouseCanvasPosition(): Point | undefined {
+    return this.lastMouseCanvasPos ? { ...this.lastMouseCanvasPos } : undefined;
+  }
+
   private handleMouseMove(e: MouseEvent): void {
     const clientPoint = this.getClientCoords(e);
     const canvasPoint = screenToCanvas(clientPoint, this.transform);
+    this.lastMouseCanvasPos = canvasPoint;
 
     if (
       this.dragMode.type === "freehand" &&
@@ -4503,8 +4512,13 @@ export class SvgSceneRenderer {
 
     // Paste: Ctrl+V / Cmd+V
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
+      if (this.onPasteRequested) {
+        e.preventDefault();
+        this.onPasteRequested(this.lastMouseCanvasPos ?? undefined);
+        return;
+      }
       e.preventDefault();
-      this.editor.paste();
+      this.editor.paste(this.lastMouseCanvasPos ?? undefined);
       return;
     }
 

@@ -34,6 +34,7 @@ import { defaultCustomChipRegistry } from "../../domain/services/CustomChipRegis
 import { Stroke } from "../../domain/services/ShapeRecognizer";
 import { wrapTextToLines } from "../../domain/services/TextMeasurement";
 import { UmlCanvasSettings } from "../../infrastructure/obsidian/PluginSettings";
+import { CanvasAttachmentService } from "../../infrastructure/obsidian/CanvasAttachmentService";
 import { CANVAS_COLOR_PRESETS } from "../../domain/value-objects/CanvasColor";
 import { FONT_SIZE_PRESETS } from "../theme/Typography";
 
@@ -55,6 +56,25 @@ export class UmlCanvasView extends TextFileView {
   private rootEl: HTMLElement | null = null;
   private escapeHatchEl: HTMLElement | null = null;
   private escapeHatchTimer: number | null = null;
+  private _canvasAttachmentService: CanvasAttachmentService | null = null;
+  private _attachmentServiceApp: App | null = null;
+  private lastMouseCanvasPos: Point | null = null;
+
+  public get canvasAttachmentService(): CanvasAttachmentService {
+    if (
+      !this._canvasAttachmentService ||
+      this._attachmentServiceApp !== this.app
+    ) {
+      this._canvasAttachmentService = new CanvasAttachmentService(this.app);
+      this._attachmentServiceApp = this.app;
+    }
+    return this._canvasAttachmentService;
+  }
+
+  public set canvasAttachmentService(service: CanvasAttachmentService) {
+    this._canvasAttachmentService = service;
+    this._attachmentServiceApp = this.app;
+  }
 
   constructor(leaf: WorkspaceLeaf, private readonly plugin: CanvasPlusPlusPlugin) {
     super(leaf);
@@ -328,6 +348,7 @@ export class UmlCanvasView extends TextFileView {
         this.promptChangePdfPage(node);
       },
       onExternalDrop: (e: DragEvent, canvasPoint: Point) => this.handleExternalDrop(e, canvasPoint),
+      onPasteRequested: (canvasPoint?: Point) => void this.pasteFromClipboardOrEditor(canvasPoint),
     });
 
     // Setup Minimap (F-011)
@@ -376,8 +397,25 @@ export class UmlCanvasView extends TextFileView {
       },
       () => {
         this.openPdfPickerModal();
+      },
+      () => {
+        void this.pasteFromClipboardOrEditor();
       }
     );
+
+    // Track cursor canvas position for accurate pasting (#5)
+    this.rootEl.addEventListener("mousemove", (e: MouseEvent) => {
+      if (this.renderer && this.rootEl) {
+        const rect = this.rootEl.getBoundingClientRect();
+        const clientX = e.clientX - rect.left;
+        const clientY = e.clientY - rect.top;
+        const transform = this.renderer.currentTransform;
+        this.lastMouseCanvasPos = {
+          x: Math.round((clientX - transform.panX) / transform.zoom),
+          y: Math.round((clientY - transform.panY) / transform.zoom),
+        };
+      }
+    });
 
     // Deselect currently selected component(s) when clicking empty canvas space (#9)
     this.rootEl.addEventListener("mousedown", (e: MouseEvent) => {
@@ -418,7 +456,7 @@ export class UmlCanvasView extends TextFileView {
         this.editor?.copySelection();
       } else if (mod && e.key.toLowerCase() === "v" && !isInput) {
         e.preventDefault();
-        this.editor?.paste();
+        void this.pasteFromClipboardOrEditor(this.lastMouseCanvasPos ?? undefined);
       } else if (mod && e.key.toLowerCase() === "b" && !isInput) {
         e.preventDefault();
         this.editor?.toggleBoldForSelection();
@@ -1470,7 +1508,7 @@ export class UmlCanvasView extends TextFileView {
           .setTitle("Paste")
           .setIcon("clipboard")
           .onClick(() => {
-            this.editor?.paste();
+            void this.pasteFromClipboardOrEditor(canvasPoint);
           });
       });
 
@@ -1611,12 +1649,13 @@ export class UmlCanvasView extends TextFileView {
     if (options.file) {
       try {
         if (typeof this.app.vault.getResourcePath === "function") {
-          src = this.app.vault.getResourcePath(options.file);
-        } else {
+          const resPath = this.app.vault.getResourcePath(options.file);
+          if (resPath) src = resPath;
+        } else if (!src) {
           src = options.file.path;
         }
       } catch {
-        src = options.file.path;
+        if (!src) src = options.file.path;
       }
     }
 
@@ -1913,18 +1952,7 @@ export class UmlCanvasView extends TextFileView {
       for (let i = 0; i < e.dataTransfer.files.length; i++) {
         const osFile = e.dataTransfer.files[i];
         if (osFile.type.startsWith("image/") || isImageFile(osFile.name)) {
-          if (typeof FileReader !== "undefined") {
-            const reader = new FileReader();
-            reader.onload = () => {
-              const dataUrl = reader.result as string;
-              void this.addImageToCanvas({
-                src: dataUrl,
-                title: osFile.name.replace(/\.[^/.]+$/, ""),
-                canvasPoint,
-              });
-            };
-            reader.readAsDataURL(osFile);
-          }
+          void this.handlePastedImageBlob(osFile, canvasPoint);
           return true;
         } else if (osFile.type === "application/pdf" || isPdfFile(osFile.name)) {
           if (typeof FileReader !== "undefined") {
@@ -1946,49 +1974,189 @@ export class UmlCanvasView extends TextFileView {
     return false;
   }
 
+  /**
+   * Automatically saves a pasted image blob to the canvas document's dedicated directory
+   * inside its working directory and links the resulting image node onto the canvas (#5).
+   */
+  public async handlePastedImageBlob(
+    blob: Blob,
+    canvasPoint?: Point
+  ): Promise<DiagramNode | null> {
+    const rawBlobName =
+      "name" in blob && typeof (blob as { name: unknown }).name === "string"
+        ? (blob as { name: string }).name
+        : undefined;
+    try {
+      const saved = await this.canvasAttachmentService.savePastedImage(blob, {
+        file: this.file,
+        diagramTitle: this.editor?.diagram?.title,
+        preferredName: rawBlobName,
+      });
+
+      return await this.addImageToCanvas({
+        file: saved.file ?? undefined,
+        filePath: saved.filePath,
+        src: saved.src,
+        title: saved.title,
+        canvasPoint,
+        size: saved.size,
+      });
+    } catch (err) {
+      console.warn(
+        "[Canvas++] Failed to save pasted image into canvas directory, falling back to data URL:",
+        err
+      );
+      if (typeof FileReader !== "undefined") {
+        return new Promise<DiagramNode | null>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const dataUrl = reader.result as string;
+            void this.addImageToCanvas({
+              src: dataUrl,
+              title: rawBlobName?.replace(/\.[^/.]+$/, "") || "Image",
+              canvasPoint,
+            }).then(resolve);
+          };
+          reader.onerror = () => resolve(null);
+          reader.readAsDataURL(blob);
+        });
+      }
+      return null;
+    }
+  }
+
+  /**
+   * Reads from system clipboard (images, files) or falls back to canvas editor selection paste.
+   */
+  public async pasteFromClipboardOrEditor(canvasPoint?: Point): Promise<void> {
+    const targetPoint = canvasPoint ?? this.lastMouseCanvasPos ?? undefined;
+
+    // 1. Check system clipboard if navigator.clipboard is available
+    if (
+      typeof navigator !== "undefined" &&
+      navigator.clipboard &&
+      typeof navigator.clipboard.read === "function"
+    ) {
+      try {
+        const items = await navigator.clipboard.read();
+        for (const item of items) {
+          const imageType = item.types.find((t) => t.startsWith("image/"));
+          if (imageType) {
+            const blob = await item.getType(imageType);
+            if (blob) {
+              await this.handlePastedImageBlob(blob, targetPoint);
+              return;
+            }
+          }
+        }
+      } catch {
+        // Permission denied or clipboard format not accessible, proceed to internal paste
+      }
+    }
+
+    // 2. Fallback to diagram selection paste
+    if (this.editor?.canPaste) {
+      this.editor.paste(targetPoint);
+    }
+  }
+
   public handlePaste(e: ClipboardEvent): void {
+    const transform = this.renderer?.currentTransform ?? { panX: 0, panY: 0, zoom: 1 };
+    const centerScreen = {
+      x: (this.rootEl?.clientWidth ?? 800) / 2,
+      y: (this.rootEl?.clientHeight ?? 600) / 2,
+    };
+    const basePoint = this.lastMouseCanvasPos ?? {
+      x: Math.round((centerScreen.x - transform.panX) / transform.zoom - 110),
+      y: Math.round((centerScreen.y - transform.panY) / transform.zoom - 130),
+    };
+
     // 1. Check binary items (blobs from clipboard)
+    const imageBlobs: Blob[] = [];
+    const pdfBlobs: Blob[] = [];
+
     const items = e.clipboardData?.items;
-    if (items) {
+    if (items && items.length > 0) {
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
         if (item.type.startsWith("image/")) {
-          e.preventDefault();
           const blob = item.getAsFile();
-          if (blob && typeof FileReader !== "undefined") {
-            const reader = new FileReader();
-            reader.onload = () => {
-              const dataUrl = reader.result as string;
-              void this.addImageToCanvas({
-                src: dataUrl,
-                title: "Image",
-              });
-            };
-            reader.readAsDataURL(blob);
-            return;
-          }
+          if (blob) imageBlobs.push(blob);
         } else if (item.type === "application/pdf") {
-          e.preventDefault();
           const blob = item.getAsFile();
-          if (blob && typeof FileReader !== "undefined") {
-            const reader = new FileReader();
-            reader.onload = () => {
-              const dataUrl = reader.result as string;
-              void this.addPdfToCanvas({
-                src: dataUrl,
-                title: "Document",
-              });
-            };
-            reader.readAsDataURL(blob);
-            return;
-          }
+          if (blob) pdfBlobs.push(blob);
         }
       }
     }
 
-    // 2. Check text from clipboard for PDF or image link/path
+    // Also check clipboardData.files if items was empty
+    if (
+      imageBlobs.length === 0 &&
+      pdfBlobs.length === 0 &&
+      e.clipboardData?.files &&
+      e.clipboardData.files.length > 0
+    ) {
+      for (let i = 0; i < e.clipboardData.files.length; i++) {
+        const file = e.clipboardData.files[i];
+        if (file.type.startsWith("image/") || isImageFile(file.name)) {
+          imageBlobs.push(file);
+        } else if (file.type === "application/pdf" || isPdfFile(file.name)) {
+          pdfBlobs.push(file);
+        }
+      }
+    }
+
+    if (imageBlobs.length > 0) {
+      e.preventDefault();
+      void (async () => {
+        let offset = 0;
+        for (const blob of imageBlobs) {
+          const pt = { x: basePoint.x + offset, y: basePoint.y + offset };
+          await this.handlePastedImageBlob(blob, pt);
+          offset += 40;
+        }
+      })();
+      return;
+    }
+
+    if (pdfBlobs.length > 0) {
+      e.preventDefault();
+      let offset = 0;
+      for (const blob of pdfBlobs) {
+        const pt = { x: basePoint.x + offset, y: basePoint.y + offset };
+        const rawPdfName =
+          "name" in blob && typeof (blob as { name: unknown }).name === "string"
+            ? (blob as { name: string }).name
+            : undefined;
+        if (typeof FileReader !== "undefined") {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const dataUrl = reader.result as string;
+            void this.addPdfToCanvas({
+              src: dataUrl,
+              title: rawPdfName?.replace(/\.[^/.]+$/, "") || "Document",
+              canvasPoint: pt,
+            });
+          };
+          reader.readAsDataURL(blob);
+        }
+        offset += 40;
+      }
+      return;
+    }
+
+    // 2. Check text from clipboard for base64 data URL, PDF or image link/path
     const text = e.clipboardData?.getData("text/plain")?.trim();
     if (text) {
+      if (text.startsWith("data:image/")) {
+        e.preventDefault();
+        const blob = this.canvasAttachmentService.dataUrlToBlob(text);
+        if (blob) {
+          void this.handlePastedImageBlob(blob, basePoint);
+          return;
+        }
+      }
+
       const match = text.match(/^!?\[\[(.*?)\]\]$/);
       const rawContent = match ? match[1] : text;
       const subpathMatch = rawContent.match(/(#[^|]+)/);
@@ -2003,11 +2171,20 @@ export class UmlCanvasView extends TextFileView {
           if (byPath instanceof TFile) file = byPath;
         }
         if (file instanceof TFile) {
-          void this.addPdfToCanvas({ file, subpath });
-        } else if (linkPath.startsWith("http://") || linkPath.startsWith("https://") || linkPath.startsWith("data:")) {
-          void this.addPdfToCanvas({ src: linkPath, subpath, title: linkPath.split("/").pop()?.replace(/\.pdf$/i, "") });
+          void this.addPdfToCanvas({ file, subpath, canvasPoint: basePoint });
+        } else if (
+          linkPath.startsWith("http://") ||
+          linkPath.startsWith("https://") ||
+          linkPath.startsWith("data:")
+        ) {
+          void this.addPdfToCanvas({
+            src: linkPath,
+            subpath,
+            title: linkPath.split("/").pop()?.replace(/\.pdf$/i, ""),
+            canvasPoint: basePoint,
+          });
         } else {
-          void this.addPdfToCanvas({ filePath: linkPath, subpath });
+          void this.addPdfToCanvas({ filePath: linkPath, subpath, canvasPoint: basePoint });
         }
         return;
       } else if (isImageFile(linkPath)) {
@@ -2018,14 +2195,28 @@ export class UmlCanvasView extends TextFileView {
           if (byPath instanceof TFile) file = byPath;
         }
         if (file instanceof TFile) {
-          void this.addImageToCanvas({ file });
-        } else if (linkPath.startsWith("http://") || linkPath.startsWith("https://") || linkPath.startsWith("data:")) {
-          void this.addImageToCanvas({ src: linkPath, title: linkPath.split("/").pop()?.replace(/\.[^/.]+$/, "") });
+          void this.addImageToCanvas({ file, canvasPoint: basePoint });
+        } else if (
+          linkPath.startsWith("http://") ||
+          linkPath.startsWith("https://") ||
+          linkPath.startsWith("data:")
+        ) {
+          void this.addImageToCanvas({
+            src: linkPath,
+            title: linkPath.split("/").pop()?.replace(/\.[^/.]+$/, ""),
+            canvasPoint: basePoint,
+          });
         } else {
-          void this.addImageToCanvas({ filePath: linkPath });
+          void this.addImageToCanvas({ filePath: linkPath, canvasPoint: basePoint });
         }
         return;
       }
+    }
+
+    // 3. Fallback: if user copied internal nodes in canvas editor, paste them
+    if (this.editor?.canPaste) {
+      e.preventDefault();
+      this.editor.paste(basePoint);
     }
   }
 
@@ -2273,7 +2464,7 @@ export class UmlCanvasView extends TextFileView {
     );
     if (matchingNodes.length === 0) return;
 
-    const oldBasename = oldPath.split("/").pop()?.replace(/\.(md|pdf)$/i, "") ?? "";
+    const oldBasename = oldPath.split("/").pop()?.replace(/\.[^/.]+$/, "") ?? "";
     for (const node of matchingNodes) {
       const newLabels = node.labels.map((l) =>
         l.text === oldBasename ? { ...l, text: file.basename } : l

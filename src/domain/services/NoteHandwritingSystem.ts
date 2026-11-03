@@ -113,7 +113,17 @@ export class NoteHandwritingSystem {
     const rawStrokes = Array.isArray(input) ? input : [input];
     const defaultBounds = rectFromBounds(0, 0, 0, 0);
 
-    const validStrokes = rawStrokes.filter((s) => s && s.points && s.points.length >= 2);
+    const validStrokes = rawStrokes
+      .filter((s) => s && s.points && s.points.length >= 1)
+      .map((s) => {
+        if (s.points.length === 1) {
+          return {
+            ...s,
+            points: [s.points[0], { ...s.points[0] }],
+          };
+        }
+        return s;
+      });
     if (validStrokes.length === 0) {
       return {
         text: "",

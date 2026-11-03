@@ -2137,7 +2137,7 @@ export class SvgSceneRenderer {
 
       const path = this.viewportEl.createSvg("path", {
         cls: "umlcanvas-freehand-stroke",
-        attr: { d: `M ${canvasPoint.x},${canvasPoint.y}` },
+        attr: { d: `M ${canvasPoint.x},${canvasPoint.y} L ${canvasPoint.x},${canvasPoint.y}` },
       });
       this.freehandPathEl = path;
 
@@ -2722,9 +2722,11 @@ export class SvgSceneRenderer {
         pressure: (e as unknown as PointerEvent).pressure ?? 0.5,
         time: Date.now(),
       });
-      const d = this.activeStroke.points
-        .map((pt, i) => `${i === 0 ? "M" : "L"} ${pt.x},${pt.y}`)
-        .join(" ");
+      const d = this.activeStroke.points.length === 1
+        ? `M ${this.activeStroke.points[0].x},${this.activeStroke.points[0].y} L ${this.activeStroke.points[0].x},${this.activeStroke.points[0].y}`
+        : this.activeStroke.points
+            .map((pt, i) => `${i === 0 ? "M" : "L"} ${pt.x},${pt.y}`)
+            .join(" ");
       this.freehandPathEl.setAttribute("d", d);
       return;
     }
@@ -2884,10 +2886,23 @@ export class SvgSceneRenderer {
             y: Math.round(p.y * sy * 10) / 10,
           }));
           node.customData.points = scaledPoints;
-          node.customData.pathData = scaledPoints.reduce(
+          let newPathData = scaledPoints.reduce(
             (acc, p, i) => `${acc}${i === 0 ? "M" : " L"} ${p.x},${p.y}`,
             ""
           );
+          if (
+            newPathData.startsWith("M") &&
+            !newPathData.includes("L") &&
+            !newPathData.includes("l") &&
+            !newPathData.includes("Z") &&
+            !newPathData.includes("z")
+          ) {
+            const coords = newPathData.substring(1).trim().split(/[ ,]+/);
+            if (coords.length >= 2) {
+              newPathData = `${newPathData} L ${coords[0]},${coords[1]}`;
+            }
+          }
+          node.customData.pathData = newPathData;
         }
       }
 
@@ -3055,7 +3070,11 @@ export class SvgSceneRenderer {
         const stroke = this.activeStroke;
         this.activeStroke = null;
 
-        // Discard micro-strokes / accidental clicks (< 15px bounding box or < 4 points)
+        const shiftKeyHeld = Boolean(e.shiftKey);
+        const effectiveAutoDetect = shiftKeyHeld ? !this.autoShapeDetection : this.autoShapeDetection;
+        const isNormalDraw = !effectiveAutoDetect && !this.handwritingTextMode;
+
+        // Discard micro-strokes / accidental clicks
         let minX = Infinity;
         let maxX = -Infinity;
         let minY = Infinity;
@@ -3068,13 +3087,21 @@ export class SvgSceneRenderer {
         }
         const width = maxX - minX;
         const height = maxY - minY;
-        const isMicroStroke = this.handwritingTextMode
+
+        // In normal draw mode (not enhance/shape mode and not handwriting text mode),
+        // we explicitly support short drawings, single-tap dots, and small marks.
+        // In shape detection mode, micro-strokes (< 15px or < 4 points) are discarded as accidental clicks.
+        const isMicroStroke = isNormalDraw
+          ? stroke.points.length === 0
+          : this.handwritingTextMode
           ? stroke.points.length < 2 || (width < 3 && height < 3)
           : stroke.points.length < 4 || (width < 15 && height < 15);
 
         if (!isMicroStroke) {
-          const shiftKeyHeld = Boolean(e.shiftKey);
-          const effectiveAutoDetect = shiftKeyHeld ? !this.autoShapeDetection : this.autoShapeDetection;
+          if (stroke.points.length === 1) {
+            stroke.points.push({ ...stroke.points[0] });
+          }
+
           if (this.onStrokeComplete) {
             this.onStrokeComplete(stroke, {
               autoDetect: effectiveAutoDetect,

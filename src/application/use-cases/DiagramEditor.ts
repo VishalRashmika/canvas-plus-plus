@@ -1782,10 +1782,26 @@ export class DiagramEditor {
       y: Math.round((p.y - minY) * 10) / 10,
     }));
 
-    const pathData = relPoints.reduce(
+    if (relPoints.length === 1) {
+      relPoints.push({ ...relPoints[0] });
+    }
+
+    let pathData = relPoints.reduce(
       (acc, p, i) => `${acc}${i === 0 ? "M" : " L"} ${p.x},${p.y}`,
       ""
     );
+    if (
+      pathData.startsWith("M") &&
+      !pathData.includes("L") &&
+      !pathData.includes("l") &&
+      !pathData.includes("Z") &&
+      !pathData.includes("z")
+    ) {
+      const coords = pathData.substring(1).trim().split(/[ ,]+/);
+      if (coords.length >= 2) {
+        pathData = `${pathData} L ${coords[0]},${coords[1]}`;
+      }
+    }
 
     return this.addNode({
       kind: "generic.freehand",

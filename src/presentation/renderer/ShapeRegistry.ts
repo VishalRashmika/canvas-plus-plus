@@ -3811,7 +3811,19 @@ export class ShapeRegistry {
         const group = document.createElementNS(svgNS, "g");
         group.setAttribute("class", "umlcanvas-shape-freehand");
 
-        const pathData = (node.customData?.pathData as string) || "";
+        let pathData = (node.customData?.pathData as string) || "";
+        if (
+          pathData.startsWith("M") &&
+          !pathData.includes("L") &&
+          !pathData.includes("l") &&
+          !pathData.includes("Z") &&
+          !pathData.includes("z")
+        ) {
+          const coords = pathData.substring(1).trim().split(/[ ,]+/);
+          if (coords.length >= 2) {
+            pathData = `${pathData} L ${coords[0]},${coords[1]}`;
+          }
+        }
 
         // Generous stroke hitbox along the path for easy selecting and moving without blocking empty canvas inside bounding box
         const hitbox = document.createElementNS(svgNS, "path");

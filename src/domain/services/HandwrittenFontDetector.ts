@@ -91,8 +91,18 @@ export class HandwrittenFontDetector {
     const rawStrokes = Array.isArray(input) ? input : [input];
     const defaultBounds = rectFromBounds(0, 0, 0, 0);
 
-    // Filter out invalid or zero-point strokes
-    const strokes = rawStrokes.filter((s) => s && s.points && s.points.length >= 2);
+    // Filter out invalid or zero-point strokes, and support 1-point dots by duplicating point
+    const strokes = rawStrokes
+      .filter((s) => s && s.points && s.points.length >= 1)
+      .map((s) => {
+        if (s.points.length === 1) {
+          return {
+            ...s,
+            points: [s.points[0], { ...s.points[0] }],
+          };
+        }
+        return s;
+      });
 
     if (strokes.length === 0) {
       return {

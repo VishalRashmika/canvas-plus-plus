@@ -3,6 +3,7 @@ import { createDiagram } from "../src/domain/entities/Diagram";
 import { defaultShapeRecognizer, Stroke, StrokePoint } from "../src/domain/services/ShapeRecognizer";
 import { SvgSceneRenderer } from "../src/presentation/renderer/SvgSceneRenderer";
 import { defaultShapeRegistry } from "../src/presentation/renderer/ShapeRegistry";
+import { defaultSvgExporter } from "../src/infrastructure/export/SvgExporter";
 
 // Headless MockElement for testing renderer & DOM events
 class MockElement {
@@ -1039,6 +1040,251 @@ describe("Issue #17 & #18: Hand Drawn Shapes, Auto Connection & Object Managemen
       expect(editor.diagram.edges.length).toBe(1);
       expect(editor.hasSelection).toBe(false);
       expect(editor.selectedEdgeIds).toEqual([]);
+    });
+  });
+
+  describe("Normal Draw Tool: Short Drawings & Dots Handling (Queue #2)", () => {
+    it("should keep a dot when clicking on canvas in normal draw mode (single click)", () => {
+      const editor = new DiagramEditor(createDiagram({ id: "diag-dot-1", diagramType: "general" }));
+      const container = new MockElement("div", { cls: "umlcanvas-svg-container" });
+      const renderer = new SvgSceneRenderer(container as any, editor, {
+        enableFreehand: true,
+        autoShapeDetection: false,
+      });
+
+      renderer.setFreehandMode(true);
+      expect(renderer.freehandMode).toBe(true);
+      expect(renderer.isAutoShapeDetection).toBe(false);
+
+      const svgEl = container.querySelector(".umlcanvas-svg");
+      const bgRect = container.querySelector(".umlcanvas-bg");
+
+      // Single click/tap at (150, 200) without mouse move
+      svgEl?.dispatch("mousedown", { button: 0, target: bgRect, clientX: 150, clientY: 200 });
+      (window as any).dispatch("mouseup", { clientX: 150, clientY: 200 });
+
+      expect(editor.diagram.nodes.length).toBe(1);
+      const dotNode = editor.diagram.nodes[0];
+      expect(dotNode.kind).toBe("generic.freehand");
+      expect(dotNode.position).toEqual({ x: 150, y: 200 });
+      expect(dotNode.customData?.pathData).toBe("M 0,0 L 0,0");
+      expect(dotNode.customData?.points).toEqual([
+        { x: 0, y: 0 },
+        { x: 0, y: 0 },
+      ]);
+      expect(editor.hasSelection).toBe(false);
+
+      renderer.destroy();
+    });
+
+    it("should display a visible dot preview element immediately on mousedown", () => {
+      const editor = new DiagramEditor(createDiagram({ id: "diag-preview", diagramType: "general" }));
+      const container = new MockElement("div", { cls: "umlcanvas-svg-container" });
+      const renderer = new SvgSceneRenderer(container as any, editor, {
+        enableFreehand: true,
+        autoShapeDetection: false,
+      });
+
+      renderer.setFreehandMode(true);
+      const svgEl = container.querySelector(".umlcanvas-svg");
+      const bgRect = container.querySelector(".umlcanvas-bg");
+
+      svgEl?.dispatch("mousedown", { button: 0, target: bgRect, clientX: 80, clientY: 90 });
+
+      // While mouse is pressed, the temporary freehand stroke preview element should have L x,y so it renders
+      const previewEl = container.querySelector(".umlcanvas-freehand-stroke");
+      expect(previewEl).not.toBeNull();
+      expect(previewEl?.getAttribute("d")).toBe("M 80,90 L 80,90");
+
+      (window as any).dispatch("mouseup", { clientX: 80, clientY: 90 });
+      expect(container.querySelector(".umlcanvas-freehand-stroke")).toBeNull();
+
+      renderer.destroy();
+    });
+
+    it("should handle short forms of drawings: 2 points with small movement (< 15px)", () => {
+      const editor = new DiagramEditor(createDiagram({ id: "diag-short-2pt", diagramType: "general" }));
+      const container = new MockElement("div", { cls: "umlcanvas-svg-container" });
+      const renderer = new SvgSceneRenderer(container as any, editor, {
+        enableFreehand: true,
+        autoShapeDetection: false,
+      });
+
+      renderer.setFreehandMode(true);
+      const svgEl = container.querySelector(".umlcanvas-svg");
+      const bgRect = container.querySelector(".umlcanvas-bg");
+
+      // Short stroke from (100, 100) to (105, 103) (width: 5, height: 3, 2 points)
+      svgEl?.dispatch("mousedown", { button: 0, target: bgRect, clientX: 100, clientY: 100 });
+      (window as any).dispatch("mousemove", { clientX: 105, clientY: 103 });
+      (window as any).dispatch("mouseup", { clientX: 105, clientY: 103 });
+
+      expect(editor.diagram.nodes.length).toBe(1);
+      const shortNode = editor.diagram.nodes[0];
+      expect(shortNode.kind).toBe("generic.freehand");
+      expect(shortNode.position).toEqual({ x: 100, y: 100 });
+      expect(shortNode.customData?.pathData).toBe("M 0,0 L 5,3");
+
+      renderer.destroy();
+    });
+
+    it("should handle short forms of drawings: 3 points with small bounding box (< 15px)", () => {
+      const editor = new DiagramEditor(createDiagram({ id: "diag-short-3pt", diagramType: "general" }));
+      const container = new MockElement("div", { cls: "umlcanvas-svg-container" });
+      const renderer = new SvgSceneRenderer(container as any, editor, {
+        enableFreehand: true,
+        autoShapeDetection: false,
+      });
+
+      renderer.setFreehandMode(true);
+      const svgEl = container.querySelector(".umlcanvas-svg");
+      const bgRect = container.querySelector(".umlcanvas-bg");
+
+      // Short tick/comma: (200, 200) -> (202, 206) -> (205, 208) (width: 5, height: 8, 3 points)
+      svgEl?.dispatch("mousedown", { button: 0, target: bgRect, clientX: 200, clientY: 200 });
+      (window as any).dispatch("mousemove", { clientX: 202, clientY: 206 });
+      (window as any).dispatch("mousemove", { clientX: 205, clientY: 208 });
+      (window as any).dispatch("mouseup", { clientX: 205, clientY: 208 });
+
+      expect(editor.diagram.nodes.length).toBe(1);
+      const node = editor.diagram.nodes[0];
+      expect(node.kind).toBe("generic.freehand");
+      expect(node.position).toEqual({ x: 200, y: 200 });
+      expect(node.customData?.pathData).toBe("M 0,0 L 2,6 L 5,8");
+
+      renderer.destroy();
+    });
+
+    it("should NOT create shapes on accidental micro-clicks when in auto-shape mode", () => {
+      const editor = new DiagramEditor(createDiagram({ id: "diag-auto-micro", diagramType: "general" }));
+      const container = new MockElement("div", { cls: "umlcanvas-svg-container" });
+      const renderer = new SvgSceneRenderer(container as any, editor, {
+        enableFreehand: true,
+        autoShapeDetection: true,
+      });
+
+      renderer.setFreehandMode(true);
+      const svgEl = container.querySelector(".umlcanvas-svg");
+      const bgRect = container.querySelector(".umlcanvas-bg");
+
+      // Single click in auto-shape detection mode is treated as accidental click / deselect
+      svgEl?.dispatch("mousedown", { button: 0, target: bgRect, clientX: 100, clientY: 100 });
+      (window as any).dispatch("mouseup", { clientX: 100, clientY: 100 });
+
+      expect(editor.diagram.nodes.length).toBe(0);
+
+      renderer.destroy();
+    });
+
+    it("should allow drawing a dot in auto-shape mode when Shift key is held (temporary draw mode)", () => {
+      const editor = new DiagramEditor(createDiagram({ id: "diag-shift-dot", diagramType: "general" }));
+      const container = new MockElement("div", { cls: "umlcanvas-svg-container" });
+      const renderer = new SvgSceneRenderer(container as any, editor, {
+        enableFreehand: true,
+        autoShapeDetection: true,
+      });
+
+      renderer.setFreehandMode(true);
+      const svgEl = container.querySelector(".umlcanvas-svg");
+      const bgRect = container.querySelector(".umlcanvas-bg");
+
+      // In auto-shape mode, holding Shift inverts to normal draw mode
+      svgEl?.dispatch("mousedown", { button: 0, target: bgRect, clientX: 120, clientY: 140, shiftKey: true });
+      (window as any).dispatch("mouseup", { clientX: 120, clientY: 140, shiftKey: true });
+
+      expect(editor.diagram.nodes.length).toBe(1);
+      expect(editor.diagram.nodes[0].kind).toBe("generic.freehand");
+      expect(editor.diagram.nodes[0].position).toEqual({ x: 120, y: 140 });
+
+      renderer.destroy();
+    });
+
+    it("ShapeRegistry should render dot nodes with stroke-linecap round and wide circular hitbox", () => {
+      const editor = new DiagramEditor(createDiagram({ id: "diag-shape-dot", diagramType: "general" }));
+      const dotStroke: Stroke = {
+        id: "dot-stroke",
+        points: [{ x: 300, y: 400 }],
+      };
+      const dotNode = editor.addFreehandNode(dotStroke);
+      expect(dotNode.customData?.pathData).toBe("M 0,0 L 0,0");
+
+      const shapeDef = defaultShapeRegistry.get("generic.freehand");
+      const el = shapeDef.renderSvg(dotNode, { isSelected: false });
+
+      const path = el.querySelector(".umlcanvas-freehand-path");
+      const hitbox = el.querySelector(".umlcanvas-freehand-hitbox");
+
+      expect(path).not.toBeNull();
+      expect(path?.getAttribute("d")).toBe("M 0,0 L 0,0");
+      expect(path?.getAttribute("stroke-linecap")).toBe("round");
+
+      expect(hitbox).not.toBeNull();
+      expect(hitbox?.getAttribute("d")).toBe("M 0,0 L 0,0");
+      expect(hitbox?.getAttribute("stroke-width")).toBe("16");
+      expect(hitbox?.getAttribute("stroke-linecap")).toBe("round");
+    });
+
+    it("ShapeRegistry should automatically fix legacy dot pathData with only moveto (M 0,0)", () => {
+      const legacyDotNode = {
+        id: "legacy-dot",
+        kind: "generic.freehand",
+        position: { x: 50, y: 50 },
+        size: { width: 20, height: 20 },
+        title: "",
+        customData: {
+          pathData: "M 0,0",
+          points: [{ x: 0, y: 0 }],
+        },
+      };
+
+      const shapeDef = defaultShapeRegistry.get("generic.freehand");
+      const el = shapeDef.renderSvg(legacyDotNode as any, { isSelected: false });
+
+      const path = el.querySelector(".umlcanvas-freehand-path");
+      const hitbox = el.querySelector(".umlcanvas-freehand-hitbox");
+
+      expect(path?.getAttribute("d")).toBe("M 0,0 L 0,0");
+      expect(hitbox?.getAttribute("d")).toBe("M 0,0 L 0,0");
+    });
+
+    it("SvgExporter should export dot node with valid stroke-linecap round SVG path", () => {
+      const editor = new DiagramEditor(createDiagram({ id: "diag-export-dot", diagramType: "general" }));
+      editor.addFreehandNode({
+        id: "export-dot",
+        points: [{ x: 50, y: 70 }],
+      });
+
+      const svg = editor.exportToSvg();
+      expect(svg).toContain('class="umlcanvas-freehand-path"');
+      expect(svg).toContain('d="M 0,0 L 0,0"');
+      expect(svg).toContain('stroke-linecap="round"');
+    });
+
+    it("should support undo and redo on kept dots in normal draw tool", () => {
+      const editor = new DiagramEditor(createDiagram({ id: "diag-undo-dot", diagramType: "general" }));
+      const container = new MockElement("div", { cls: "umlcanvas-svg-container" });
+      const renderer = new SvgSceneRenderer(container as any, editor, {
+        enableFreehand: true,
+        autoShapeDetection: false,
+      });
+
+      renderer.setFreehandMode(true);
+      const svgEl = container.querySelector(".umlcanvas-svg");
+      const bgRect = container.querySelector(".umlcanvas-bg");
+
+      svgEl?.dispatch("mousedown", { button: 0, target: bgRect, clientX: 200, clientY: 200 });
+      (window as any).dispatch("mouseup", { clientX: 200, clientY: 200 });
+
+      expect(editor.diagram.nodes.length).toBe(1);
+
+      editor.undo();
+      expect(editor.diagram.nodes.length).toBe(0);
+
+      editor.redo();
+      expect(editor.diagram.nodes.length).toBe(1);
+      expect(editor.diagram.nodes[0].position).toEqual({ x: 200, y: 200 });
+
+      renderer.destroy();
     });
   });
 });

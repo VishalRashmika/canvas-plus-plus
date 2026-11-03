@@ -797,7 +797,19 @@ export class SvgExporter {
       }
 
       case "generic.freehand": {
-        const pathData = (node.customData?.pathData as string) || "";
+        let pathData = (node.customData?.pathData as string) || "";
+        if (
+          pathData.startsWith("M") &&
+          !pathData.includes("L") &&
+          !pathData.includes("l") &&
+          !pathData.includes("Z") &&
+          !pathData.includes("z")
+        ) {
+          const coords = pathData.substring(1).trim().split(/[ ,]+/);
+          if (coords.length >= 2) {
+            pathData = `${pathData} L ${coords[0]},${coords[1]}`;
+          }
+        }
         out += `    <path class="umlcanvas-freehand-path" d="${escapeXml(pathData)}" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />\n`;
         break;
       }

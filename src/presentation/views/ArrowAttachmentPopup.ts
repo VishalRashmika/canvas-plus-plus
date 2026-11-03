@@ -11,6 +11,7 @@ export interface ArrowAttachmentItem {
   description: string;
   shortcut?: string;
   iconId?: string;
+  iconSvg?: string;
   category?: string;
   color?: string;
   customData?: unknown;

@@ -3818,7 +3818,11 @@ export class ShapeRegistry {
           !pathData.includes("L") &&
           !pathData.includes("l") &&
           !pathData.includes("Z") &&
-          !pathData.includes("z")
+          !pathData.includes("z") &&
+          !pathData.includes("Q") &&
+          !pathData.includes("q") &&
+          !pathData.includes("C") &&
+          !pathData.includes("c")
         ) {
           const coords = pathData.substring(1).trim().split(/[ ,]+/);
           if (coords.length >= 2) {

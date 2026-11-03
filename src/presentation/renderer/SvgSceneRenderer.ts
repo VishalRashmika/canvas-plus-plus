@@ -37,6 +37,7 @@ export interface ArrowAttachmentContext {
   startPoint: Point;
 }
 import { Stroke, StrokePoint } from "../../domain/services/ShapeRecognizer";
+import { pointsToSmoothSvgPath, smoothPoints } from "../../domain/services/FreehandSmoother";
 import { resolveCanvasColor, isCanvasColorPreset } from "../../domain/value-objects/CanvasColor";
 import { defaultCustomChipRegistry } from "../../domain/services/CustomChipRegistry";
 import {
@@ -213,6 +214,7 @@ export class SvgSceneRenderer {
   private handwritingTextMode = false;
   private activeStroke: Stroke | null = null;
   private freehandPathEl: SVGPathElement | null = null;
+  private cachedContainerRect: { left: number; top: number; width: number; height: number } | null = null;
   private enableVirtualization: boolean;
   private virtualizationThreshold: number;
   private enableFreehand: boolean;
@@ -2504,9 +2506,10 @@ export class SvgSceneRenderer {
 
   private getClientCoords(e: MouseEvent): Point {
     const rect =
-      typeof this.container.getBoundingClientRect === "function"
+      this.cachedContainerRect ||
+      (typeof this.container.getBoundingClientRect === "function"
         ? this.container.getBoundingClientRect()
-        : { left: 0, top: 0, width: this.container.clientWidth || 800, height: this.container.clientHeight || 600 };
+        : { left: 0, top: 0, width: this.container.clientWidth || 800, height: this.container.clientHeight || 600 });
     return {
       x: e.clientX - rect.left,
       y: e.clientY - rect.top,
@@ -2640,6 +2643,10 @@ export class SvgSceneRenderer {
       if (!e.shiftKey && !e.metaKey && !e.ctrlKey && this.editor.hasSelection) {
         this.editor.clearSelection();
       }
+      this.cachedContainerRect =
+        typeof this.container.getBoundingClientRect === "function"
+          ? this.container.getBoundingClientRect()
+          : null;
       const initialPoint: StrokePoint = {
         x: canvasPoint.x,
         y: canvasPoint.y,
@@ -3199,18 +3206,36 @@ export class SvgSceneRenderer {
       this.activeStroke &&
       this.freehandPathEl
     ) {
-      this.activeStroke.points.push({
-        x: canvasPoint.x,
-        y: canvasPoint.y,
-        pressure: (e as unknown as PointerEvent).pressure ?? 0.5,
-        time: Date.now(),
-      });
-      const d = this.activeStroke.points.length === 1
-        ? `M ${this.activeStroke.points[0].x},${this.activeStroke.points[0].y} L ${this.activeStroke.points[0].x},${this.activeStroke.points[0].y}`
-        : this.activeStroke.points
-            .map((pt, i) => `${i === 0 ? "M" : "L"} ${pt.x},${pt.y}`)
-            .join(" ");
-      this.freehandPathEl.setAttribute("d", d);
+      const rawEvents: MouseEvent[] =
+        typeof (e as any).getCoalescedEvents === "function"
+          ? (e as any).getCoalescedEvents()
+          : [e];
+
+      let added = false;
+      for (const evt of rawEvents) {
+        const clientPt = this.getClientCoords(evt);
+        const pt = screenToCanvas(clientPt, this.transform);
+        const pts = this.activeStroke.points;
+        const lastPt = pts[pts.length - 1];
+
+        // Skip sub-pixel jitter points (distance < 1.2px)
+        const dx = pt.x - lastPt.x;
+        const dy = pt.y - lastPt.y;
+        if (dx * dx + dy * dy >= 1.44) {
+          pts.push({
+            x: pt.x,
+            y: pt.y,
+            pressure: (evt as unknown as PointerEvent).pressure ?? 0.5,
+            time: Date.now(),
+          });
+          added = true;
+        }
+      }
+
+      if (added || this.activeStroke.points.length <= 2) {
+        const d = pointsToSmoothSvgPath(this.activeStroke.points);
+        this.freehandPathEl.setAttribute("d", d);
+      }
       return;
     }
 
@@ -3369,16 +3394,25 @@ export class SvgSceneRenderer {
             y: Math.round(p.y * sy * 10) / 10,
           }));
           node.customData.points = scaledPoints;
-          let newPathData = scaledPoints.reduce(
-            (acc, p, i) => `${acc}${i === 0 ? "M" : " L"} ${p.x},${p.y}`,
-            ""
-          );
+          let newPathData: string;
+          if (scaledPoints.length <= 3) {
+            newPathData = scaledPoints.reduce(
+              (acc, p, i) => `${acc}${i === 0 ? "M" : " L"} ${p.x},${p.y}`,
+              ""
+            );
+          } else {
+            newPathData = pointsToSmoothSvgPath(smoothPoints(scaledPoints));
+          }
           if (
             newPathData.startsWith("M") &&
             !newPathData.includes("L") &&
             !newPathData.includes("l") &&
             !newPathData.includes("Z") &&
-            !newPathData.includes("z")
+            !newPathData.includes("z") &&
+            !newPathData.includes("Q") &&
+            !newPathData.includes("q") &&
+            !newPathData.includes("C") &&
+            !newPathData.includes("c")
           ) {
             const coords = newPathData.substring(1).trim().split(/[ ,]+/);
             if (coords.length >= 2) {
@@ -3570,6 +3604,7 @@ export class SvgSceneRenderer {
   }
 
   private handleMouseLeave(): void {
+    this.cachedContainerRect = null;
     if (this.hoveredTableNodeId) {
       this.hoveredTableNodeId = undefined;
       this.renderInteractions();
@@ -3581,6 +3616,7 @@ export class SvgSceneRenderer {
     const canvasPoint = screenToCanvas(clientPoint, this.transform);
 
     if (this.dragMode.type === "freehand") {
+      this.cachedContainerRect = null;
       if (this.freehandPathEl) {
         this.freehandPathEl.remove();
         this.freehandPathEl = null;
@@ -3588,6 +3624,19 @@ export class SvgSceneRenderer {
       if (this.activeStroke) {
         const stroke = this.activeStroke;
         this.activeStroke = null;
+
+        // Ensure final point is captured if movement occurred
+        const lastPt = stroke.points[stroke.points.length - 1];
+        const dx = canvasPoint.x - lastPt.x;
+        const dy = canvasPoint.y - lastPt.y;
+        if (dx * dx + dy * dy >= 1.44) {
+          stroke.points.push({
+            x: canvasPoint.x,
+            y: canvasPoint.y,
+            pressure: (e as unknown as PointerEvent).pressure ?? 0.5,
+            time: Date.now(),
+          });
+        }
 
         const shiftKeyHeld = Boolean(e.shiftKey);
         const effectiveAutoDetect = shiftKeyHeld ? !this.autoShapeDetection : this.autoShapeDetection;

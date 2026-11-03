@@ -83,6 +83,7 @@ import { calculateNodeFitSize } from "../../domain/services/TextMeasurement";
 import { defaultJsonCanvasImporter } from "../../infrastructure/persistence/JsonCanvasImporter";
 import { Stereotype } from "../../domain/value-objects/Stereotype";
 import { Stroke, RecognitionResult, defaultShapeRecognizer } from "../../domain/services/ShapeRecognizer";
+import { pointsToSmoothSvgPath, smoothPoints } from "../../domain/services/FreehandSmoother";
 import {
   defaultHandwrittenFontDetector,
   HandwrittenFontDetectionResult,
@@ -1830,21 +1831,30 @@ export class DiagramEditor {
       relPoints.push({ ...relPoints[0] });
     }
 
-    let pathData = relPoints.reduce(
-      (acc, p, i) => `${acc}${i === 0 ? "M" : " L"} ${p.x},${p.y}`,
-      ""
-    );
-    if (
-      pathData.startsWith("M") &&
-      !pathData.includes("L") &&
-      !pathData.includes("l") &&
-      !pathData.includes("Z") &&
-      !pathData.includes("z")
-    ) {
-      const coords = pathData.substring(1).trim().split(/[ ,]+/);
-      if (coords.length >= 2) {
-        pathData = `${pathData} L ${coords[0]},${coords[1]}`;
+    let pathData: string;
+    if (relPoints.length <= 3) {
+      pathData = relPoints.reduce(
+        (acc, p, i) => `${acc}${i === 0 ? "M" : " L"} ${p.x},${p.y}`,
+        ""
+      );
+      if (
+        pathData.startsWith("M") &&
+        !pathData.includes("L") &&
+        !pathData.includes("l") &&
+        !pathData.includes("Z") &&
+        !pathData.includes("z") &&
+        !pathData.includes("Q") &&
+        !pathData.includes("q") &&
+        !pathData.includes("C") &&
+        !pathData.includes("c")
+      ) {
+        const coords = pathData.substring(1).trim().split(/[ ,]+/);
+        if (coords.length >= 2) {
+          pathData = `${pathData} L ${coords[0]},${coords[1]}`;
+        }
       }
+    } else {
+      pathData = pointsToSmoothSvgPath(smoothPoints(relPoints));
     }
 
     return this.addNode({

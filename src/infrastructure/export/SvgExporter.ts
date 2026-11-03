@@ -971,10 +971,16 @@ export class SvgExporter {
               const cellCx = c * colWidth + colWidth / 2;
               const cellCy = r * rowHeight + rowHeight / 2;
               const isHdr = r === 0 && hasHeader;
+              const cellPaddingX = 8;
+              const availableCellW = Math.max(16, colWidth - cellPaddingX * 2);
+              const boldMultiplier = (nodeFont.bold || isHdr) ? 1.1 : 1.0;
+              const charWidth = Math.max(4.5, baseFontSize * 0.58 * boldMultiplier);
+              const lines = wrapTextToLines(cellText, availableCellW, charWidth);
+              const formattedText = lines.join("\n");
               out += this.renderMultilineText(
                 cellCx,
                 cellCy + 4,
-                cellText,
+                formattedText,
                 isHdr ? `${fontAttrs} font-weight="bold"` : fontAttrs,
                 "middle",
                 isHdr ? "umlcanvas-table-cell-header" : "umlcanvas-table-cell-text",

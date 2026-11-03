@@ -4280,21 +4280,29 @@ export class ShapeRegistry {
                 fontSize,
               });
 
-              if (cellText.includes("\n")) {
-                const lines = cellText.split(/\r?\n/);
+              const cellPaddingX = 8;
+              const availableCellW = Math.max(16, colWidth - cellPaddingX * 2);
+              const boldMultiplier = (nodeFont.bold || isHeaderCell) ? 1.1 : 1.0;
+              const charWidth = Math.max(4.5, fontSize * 0.58 * boldMultiplier);
+              const lines = wrapTextToLines(cellText, availableCellW, charWidth);
+
+              if (lines.length > 1) {
                 const lineH = Math.round(fontSize * 1.35);
-                const startY = cellY + rowHeight / 2 - ((lines.length - 1) * lineH) / 2;
+                const totalTextH = (lines.length - 1) * lineH;
+                const startY = Math.max(cellY + lineH / 2 + 2, cellY + rowHeight / 2 - totalTextH / 2);
                 lines.forEach((lineStr, idx) => {
+                  const lineY = Math.round(startY + idx * lineH);
+                  if (lineY > cellY + rowHeight - 2 && idx > 0) return;
                   const tspan = document.createElementNS(svgNS, "tspan");
                   tspan.setAttribute("x", String(cellX + colWidth / 2));
-                  tspan.setAttribute("y", String(Math.round(startY + idx * lineH)));
+                  tspan.setAttribute("y", String(lineY));
                   tspan.setAttribute("text-anchor", "middle");
                   tspan.setAttribute("dominant-baseline", "central");
-                  tspan.textContent = lineStr;
+                  tspan.textContent = lineStr || " ";
                   textEl.appendChild(tspan);
                 });
               } else {
-                textEl.textContent = cellText;
+                textEl.textContent = lines[0] ?? "";
               }
               cellG.appendChild(textEl);
             }

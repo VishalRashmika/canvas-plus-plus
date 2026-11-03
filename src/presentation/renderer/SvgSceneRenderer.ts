@@ -6,7 +6,7 @@ import { Group } from "../../domain/entities/Group";
 import { Point, point } from "../../domain/value-objects/Point";
 import { Rect, Size, rect, rectFromBounds, intersects, contains, center } from "../../domain/value-objects/Rect";
 import { Side } from "../../domain/types";
-import { ShapeRegistry, defaultShapeRegistry } from "./ShapeRegistry";
+import { ShapeRegistry, defaultShapeRegistry, getTableDataFromNode } from "./ShapeRegistry";
 import {
   estimateMarkdownContentHeight,
   wrapTextToLines,
@@ -3778,7 +3778,13 @@ export class SvgSceneRenderer {
           textAlign: bounds.textAlign,
         };
         if (node.kind === "generic.table") {
-          const textLines = (this.inlineEditorEl.value || "").split(/\r?\n/).length;
+          const cols = Math.max(1, (node.customData?.cols as number) || 3);
+          const colW = node.size.width / cols;
+          const availableW = Math.max(16, colW - 16);
+          const isHdr = (this.editingCellRow ?? 0) === 0 && node.customData?.hasHeaderRow !== false;
+          const charW = Math.max(4.5, fontSize * 0.58 * (nodeFont.bold || isHdr ? 1.1 : 1.0));
+          const wrapped = wrapTextToLines(this.inlineEditorEl.value || "", availableW, charW);
+          const textLines = Math.max(1, wrapped.length);
           const totalTextH = textLines * lineHeight;
           const padTop = Math.max(2, Math.floor((screenH - totalTextH) / 2));
           styles.paddingTop = `${padTop}px`;
@@ -3879,6 +3885,28 @@ export class SvgSceneRenderer {
         node.size = {
           width: node.size.width,
           height: Math.round(neededH),
+        };
+        this.renderNodes();
+        this.renderInteractions();
+      }
+    } else if (node.kind === "generic.table") {
+      const newText = this.inlineEditorEl.value;
+      const rows = Math.max(1, (node.customData?.rows as number) || 3);
+      const cols = Math.max(1, (node.customData?.cols as number) || 3);
+      const colWidth = node.size.width / cols;
+      const nodeFont = getNodeFontStyle(node);
+      const fontSize = Math.max(10, (nodeFont.fontSize ?? 12) - (rows > 4 ? 2 : 0));
+      const lineH = Math.round(fontSize * 1.35);
+      const availableW = Math.max(16, colWidth - 16);
+      const isHdr = (this.editingCellRow ?? 0) === 0 && node.customData?.hasHeaderRow !== false;
+      const charWidth = Math.max(4.5, fontSize * 0.58 * (nodeFont.bold || isHdr ? 1.1 : 1.0));
+      const wrapped = wrapTextToLines(newText, availableW, charWidth);
+      const neededRowH = Math.max(1, wrapped.length) * lineH + 16;
+      const neededTableH = Math.max(node.size.height, rows * neededRowH);
+      if (neededTableH > node.size.height) {
+        node.size = {
+          width: node.size.width,
+          height: Math.round(neededTableH),
         };
         this.renderNodes();
         this.renderInteractions();
@@ -3997,7 +4025,13 @@ export class SvgSceneRenderer {
       textAlign: bounds.textAlign,
     };
     if (node.kind === "generic.table") {
-      const textLines = (currentText || "").split(/\r?\n/).length;
+      const cols = Math.max(1, (node.customData?.cols as number) || 3);
+      const colW = node.size.width / cols;
+      const availableW = Math.max(16, colW - 16);
+      const isHdr = (this.editingCellRow ?? 0) === 0 && node.customData?.hasHeaderRow !== false;
+      const charW = Math.max(4.5, fontSize * 0.58 * (nodeFont.bold || isHdr ? 1.1 : 1.0));
+      const wrapped = wrapTextToLines(currentText || "", availableW, charW);
+      const textLines = Math.max(1, wrapped.length);
       const totalTextH = textLines * lineHeight;
       const padTop = Math.max(2, Math.floor((screenH - totalTextH) / 2));
       styles.paddingTop = `${padTop}px`;
@@ -4405,6 +4439,47 @@ export class SvgSceneRenderer {
       if (node) {
         if (node.kind === "generic.table") {
           this.editor.updateTableCell(node.id, r, c, newText);
+          const tableData = getTableDataFromNode(node);
+          const rows = Math.max(1, tableData.rows || 3);
+          const cols = Math.max(1, tableData.cols || 3);
+          const colWidth = node.size.width / cols;
+          const nodeFont = getNodeFontStyle(node);
+          const fontSize = Math.max(10, (nodeFont.fontSize ?? 12) - (rows > 4 ? 2 : 0));
+          const lineH = Math.round(fontSize * 1.35);
+          const availableW = Math.max(16, colWidth - 16);
+
+          const cells = tableData.cells || [];
+          let maxNeededRowH = 0;
+          for (let rowIdx = 0; rowIdx < rows; rowIdx++) {
+            let maxLinesInRow = 1;
+            for (let colIdx = 0; colIdx < cols; colIdx++) {
+              let text = cells[rowIdx]?.[colIdx] ?? "";
+              if (!text && rowIdx === 0 && tableData.headers?.[colIdx]) {
+                text = tableData.headers[colIdx];
+              }
+              if (text) {
+                const isHdr = rowIdx === 0 && tableData.hasHeaderRow !== false;
+                const cellCharW = Math.max(4.5, fontSize * 0.58 * (nodeFont.bold || isHdr ? 1.1 : 1.0));
+                const cellLines = wrapTextToLines(text, availableW, cellCharW);
+                if (cellLines.length > maxLinesInRow) {
+                  maxLinesInRow = cellLines.length;
+                }
+              }
+            }
+            const neededForThisRow = maxLinesInRow * lineH + 16;
+            if (neededForThisRow > maxNeededRowH) {
+              maxNeededRowH = neededForThisRow;
+            }
+          }
+
+          const neededTableH = Math.max(node.size.height, rows * maxNeededRowH);
+          if (neededTableH > node.size.height) {
+            node.size = {
+              width: node.size.width,
+              height: Math.round(neededTableH),
+            };
+          }
+
           this.renderNodes();
           this.renderInteractions();
           return;

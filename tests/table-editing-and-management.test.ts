@@ -838,4 +838,97 @@ describe("Table Cell Editing and Management Tests", () => {
       toolbar.destroy();
     });
   });
+
+  describe("12. Long Sentence Word-Wrapping and Cell Boundary Protection", () => {
+    it("should render a long sentence in a table cell with line breaks (<tspan>) matching the table column width", () => {
+      // 1. Import a table from the bottom toolbar
+      const toolbar = new Toolbar(container as any, editor, renderer);
+      const bottomToolbar = container.querySelector(".umlcanvas-floating-bottom-toolbar");
+      const buttons = bottomToolbar?.querySelectorAll("button") || [];
+      const tableBtn = buttons.find((b) => b.title.startsWith("Table"));
+      expect(tableBtn).toBeDefined();
+      tableBtn?.click();
+
+      expect(editor.diagram.nodes.length).toBe(1);
+      const tableNode = editor.diagram.nodes[0];
+      expect(tableNode.kind).toBe("generic.table");
+
+      // 2. Add a long sentence to a single cell (without explicit \n breaks)
+      const longSentence = "This is a very long sentence that has multiple words and easily exceeds the single cell boundaries of the imported table";
+      renderer.startInlineEditor(tableNode, { row: 0, col: 0 });
+      const activeEditor = renderer.activeInlineEditor as unknown as MockElement;
+      activeEditor.value = longSentence;
+      renderer.commitInlineEditor();
+
+      // 3. Render the table SVG shape
+      const shapeDef = defaultShapeRegistry.get("generic.table");
+      const svgEl = shapeDef.renderSvg(tableNode, { isSelected: false });
+
+      // 4. Verify the cell contains a text element with multiple <tspan> lines rather than a single line
+      const cell00 = Array.from(svgEl.querySelectorAll(".umlcanvas-table-cell")).find(
+        (c: any) => c.getAttribute("data-row") === "0" && c.getAttribute("data-col") === "0"
+      ) as any;
+      expect(cell00).toBeDefined();
+
+      const textEl = cell00?.querySelector(".umlcanvas-table-cell-text");
+      expect(textEl).not.toBeNull();
+
+      const tspans = textEl?.querySelectorAll("tspan") || [];
+      expect(tspans.length).toBeGreaterThan(1);
+
+      // Verify each individual tspan is much shorter than the full sentence length
+      for (const tspan of tspans) {
+        expect(tspan.textContent.length).toBeLessThan(longSentence.length);
+        // Col width is 300 / 3 = 100, so line length in chars should be constrained (<= 20 chars per line)
+        expect(tspan.textContent.length).toBeLessThanOrEqual(20);
+      }
+
+      toolbar.destroy();
+    });
+
+    it("should auto-expand table height so that multi-line wrapped text fits without overflowing", () => {
+      const table = editor.addTableNode({ rows: 3, cols: 3, size: { width: 300, height: 90 } });
+      const initialHeight = table.size.height;
+
+      // Add a long sentence that requires multiple lines
+      const longSentence = "Another long sentence to test automatic height expansion for tables so that rows have sufficient vertical room for wrapped lines";
+      renderer.startInlineEditor(table, { row: 1, col: 1 });
+      const activeEditor = renderer.activeInlineEditor as unknown as MockElement;
+      activeEditor.value = longSentence;
+      renderer.commitInlineEditor();
+
+      // Table height should expand beyond initial 90px
+      expect(table.size.height).toBeGreaterThan(initialHeight);
+    });
+
+    it("should export long sentences in table cells with wrapped <tspan> elements in SvgExporter", () => {
+      const table = editor.addTableNode({ rows: 2, cols: 2, size: { width: 200, height: 100 } });
+      const longSentence = "A long header sentence in a small table column that must wrap in export";
+      editor.updateTableCell(table.id, 0, 0, longSentence);
+
+      const exported = defaultSvgExporter.exportToSvg(editor.diagram);
+      expect(exported).toContain("<tspan");
+      // Export should not contain the entire sentence on a single line
+      expect(exported).not.toContain(`<text x="50" y="29" text-anchor="middle" class="umlcanvas-table-cell-header">${longSentence}</text>`);
+    });
+
+    it("should preserve manual newlines while also wrapping long lines within paragraphs", () => {
+      const table = editor.addTableNode({ rows: 2, cols: 2, size: { width: 200, height: 100 } });
+      const multiParaText = "Short line\nA very long second line that needs wrapping inside the cell boundaries";
+      editor.updateTableCell(table.id, 1, 0, multiParaText);
+
+      const shapeDef = defaultShapeRegistry.get("generic.table");
+      const svgEl = shapeDef.renderSvg(table, { isSelected: false });
+
+      const cell10 = Array.from(svgEl.querySelectorAll(".umlcanvas-table-cell")).find(
+        (c: any) => c.getAttribute("data-row") === "1" && c.getAttribute("data-col") === "0"
+      ) as any;
+      const textEl = cell10?.querySelector(".umlcanvas-table-cell-text");
+      const tspans = textEl?.querySelectorAll("tspan") || [];
+
+      // "Short line" is line 1, and the long second line is wrapped into multiple lines
+      expect(tspans.length).toBeGreaterThanOrEqual(3);
+      expect(tspans[0].textContent).toBe("Short line");
+    });
+  });
 });

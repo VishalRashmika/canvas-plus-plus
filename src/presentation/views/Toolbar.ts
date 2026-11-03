@@ -1188,7 +1188,7 @@ export class Toolbar {
         const isDrawActive =
           this.renderer.freehandMode &&
           !this.renderer.isAutoShapeDetection &&
-          !Boolean(this.renderer.isHandwritingTextMode);
+          !this.renderer.isHandwritingTextMode;
         if (isDrawActive) {
           this.renderer.setFreehandMode(false);
         } else {
@@ -1215,7 +1215,7 @@ export class Toolbar {
         const isAutoShapeActive =
           this.renderer.freehandMode &&
           this.renderer.isAutoShapeDetection &&
-          !Boolean(this.renderer.isHandwritingTextMode);
+          !this.renderer.isHandwritingTextMode;
         if (isAutoShapeActive) {
           this.renderer.setFreehandMode(false);
         } else {

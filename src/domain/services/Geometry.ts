@@ -13,15 +13,56 @@ export function getRectCenter(position: Point, size: Size): Point {
 }
 
 /**
- * Calculates the anchor point on a specific side of a rectangle.
+ * Checks whether a shape kind or string identifier represents a triangle.
+ */
+export function isTriangleShape(shapeOrKind?: string): boolean {
+  if (!shapeOrKind) return false;
+  return (
+    !shapeOrKind.includes("marker") &&
+    (shapeOrKind === "generic.triangle" ||
+      shapeOrKind === "triangle" ||
+      shapeOrKind.endsWith(".triangle") ||
+      shapeOrKind.includes("triangle"))
+  );
+}
+
+/**
+ * Calculates the anchor point on a specific side of a shape boundary.
  * offset: 0..1 along the edge (0.5 is center).
  */
 export function getSidePoint(
   position: Point,
   size: Size,
   side: Side,
-  offset = 0.5
+  offset = 0.5,
+  shapeOrKind?: string
 ): Point {
+  if (isTriangleShape(shapeOrKind)) {
+    const halfW = size.width / 2;
+    switch (side) {
+      case "top":
+        return {
+          x: Math.round(position.x + halfW),
+          y: Math.round(position.y),
+        };
+      case "bottom":
+        return {
+          x: Math.round(position.x + size.width * offset),
+          y: Math.round(position.y + size.height),
+        };
+      case "left":
+        return {
+          x: Math.round(position.x + halfW * (1 - offset)),
+          y: Math.round(position.y + size.height * offset),
+        };
+      case "right":
+        return {
+          x: Math.round(position.x + halfW + halfW * offset),
+          y: Math.round(position.y + size.height * offset),
+        };
+    }
+  }
+
   switch (side) {
     case "top":
       return { x: position.x + size.width * offset, y: position.y };
@@ -93,24 +134,80 @@ export interface StraightConnectionEndpoints {
   end: Point;
 }
 
+export interface EndpointNodeOptions {
+  position: Point;
+  size: Size;
+  side?: Side;
+  portOffset?: number;
+  kind?: string;
+  shape?: string;
+  facingPoint?: Point;
+}
+
 /**
- * Calculates straight-line endpoints between source and target rectangles,
- * optionally constrained to specific sides or ports.
+ * Calculates the perimeter intersection for any shape (triangle, circle, ellipse, diamond, or rect).
+ */
+export function getPerimeterIntersectionForShape(
+  boundary: { position: Point; size: Size; kind?: string; shape?: string },
+  target: Point
+): Point {
+  const shape = boundary.kind ?? boundary.shape;
+  if (isTriangleShape(shape)) {
+    return getTrianglePerimeterIntersection(boundary, target);
+  }
+  if (shape === "generic.circle" || shape === "circle") {
+    return getCirclePerimeterIntersection(boundary, target);
+  }
+  if (shape === "generic.ellipse" || shape === "ellipse") {
+    return getEllipsePerimeterIntersection(boundary, target);
+  }
+  if (
+    shape === "generic.diamond" ||
+    shape === "diamond" ||
+    shape === "activity.decision" ||
+    shape === "state.choice"
+  ) {
+    return getDiamondPerimeterIntersection(boundary, target);
+  }
+  return getRectPerimeterIntersection(boundary, target);
+}
+
+/**
+ * Calculates straight-line endpoints between source and target shapes,
+ * properly honoring triangle and shape perimeters or specific sides/ports.
  */
 export function calculateStraightEndpoints(
-  source: { position: Point; size: Size; side?: Side },
-  target: { position: Point; size: Size; side?: Side }
+  source: EndpointNodeOptions,
+  target: EndpointNodeOptions
 ): StraightConnectionEndpoints {
   const sourceCenter = getRectCenter(source.position, source.size);
   const targetCenter = getRectCenter(target.position, target.size);
 
+  const sourceKind = source.kind ?? source.shape;
+  const targetKind = target.kind ?? target.shape;
+
+  const sourceFacing = source.facingPoint ?? targetCenter;
+  const targetFacing = target.facingPoint ?? sourceCenter;
+
   const start = source.side
-    ? getSidePoint(source.position, source.size, source.side)
-    : getRectPerimeterIntersection(source, targetCenter);
+    ? getSidePoint(
+        source.position,
+        source.size,
+        source.side,
+        source.portOffset ?? 0.5,
+        sourceKind
+      )
+    : getPerimeterIntersectionForShape(source, sourceFacing);
 
   const end = target.side
-    ? getSidePoint(target.position, target.size, target.side)
-    : getRectPerimeterIntersection(target, sourceCenter);
+    ? getSidePoint(
+        target.position,
+        target.size,
+        target.side,
+        target.portOffset ?? 0.5,
+        targetKind
+      )
+    : getPerimeterIntersectionForShape(target, targetFacing);
 
   return { start, end };
 }
@@ -245,11 +342,12 @@ export function getTrianglePerimeterIntersection(
     const t = ((a.x - cx) * ey - (a.y - cy) * ex) / denom;
     const u = ((a.x - cx) * dy - (a.y - cy) * dx) / denom;
 
-    if (t > 0 && u >= 0 && u <= 1 && t < minT) {
+    if (t > 0 && u >= -1e-4 && u <= 1 + 1e-4 && t < minT) {
       minT = t;
+      const clampedU = Math.max(0, Math.min(1, u));
       closestPt = {
-        x: Math.round(cx + t * dx),
-        y: Math.round(cy + t * dy),
+        x: Math.round(a.x + clampedU * ex),
+        y: Math.round(a.y + clampedU * ey),
       };
     }
   }

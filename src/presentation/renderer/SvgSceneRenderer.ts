@@ -1263,6 +1263,7 @@ export class SvgSceneRenderer {
           size: fromNode.size,
           side: fromSide,
           portOffset: fromPort?.offset,
+          kind: fromNode.kind,
         },
         {
           id: toNode.id,
@@ -1270,6 +1271,7 @@ export class SvgSceneRenderer {
           size: toNode.size,
           side: toSide,
           portOffset: toPort?.offset,
+          kind: toNode.kind,
         },
         {
           routing: edge.routing,
@@ -1580,7 +1582,7 @@ export class SvgSceneRenderer {
       // Render ports & port handles (F-007, F-031)
       const ports = shapeDef.getPorts(node);
       for (const port of ports) {
-        const pt = getSidePoint({ x: 0, y: 0 }, node.size, port.side, port.offset);
+        const pt = getSidePoint({ x: 0, y: 0 }, node.size, port.side, port.offset, node.kind);
         const handle = document.createElementNS(svgNS, "circle");
         handle.setAttribute("cx", String(pt.x));
         handle.setAttribute("cy", String(pt.y));
@@ -1719,6 +1721,7 @@ export class SvgSceneRenderer {
           size: fromNode.size,
           side: fromSide,
           portOffset: fromPort?.offset,
+          kind: fromNode.kind,
         },
         {
           id: toNode.id,
@@ -1726,6 +1729,7 @@ export class SvgSceneRenderer {
           size: toNode.size,
           side: toSide,
           portOffset: toPort?.offset,
+          kind: toNode.kind,
         },
         {
           routing: edge.routing,
@@ -2351,7 +2355,8 @@ export class SvgSceneRenderer {
             node.position,
             node.size,
             side,
-            port?.offset ?? 0.5
+            port?.offset ?? 0.5,
+            node.kind
           );
           this.dragMode = {
             type: "edge",
@@ -3064,7 +3069,7 @@ export class SvgSceneRenderer {
 
           if (node.ports && node.ports.length > 0) {
             for (const p of node.ports) {
-              const pt = getSidePoint(node.position, node.size, p.side, p.offset);
+              const pt = getSidePoint(node.position, node.size, p.side, p.offset, node.kind);
               if (Math.hypot(canvasPoint.x - pt.x, canvasPoint.y - pt.y) < 16) {
                 hoveredPortId = p.id;
                 hoveredSide = p.side;
@@ -4298,6 +4303,7 @@ export class SvgSceneRenderer {
         size: fromNode.size,
         side: fromSide,
         portOffset: fromPort?.offset,
+        kind: fromNode.kind,
       },
       {
         id: toNode.id,
@@ -4305,6 +4311,7 @@ export class SvgSceneRenderer {
         size: toNode.size,
         side: toSide,
         portOffset: toPort?.offset,
+        kind: toNode.kind,
       },
       {
         routing: edge.routing,
@@ -4349,13 +4356,15 @@ export class SvgSceneRenderer {
       fromNode.position,
       fromNode.size,
       fromSide ?? getFacingSide(fromNode.position, fromNode.size, getRectCenter(toNode.position, toNode.size)),
-      fromPort?.offset ?? 0.5
+      fromPort?.offset ?? 0.5,
+      fromNode.kind
     );
     const toPt = getSidePoint(
       toNode.position,
       toNode.size,
       toSide ?? getFacingSide(toNode.position, toNode.size, getRectCenter(fromNode.position, fromNode.size)),
-      toPort?.offset ?? 0.5
+      toPort?.offset ?? 0.5,
+      toNode.kind
     );
 
     const fullPoints = [fromPt, ...edge.waypoints, toPt];

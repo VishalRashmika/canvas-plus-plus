@@ -420,6 +420,7 @@ export class SvgExporter {
         size: fromNode.size,
         side: fromSide,
         portOffset: fromPort?.offset,
+        kind: fromNode.kind,
       },
       {
         id: toNode.id,
@@ -427,6 +428,7 @@ export class SvgExporter {
         size: toNode.size,
         side: toSide,
         portOffset: toPort?.offset,
+        kind: toNode.kind,
       },
       {
         routing: edge.routing,

@@ -24,3 +24,4 @@ export * from "./services/HandwrittenFontDetector";
 export * from "./services/TableDetector";
 export * from "./services/HandwritingRecognizer";
 export * from "./services/HanddrawnNoteEnhancer";
+export * from "./services/NoteHandwritingSystem";

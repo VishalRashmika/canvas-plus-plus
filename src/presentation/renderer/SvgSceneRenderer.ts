@@ -41,12 +41,12 @@ export interface SvgSceneRendererOptions {
   showGrid?: boolean;
   initialTransform?: ViewportTransform;
   onTransformChange?: (transform: ViewportTransform) => void;
-  onStrokeComplete?: (stroke: Stroke, options?: { autoDetect?: boolean }) => void;
+  onStrokeComplete?: (stroke: Stroke, options?: { autoDetect?: boolean; handwritingText?: boolean }) => void;
   enableVirtualization?: boolean;
   virtualizationThreshold?: number;
   enableFreehand?: boolean;
   autoShapeDetection?: boolean;
-  onModeChange?: (mode: "select" | "draw" | "grab") => void;
+  onModeChange?: (mode: "select" | "draw" | "grab" | "handwrite") => void;
   onContextMenu?: (
     e: MouseEvent,
     canvasPoint: Point,
@@ -190,16 +190,17 @@ export class SvgSceneRenderer {
   private showGrid: boolean;
   private transform: ViewportTransform = { panX: 0, panY: 0, zoom: 1.0 };
   private onTransformChange?: (transform: ViewportTransform) => void;
-  private onStrokeComplete?: (stroke: Stroke, options?: { autoDetect?: boolean }) => void;
+  private onStrokeComplete?: (stroke: Stroke, options?: { autoDetect?: boolean; handwritingText?: boolean }) => void;
 
   private isFreehandMode = false;
   private autoShapeDetection = true;
+  private handwritingTextMode = false;
   private activeStroke: Stroke | null = null;
   private freehandPathEl: SVGPathElement | null = null;
   private enableVirtualization: boolean;
   private virtualizationThreshold: number;
   private enableFreehand: boolean;
-  private onModeChange?: (mode: "select" | "draw" | "grab") => void;
+  private onModeChange?: (mode: "select" | "draw" | "grab" | "handwrite") => void;
 
   private isGrabMode = false;
 
@@ -511,12 +512,23 @@ export class SvgSceneRenderer {
       this.editor.clearSelection();
     }
     this.isFreehandMode = active;
+    if (!active) {
+      this.handwritingTextMode = false;
+    }
     if (active) {
       this.container.classList.add("umlcanvas-freehand-mode");
     } else {
       this.container.classList.remove("umlcanvas-freehand-mode");
     }
-    this.onModeChange?.(active ? "draw" : (this.isGrabMode ? "grab" : "select"));
+    this.onModeChange?.(
+      active
+        ? this.handwritingTextMode
+          ? "handwrite"
+          : "draw"
+        : this.isGrabMode
+        ? "grab"
+        : "select"
+    );
   }
 
   get freehandMode(): boolean {
@@ -526,6 +538,7 @@ export class SvgSceneRenderer {
   setGrabMode(active: boolean): void {
     if (active && this.isFreehandMode) {
       this.isFreehandMode = false;
+      this.handwritingTextMode = false;
       this.container.classList.remove("umlcanvas-freehand-mode");
     }
     this.isGrabMode = active;
@@ -534,7 +547,15 @@ export class SvgSceneRenderer {
     } else {
       this.container.classList.remove("umlcanvas-grab-mode");
     }
-    this.onModeChange?.(active ? "grab" : (this.isFreehandMode ? "draw" : "select"));
+    this.onModeChange?.(
+      active
+        ? "grab"
+        : this.isFreehandMode
+        ? this.handwritingTextMode
+          ? "handwrite"
+          : "draw"
+        : "select"
+    );
   }
 
   get grabMode(): boolean {
@@ -543,15 +564,50 @@ export class SvgSceneRenderer {
 
   setAutoShapeDetection(active: boolean): void {
     this.autoShapeDetection = active;
-    if (active && this.isGrabMode) {
-      this.isGrabMode = false;
-      this.container.classList.remove("umlcanvas-grab-mode");
+    if (active) {
+      this.handwritingTextMode = false;
+      if (this.isGrabMode) {
+        this.isGrabMode = false;
+        this.container.classList.remove("umlcanvas-grab-mode");
+      }
     }
-    this.onModeChange?.(this.isGrabMode ? "grab" : (this.isFreehandMode ? "draw" : "select"));
+    this.onModeChange?.(
+      this.isGrabMode
+        ? "grab"
+        : this.isFreehandMode
+        ? this.handwritingTextMode
+          ? "handwrite"
+          : "draw"
+        : "select"
+    );
   }
 
   get isAutoShapeDetection(): boolean {
     return this.autoShapeDetection;
+  }
+
+  setHandwritingTextMode(active: boolean): void {
+    this.handwritingTextMode = active;
+    if (active) {
+      this.autoShapeDetection = false;
+      if (this.isGrabMode) {
+        this.isGrabMode = false;
+        this.container.classList.remove("umlcanvas-grab-mode");
+      }
+    }
+    this.onModeChange?.(
+      this.isGrabMode
+        ? "grab"
+        : this.isFreehandMode
+        ? this.handwritingTextMode
+          ? "handwrite"
+          : "draw"
+        : "select"
+    );
+  }
+
+  get isHandwritingTextMode(): boolean {
+    return this.handwritingTextMode;
   }
 
   zoomIn(): void {
@@ -3012,15 +3068,22 @@ export class SvgSceneRenderer {
         }
         const width = maxX - minX;
         const height = maxY - minY;
-        const isMicroStroke = stroke.points.length < 4 || (width < 15 && height < 15);
+        const isMicroStroke = this.handwritingTextMode
+          ? stroke.points.length < 2 || (width < 3 && height < 3)
+          : stroke.points.length < 4 || (width < 15 && height < 15);
 
         if (!isMicroStroke) {
           const shiftKeyHeld = Boolean(e.shiftKey);
           const effectiveAutoDetect = shiftKeyHeld ? !this.autoShapeDetection : this.autoShapeDetection;
           if (this.onStrokeComplete) {
-            this.onStrokeComplete(stroke, { autoDetect: effectiveAutoDetect });
+            this.onStrokeComplete(stroke, {
+              autoDetect: effectiveAutoDetect,
+              handwritingText: this.handwritingTextMode,
+            });
           } else {
-            if (effectiveAutoDetect) {
+            if (this.handwritingTextMode) {
+              this.editor.handwriteTextFromStrokes([stroke]);
+            } else if (effectiveAutoDetect) {
               this.editor.snapStrokeToShape(stroke, { select: false, fallbackToFreehand: true });
             } else {
               this.editor.keepAsFreehand(stroke, { select: false });
@@ -4738,15 +4801,31 @@ export class SvgSceneRenderer {
         return;
       } else {
         e.preventDefault();
-        const isDrawActive = this.isFreehandMode && !this.autoShapeDetection;
+        const isDrawActive = this.isFreehandMode && !this.autoShapeDetection && !this.handwritingTextMode;
         if (isDrawActive) {
           this.setFreehandMode(false);
         } else {
           this.setAutoShapeDetection(false);
+          this.setHandwritingTextMode(false);
           this.setFreehandMode(true);
         }
         return;
       }
+    }
+
+    // Handwrite Text tool shortcut: W or Shift+W (toggle Handwrite Text mode)
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "w" && this.enableFreehand) {
+      e.preventDefault();
+      const isHandwriteActive = this.isFreehandMode && this.handwritingTextMode;
+      if (isHandwriteActive) {
+        this.setFreehandMode(false);
+        this.setHandwritingTextMode(false);
+      } else {
+        this.setAutoShapeDetection(false);
+        this.setHandwritingTextMode(true);
+        this.setFreehandMode(true);
+      }
+      return;
     }
   }
 

@@ -147,15 +147,36 @@ export class HandwrittenFontDetector {
       this.extractStrokeFeatures(s, idx)
     );
 
-    // 3. Handle single continuous cursive stroke with multiple letter lobes
-    if (
-      strokes.length === 1 &&
-      (strokeFeatures[0].width / strokeFeatures[0].height > 1.2 ||
-        strokeFeatures[0].totalLength > 1.8 * Math.hypot(strokeFeatures[0].width, strokeFeatures[0].height))
-    ) {
-      const cursiveSubStrokes = this.segmentCursiveStroke(strokes[0]);
-      if (cursiveSubStrokes.length > 1) {
-        return this.detect(cursiveSubStrokes);
+    // 3. Handle continuous cursive strokes with multiple letter lobes
+    const hasPotentialCursive = strokes.some((s, idx) => {
+      const f = strokeFeatures[idx];
+      return (
+        f.width / Math.max(1, f.height) > 1.25 ||
+        f.totalLength > 1.8 * Math.hypot(f.width, f.height)
+      );
+    });
+
+    if (hasPotentialCursive) {
+      const expandedStrokes: Stroke[] = [];
+      let didSegment = false;
+      for (let i = 0; i < strokes.length; i++) {
+        const s = strokes[i];
+        const f = strokeFeatures[i];
+        if (
+          f.width / Math.max(1, f.height) > 1.25 ||
+          f.totalLength > 1.8 * Math.hypot(f.width, f.height)
+        ) {
+          const sub = this.segmentCursiveStroke(s);
+          if (sub.length > 1) {
+            expandedStrokes.push(...sub);
+            didSegment = true;
+            continue;
+          }
+        }
+        expandedStrokes.push(s);
+      }
+      if (didSegment && expandedStrokes.length > strokes.length) {
+        return this.detect(expandedStrokes);
       }
     }
 
@@ -1563,7 +1584,7 @@ export class HandwrittenFontDetector {
    * For continuous cursive handwriting drawn in a single stroke across a wide area,
    * segments the stroke at baseline valleys / ligatures into individual letter strokes.
    */
-  private segmentCursiveStroke(stroke: Stroke): Stroke[] {
+  public segmentCursiveStroke(stroke: Stroke): Stroke[] {
     const pts = stroke.points;
     const n = pts.length;
     if (n < 12) return [stroke];

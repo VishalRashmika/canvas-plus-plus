@@ -87,6 +87,7 @@ import {
   defaultHandwrittenFontDetector,
   HandwrittenFontDetectionResult,
 } from "../../domain/services/HandwrittenFontDetector";
+import { defaultNoteHandwritingSystem } from "../../domain/services/NoteHandwritingSystem";
 import {
   defaultTableDetector,
 } from "../../domain/services/TableDetector";
@@ -1814,6 +1815,78 @@ export class DiagramEditor {
     return defaultHandwrittenFontDetector.detect(strokes);
   }
 
+  handwriteTextFromStrokes(
+    strokes: Stroke | Stroke[],
+    options?: { select?: boolean; appendToNearby?: boolean }
+  ): DiagramNode | null {
+    const rawStrokes = Array.isArray(strokes) ? strokes : [strokes];
+    if (rawStrokes.length === 0) return null;
+
+    const res = defaultNoteHandwritingSystem.recognize(rawStrokes);
+    if (!res.text || res.text.trim().length === 0) {
+      return null;
+    }
+
+    const select = options?.select ?? false;
+    const paddingX = 24;
+    const paddingY = 16;
+    const width = Math.max(50, Math.round(res.bounds.size.width + paddingX));
+    const height = Math.max(30, Math.round(res.bounds.size.height + paddingY));
+
+    if (options?.appendToNearby) {
+      const nearbyNode = this.diagram.nodes.find((n) => {
+        if (n.kind !== "generic.text") return false;
+        const nodeCenterY = n.position.y + n.size.height / 2;
+        const resCenterY = res.bounds.position.y + res.bounds.size.height / 2;
+        if (Math.abs(nodeCenterY - resCenterY) > 30) return false;
+        const nodeRight = n.position.x + n.size.width;
+        const gap = res.bounds.position.x - nodeRight;
+        return gap >= -20 && gap <= 120;
+      });
+
+      if (nearbyNode) {
+        const updatedText = `${nearbyNode.title} ${res.text}`;
+        nearbyNode.title = updatedText;
+        nearbyNode.size = {
+          width: Math.max(nearbyNode.size.width + width, nearbyNode.size.width + 40),
+          height: Math.max(nearbyNode.size.height, height),
+        };
+        if (nearbyNode.labels && nearbyNode.labels.length > 0) {
+          nearbyNode.labels[0].text = updatedText;
+        }
+        this.notify();
+        return nearbyNode;
+      }
+    }
+
+    return this.addNode({
+      kind: "generic.text",
+      title: res.text,
+      position: {
+        x: Math.round(res.bounds.position.x),
+        y: Math.round(res.bounds.position.y),
+      },
+      size: { width, height },
+      labels: [
+        {
+          id: `label-${Date.now()}`,
+          text: res.text,
+          anchor: "node",
+          position: { x: 0, y: 0 },
+          style: {
+            fontFamily: res.fontFamily,
+            fontSize: res.estimatedFontSize,
+          },
+        },
+      ],
+      style: {
+        fontFamily: res.fontFamily,
+        fontSize: res.estimatedFontSize,
+      },
+      select,
+    });
+  }
+
   enhanceStrokes(
     strokes: Stroke[],
     options?: { confidenceThreshold?: number }
@@ -2726,38 +2799,6 @@ export class DiagramEditor {
       if (attachedEdge) {
         return attachedEdge;
       }
-    }
-
-    // 2. Check for handwritten letter/word detection when not connecting components
-    const fontResult = defaultHandwrittenFontDetector.detect(stroke);
-    if (
-      fontResult.isText &&
-      fontResult.confidence >= confidenceThreshold &&
-      fontResult.text.trim().length > 0 &&
-      (fontResult.text !== "O" ||
-        (fontResult.bounds.size.width <= 65 && fontResult.bounds.size.height <= 65)) &&
-      result.shape !== "line" &&
-      result.shape !== "arrow"
-    ) {
-      const paddingX = 20;
-      const paddingY = 14;
-      const width = Math.max(50, Math.round(fontResult.bounds.size.width + paddingX));
-      const height = Math.max(30, Math.round(fontResult.bounds.size.height + paddingY));
-
-      return this.addNode({
-        kind: "generic.text",
-        title: fontResult.text,
-        position: {
-          x: Math.round(fontResult.bounds.position.x),
-          y: Math.round(fontResult.bounds.position.y),
-        },
-        size: { width, height },
-        style: {
-          fontFamily: fontResult.fontFamily,
-          fontSize: fontResult.estimatedFontSize,
-        },
-        select,
-      });
     }
 
     if (result.confidence < confidenceThreshold || result.shape === "none") {

@@ -53,6 +53,7 @@ export class Toolbar {
   private grabBtn!: HTMLButtonElement;
   private drawBtn!: HTMLButtonElement;
   private autoShapeBtn!: HTMLButtonElement;
+  private handwriteTextBtn!: HTMLButtonElement;
   private rectBtn!: HTMLButtonElement;
   private circleBtn!: HTMLButtonElement;
   private diamondBtn!: HTMLButtonElement;
@@ -1131,7 +1132,7 @@ export class Toolbar {
   }
 
   private createBottomControls(): void {
-    // Mode Group (Select, Grab, Draw, Auto Shape)
+    // Mode Group (Select, Grab, Draw, Auto Shape, Handwrite Text)
     const modeGroup = this.createGroup(this.bottomToolbarEl);
 
     // Select Tool (V / Esc)
@@ -1141,6 +1142,9 @@ export class Toolbar {
       () => {
         if (typeof this.renderer.setGrabMode === "function") {
           this.renderer.setGrabMode(false);
+        }
+        if (typeof this.renderer.setHandwritingTextMode === "function") {
+          this.renderer.setHandwritingTextMode(false);
         }
         this.renderer.setFreehandMode(false);
         this.updateToolMode();
@@ -1157,6 +1161,9 @@ export class Toolbar {
         const active = !this.renderer.grabMode;
         if (active && typeof this.renderer.setFreehandMode === "function") {
           this.renderer.setFreehandMode(false);
+        }
+        if (active && typeof this.renderer.setHandwritingTextMode === "function") {
+          this.renderer.setHandwritingTextMode(false);
         }
         if (typeof this.renderer.setGrabMode === "function") {
           this.renderer.setGrabMode(active);
@@ -1175,7 +1182,13 @@ export class Toolbar {
         if (typeof this.renderer.setGrabMode === "function") {
           this.renderer.setGrabMode(false);
         }
-        const isDrawActive = this.renderer.freehandMode && !this.renderer.isAutoShapeDetection;
+        if (typeof this.renderer.setHandwritingTextMode === "function") {
+          this.renderer.setHandwritingTextMode(false);
+        }
+        const isDrawActive =
+          this.renderer.freehandMode &&
+          !this.renderer.isAutoShapeDetection &&
+          !Boolean(this.renderer.isHandwritingTextMode);
         if (isDrawActive) {
           this.renderer.setFreehandMode(false);
         } else {
@@ -1196,7 +1209,13 @@ export class Toolbar {
         if (typeof this.renderer.setGrabMode === "function") {
           this.renderer.setGrabMode(false);
         }
-        const isAutoShapeActive = this.renderer.freehandMode && this.renderer.isAutoShapeDetection;
+        if (typeof this.renderer.setHandwritingTextMode === "function") {
+          this.renderer.setHandwritingTextMode(false);
+        }
+        const isAutoShapeActive =
+          this.renderer.freehandMode &&
+          this.renderer.isAutoShapeDetection &&
+          !Boolean(this.renderer.isHandwritingTextMode);
         if (isAutoShapeActive) {
           this.renderer.setFreehandMode(false);
         } else {
@@ -1208,6 +1227,34 @@ export class Toolbar {
       "sparkles"
     );
     modeGroup.appendChild(this.autoShapeBtn);
+
+    // Handwrite Text Detection (W)
+    this.handwriteTextBtn = this.createButton(
+      "Handwrite Text (W) - Autodetect handwritten notes into lowercase text",
+      "",
+      () => {
+        if (typeof this.renderer.setGrabMode === "function") {
+          this.renderer.setGrabMode(false);
+        }
+        const isHandwriteActive =
+          this.renderer.freehandMode && Boolean(this.renderer.isHandwritingTextMode);
+        if (isHandwriteActive) {
+          this.renderer.setFreehandMode(false);
+          if (typeof this.renderer.setHandwritingTextMode === "function") {
+            this.renderer.setHandwritingTextMode(false);
+          }
+        } else {
+          this.renderer.setAutoShapeDetection(false);
+          if (typeof this.renderer.setHandwritingTextMode === "function") {
+            this.renderer.setHandwritingTextMode(true);
+          }
+          this.renderer.setFreehandMode(true);
+        }
+        this.updateToolMode();
+      },
+      "pen-tool"
+    );
+    modeGroup.appendChild(this.handwriteTextBtn);
 
     this.addDivider(this.bottomToolbarEl);
 
@@ -1777,6 +1824,9 @@ export class Toolbar {
   updateToolMode(): void {
     const isFreehand = this.renderer.freehandMode;
     const isGrab = Boolean(this.renderer.grabMode);
+    const isHandwrite = Boolean(this.renderer.isHandwritingTextMode);
+    const isAutoShape = Boolean(this.renderer.isAutoShapeDetection);
+
     if (this.selectBtn) {
       this.selectBtn.classList.toggle("is-active", !isFreehand && !isGrab);
     }
@@ -1791,7 +1841,7 @@ export class Toolbar {
         this.drawBtn.classList.remove("is-hidden");
         this.drawBtn.classList.toggle(
           "is-active",
-          isFreehand && !this.renderer.isAutoShapeDetection
+          isFreehand && !isAutoShape && !isHandwrite
         );
       }
     }
@@ -1803,7 +1853,19 @@ export class Toolbar {
         this.autoShapeBtn.classList.remove("is-hidden");
         this.autoShapeBtn.classList.toggle(
           "is-active",
-          isFreehand && this.renderer.isAutoShapeDetection
+          isFreehand && isAutoShape && !isHandwrite
+        );
+      }
+    }
+    if (this.handwriteTextBtn) {
+      if (!this.freehandEnabled) {
+        this.handwriteTextBtn.classList.add("is-hidden");
+        this.handwriteTextBtn.classList.remove("is-active");
+      } else {
+        this.handwriteTextBtn.classList.remove("is-hidden");
+        this.handwriteTextBtn.classList.toggle(
+          "is-active",
+          isFreehand && isHandwrite
         );
       }
     }

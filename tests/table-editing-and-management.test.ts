@@ -574,6 +574,138 @@ describe("Table Cell Editing and Management Tests", () => {
 
       expect(table.customData?.rows).toBe(3);
     });
+
+    it("should include transparent hitboxes and transformOrigin at button center for smooth, flicker-free hover transitions", () => {
+      const table = editor.addTableNode({ rows: 3, cols: 3, position: { x: 100, y: 100 }, size: { width: 300, height: 180 } });
+      editor.selectNode(table.id, false);
+
+      const addColBtn = container.querySelector(".umlcanvas-table-add-col-btn");
+      const addRowBtn = container.querySelector(".umlcanvas-table-add-row-btn");
+      expect(addColBtn).not.toBeNull();
+      expect(addRowBtn).not.toBeNull();
+
+      // Verify transformOrigin is set to button coordinates
+      expect(addColBtn?.style.transformOrigin).toBe("416px 176px");
+      expect(addRowBtn?.style.transformOrigin).toBe("236px 296px");
+
+      // Verify hitbox circles exist with r="16" and pointer-events capability
+      const colHitbox = addColBtn?.querySelector(".umlcanvas-table-btn-hitbox");
+      const rowHitbox = addRowBtn?.querySelector(".umlcanvas-table-btn-hitbox");
+      expect(colHitbox).not.toBeNull();
+      expect(rowHitbox).not.toBeNull();
+      expect(colHitbox?.getAttribute("r")).toBe("16");
+      expect(rowHitbox?.getAttribute("r")).toBe("16");
+
+      // Verify visible circle and text
+      const colCircle = addColBtn?.querySelector(".umlcanvas-table-btn-circle");
+      const colText = addColBtn?.querySelector(".umlcanvas-table-btn-text");
+      expect(colCircle?.getAttribute("r")).toBe("11");
+      expect(colText?.textContent).toBe("+");
+    });
+
+    it("should smoothly display hovering buttons when hovering over an unselected table and dismiss on mouseleave", () => {
+      const table = editor.addTableNode({ rows: 3, cols: 3, position: { x: 100, y: 100 }, size: { width: 300, height: 180 } });
+      editor.clearSelection();
+
+      // Initially unselected table shows no controls
+      expect(container.querySelector(".umlcanvas-table-add-col-btn")).toBeNull();
+
+      // Hover over table area
+      (window as any).dispatch("mousemove", { clientX: 200, clientY: 150 });
+
+      // Buttons appear smoothly
+      const addColBtn = container.querySelector(".umlcanvas-table-add-col-btn");
+      expect(addColBtn).not.toBeNull();
+
+      // Mouse leaves the SVG container
+      const svgEl = container.querySelector(".umlcanvas-svg");
+      svgEl?.dispatch("mouseleave");
+
+      // Buttons are dismissed cleanly
+      expect(container.querySelector(".umlcanvas-table-add-col-btn")).toBeNull();
+    });
+
+    it("should commit active cell inline editing and add column/row without dropping button action or flickering", () => {
+      const table = editor.addTableNode({ rows: 3, cols: 3 });
+      editor.selectNode(table.id, false);
+
+      // Start inline editor in cell (0, 0)
+      renderer.startInlineEditor(table, { row: 0, col: 0 });
+      const activeEditor = renderer.activeInlineEditor as unknown as MockElement;
+      activeEditor.value = "Flicker-Free Commit";
+
+      // Click Add Column button directly while inline editing is open
+      const addColBtn = container.querySelector(".umlcanvas-table-add-col-btn");
+      const svgEl = container.querySelector(".umlcanvas-svg");
+      svgEl?.dispatch("mousedown", {
+        button: 0,
+        target: addColBtn,
+        clientX: 350,
+        clientY: 150,
+      });
+
+      // Cell value committed AND column was added
+      expect((table.customData?.cells as string[][])[0][0]).toBe("Flicker-Free Commit");
+      expect(table.customData?.cols).toBe(4);
+      expect(editor.isNodeSelected(table.id)).toBe(true);
+    });
+
+    it("should handle rapid successive button clicks without accidentally launching cell inline editor", () => {
+      const table = editor.addTableNode({ rows: 3, cols: 3, position: { x: 100, y: 100 }, size: { width: 300, height: 180 } });
+      editor.selectNode(table.id, false);
+
+      const addColBtn = container.querySelector(".umlcanvas-table-add-col-btn");
+      const svgEl = container.querySelector(".umlcanvas-svg");
+
+      // First click on Add Column button
+      svgEl?.dispatch("mousedown", {
+        button: 0,
+        target: addColBtn,
+        clientX: 416,
+        clientY: 176,
+      });
+
+      expect(table.customData?.cols).toBe(4);
+
+      // Rapid second mousedown at the same location (which now falls on the newly expanded table cell)
+      const newCellTarget = container.querySelector(".umlcanvas-table-cell");
+      svgEl?.dispatch("mousedown", {
+        button: 0,
+        target: newCellTarget,
+        clientX: 416,
+        clientY: 176,
+      });
+
+      // Mouseup occurs
+      (window as any).dispatch("mouseup", { clientX: 416, clientY: 176 });
+
+      // Inline editor should NOT be launched on the cell due to debounced button action protection
+      expect(renderer.activeInlineEditor).toBeNull();
+    });
+
+    it("should select table when clicking hover button on an unselected table", () => {
+      const table = editor.addTableNode({ rows: 3, cols: 3, position: { x: 100, y: 100 }, size: { width: 300, height: 180 } });
+      editor.clearSelection();
+      expect(editor.isNodeSelected(table.id)).toBe(false);
+
+      // Hover over table to reveal controls
+      (window as any).dispatch("mousemove", { clientX: 200, clientY: 150 });
+      const addRowBtn = container.querySelector(".umlcanvas-table-add-row-btn");
+      expect(addRowBtn).not.toBeNull();
+
+      // Click Add Row button
+      const svgEl = container.querySelector(".umlcanvas-svg");
+      svgEl?.dispatch("mousedown", {
+        button: 0,
+        target: addRowBtn,
+        clientX: 236,
+        clientY: 296,
+      });
+
+      // Row added and table selected
+      expect(table.customData?.rows).toBe(4);
+      expect(editor.isNodeSelected(table.id)).toBe(true);
+    });
   });
 
   describe("6. Context Menu Actions for Table", () => {

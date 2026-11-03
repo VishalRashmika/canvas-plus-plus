@@ -207,12 +207,15 @@ export class SvgSceneRenderer {
   private dragMode: DragMode = { type: "none" };
   private isSpacePressed = false;
   private unsubscribeEditor: (() => void) | null = null;
+  private hoveredTableNodeId?: string;
+  private lastTableButtonActionTime = 0;
 
   // Bound event listeners for cleanup
   private onWheelBound: (e: WheelEvent) => void;
   private onMouseDownBound: (e: MouseEvent) => void;
   private onMouseMoveBound: (e: MouseEvent) => void;
   private onMouseUpBound: (e: MouseEvent) => void;
+  private onMouseLeaveBound: (e: MouseEvent) => void;
   private onKeyDownBound: (e: KeyboardEvent) => void;
   private onKeyUpBound: (e: KeyboardEvent) => void;
   private onDblClickBound: (e: MouseEvent) => void;
@@ -325,6 +328,7 @@ export class SvgSceneRenderer {
     this.onMouseDownBound = this.handleMouseDown.bind(this);
     this.onMouseMoveBound = this.handleMouseMove.bind(this);
     this.onMouseUpBound = this.handleMouseUp.bind(this);
+    this.onMouseLeaveBound = this.handleMouseLeave.bind(this);
     this.onKeyDownBound = this.handleKeyDown.bind(this);
     this.onKeyUpBound = this.handleKeyUp.bind(this);
     this.onDblClickBound = this.handleDblClick.bind(this);
@@ -402,6 +406,7 @@ export class SvgSceneRenderer {
     this.svgEl.addEventListener("contextmenu", this.onContextMenuBound);
     this.svgEl.addEventListener("dragover", this.onDragOverBound);
     this.svgEl.addEventListener("drop", this.onDropBound);
+    this.svgEl.addEventListener("mouseleave", this.onMouseLeaveBound);
 
     this.unsubscribeEditor = this.editor.subscribe(() => {
       this.render();
@@ -1673,112 +1678,25 @@ export class SvgSceneRenderer {
           this.interactionLayerEl.appendChild(handle);
         }
 
-        // On-canvas interactive table controls for generic.table
-        if (node.kind === "generic.table") {
-          const rows = Math.max(1, (node.customData?.rows as number) || 3);
-          const cols = Math.max(1, (node.customData?.cols as number) || 3);
-
-          // Add Column (+) button at right border
-          const addColG = document.createElementNS(svgNS, "g");
-          addColG.setAttribute("class", "umlcanvas-table-canvas-btn umlcanvas-table-add-col-btn");
-          addColG.setAttribute("data-node-id", node.id);
-          addColG.setAttribute("title", "Add Column");
-          const addColCx = node.position.x + node.size.width + 16;
-          const addColCy = cols > 1
-            ? node.position.y + node.size.height / 2 - 14
-            : node.position.y + node.size.height / 2;
-          const addColCircle = document.createElementNS(svgNS, "circle");
-          addColCircle.setAttribute("cx", String(addColCx));
-          addColCircle.setAttribute("cy", String(addColCy));
-          addColCircle.setAttribute("r", "11");
-          addColCircle.setAttribute("class", "umlcanvas-table-btn-circle");
-          const addColText = document.createElementNS(svgNS, "text");
-          addColText.setAttribute("x", String(addColCx));
-          addColText.setAttribute("y", String(addColCy));
-          addColText.setAttribute("text-anchor", "middle");
-          addColText.setAttribute("dominant-baseline", "central");
-          addColText.setAttribute("class", "umlcanvas-table-btn-text");
-          addColText.textContent = "+";
-          addColG.appendChild(addColCircle);
-          addColG.appendChild(addColText);
-          this.interactionLayerEl.appendChild(addColG);
-
-          // Delete Column (-) button at right border (only if cols > 1)
-          if (cols > 1) {
-            const delColG = document.createElementNS(svgNS, "g");
-            delColG.setAttribute("class", "umlcanvas-table-canvas-btn umlcanvas-table-del-col-btn");
-            delColG.setAttribute("data-node-id", node.id);
-            delColG.setAttribute("title", "Delete Column");
-            const delColCx = node.position.x + node.size.width + 16;
-            const delColCy = node.position.y + node.size.height / 2 + 14;
-            const delColCircle = document.createElementNS(svgNS, "circle");
-            delColCircle.setAttribute("cx", String(delColCx));
-            delColCircle.setAttribute("cy", String(delColCy));
-            delColCircle.setAttribute("r", "11");
-            delColCircle.setAttribute("class", "umlcanvas-table-btn-circle is-delete");
-            const delColText = document.createElementNS(svgNS, "text");
-            delColText.setAttribute("x", String(delColCx));
-            delColText.setAttribute("y", String(delColCy));
-            delColText.setAttribute("text-anchor", "middle");
-            delColText.setAttribute("dominant-baseline", "central");
-            delColText.setAttribute("class", "umlcanvas-table-btn-text");
-            delColText.textContent = "−";
-            delColG.appendChild(delColCircle);
-            delColG.appendChild(delColText);
-            this.interactionLayerEl.appendChild(delColG);
-          }
-
-          // Add Row (+) button at bottom border
-          const addRowG = document.createElementNS(svgNS, "g");
-          addRowG.setAttribute("class", "umlcanvas-table-canvas-btn umlcanvas-table-add-row-btn");
-          addRowG.setAttribute("data-node-id", node.id);
-          addRowG.setAttribute("title", "Add Row");
-          const addRowCx = rows > 1
-            ? node.position.x + node.size.width / 2 - 14
-            : node.position.x + node.size.width / 2;
-          const addRowCy = node.position.y + node.size.height + 16;
-          const addRowCircle = document.createElementNS(svgNS, "circle");
-          addRowCircle.setAttribute("cx", String(addRowCx));
-          addRowCircle.setAttribute("cy", String(addRowCy));
-          addRowCircle.setAttribute("r", "11");
-          addRowCircle.setAttribute("class", "umlcanvas-table-btn-circle");
-          const addRowText = document.createElementNS(svgNS, "text");
-          addRowText.setAttribute("x", String(addRowCx));
-          addRowText.setAttribute("y", String(addRowCy));
-          addRowText.setAttribute("text-anchor", "middle");
-          addRowText.setAttribute("dominant-baseline", "central");
-          addRowText.setAttribute("class", "umlcanvas-table-btn-text");
-          addRowText.textContent = "+";
-          addRowG.appendChild(addRowCircle);
-          addRowG.appendChild(addRowText);
-          this.interactionLayerEl.appendChild(addRowG);
-
-          // Delete Row (-) button at bottom border (only if rows > 1)
-          if (rows > 1) {
-            const delRowG = document.createElementNS(svgNS, "g");
-            delRowG.setAttribute("class", "umlcanvas-table-canvas-btn umlcanvas-table-del-row-btn");
-            delRowG.setAttribute("data-node-id", node.id);
-            delRowG.setAttribute("title", "Delete Row");
-            const delRowCx = node.position.x + node.size.width / 2 + 14;
-            const delRowCy = node.position.y + node.size.height + 16;
-            const delRowCircle = document.createElementNS(svgNS, "circle");
-            delRowCircle.setAttribute("cx", String(delRowCx));
-            delRowCircle.setAttribute("cy", String(delRowCy));
-            delRowCircle.setAttribute("r", "11");
-            delRowCircle.setAttribute("class", "umlcanvas-table-btn-circle is-delete");
-            const delRowText = document.createElementNS(svgNS, "text");
-            delRowText.setAttribute("x", String(delRowCx));
-            delRowText.setAttribute("y", String(delRowCy));
-            delRowText.setAttribute("text-anchor", "middle");
-            delRowText.setAttribute("dominant-baseline", "central");
-            delRowText.setAttribute("class", "umlcanvas-table-btn-text");
-            delRowText.textContent = "−";
-            delRowG.appendChild(delRowCircle);
-            delRowG.appendChild(delRowText);
-            this.interactionLayerEl.appendChild(delRowG);
-          }
-        }
       }
+    }
+
+    // On-canvas interactive table controls for selected or hovered generic.table
+    const tableNodesForControls = new Set<DiagramNode>();
+    for (const node of selectedNodes) {
+      if (node.kind === "generic.table" && selectedNodes.length === 1 && !this.editor.isNodeLocked(node.id)) {
+        tableNodesForControls.add(node);
+      }
+    }
+    if (this.hoveredTableNodeId && this.editor.selectedNodeIds.length <= 1) {
+      const hNode = this.editor.diagram.nodes.find((n) => n.id === this.hoveredTableNodeId);
+      if (hNode && hNode.kind === "generic.table" && !this.editor.isNodeLocked(hNode.id) && this.editor.isNodeVisible(hNode.id)) {
+        tableNodesForControls.add(hNode);
+      }
+    }
+
+    for (const tableNode of tableNodesForControls) {
+      this.renderTableControls(tableNode);
     }
 
     // Selection handles for selected edges (F-007, line editing & reconnecting)
@@ -2033,6 +1951,156 @@ export class SvgSceneRenderer {
     }
   }
 
+  private renderTableControls(node: DiagramNode): void {
+    const svgNS = "http://www.w3.org/2000/svg";
+    const rows = Math.max(1, (node.customData?.rows as number) || 3);
+    const cols = Math.max(1, (node.customData?.cols as number) || 3);
+
+    // Add Column (+) button at right border
+    const addColG = document.createElementNS(svgNS, "g");
+    addColG.setAttribute("class", "umlcanvas-table-canvas-btn umlcanvas-table-add-col-btn");
+    addColG.setAttribute("data-node-id", node.id);
+    addColG.setAttribute("title", "Add Column");
+    const addColCx = node.position.x + node.size.width + 16;
+    const addColCy = cols > 1
+      ? node.position.y + node.size.height / 2 - 14
+      : node.position.y + node.size.height / 2;
+    addColG.style.transformOrigin = `${addColCx}px ${addColCy}px`;
+
+    const addColHitbox = document.createElementNS(svgNS, "circle");
+    addColHitbox.setAttribute("cx", String(addColCx));
+    addColHitbox.setAttribute("cy", String(addColCy));
+    addColHitbox.setAttribute("r", "16");
+    addColHitbox.setAttribute("class", "umlcanvas-table-btn-hitbox");
+    addColG.appendChild(addColHitbox);
+
+    const addColCircle = document.createElementNS(svgNS, "circle");
+    addColCircle.setAttribute("cx", String(addColCx));
+    addColCircle.setAttribute("cy", String(addColCy));
+    addColCircle.setAttribute("r", "11");
+    addColCircle.setAttribute("class", "umlcanvas-table-btn-circle");
+    addColG.appendChild(addColCircle);
+
+    const addColText = document.createElementNS(svgNS, "text");
+    addColText.setAttribute("x", String(addColCx));
+    addColText.setAttribute("y", String(addColCy));
+    addColText.setAttribute("text-anchor", "middle");
+    addColText.setAttribute("dominant-baseline", "central");
+    addColText.setAttribute("class", "umlcanvas-table-btn-text");
+    addColText.textContent = "+";
+    addColG.appendChild(addColText);
+
+    this.interactionLayerEl.appendChild(addColG);
+
+    // Delete Column (-) button at right border (only if cols > 1)
+    if (cols > 1) {
+      const delColG = document.createElementNS(svgNS, "g");
+      delColG.setAttribute("class", "umlcanvas-table-canvas-btn umlcanvas-table-del-col-btn");
+      delColG.setAttribute("data-node-id", node.id);
+      delColG.setAttribute("title", "Delete Column");
+      const delColCx = node.position.x + node.size.width + 16;
+      const delColCy = node.position.y + node.size.height / 2 + 14;
+      delColG.style.transformOrigin = `${delColCx}px ${delColCy}px`;
+
+      const delColHitbox = document.createElementNS(svgNS, "circle");
+      delColHitbox.setAttribute("cx", String(delColCx));
+      delColHitbox.setAttribute("cy", String(delColCy));
+      delColHitbox.setAttribute("r", "16");
+      delColHitbox.setAttribute("class", "umlcanvas-table-btn-hitbox");
+      delColG.appendChild(delColHitbox);
+
+      const delColCircle = document.createElementNS(svgNS, "circle");
+      delColCircle.setAttribute("cx", String(delColCx));
+      delColCircle.setAttribute("cy", String(delColCy));
+      delColCircle.setAttribute("r", "11");
+      delColCircle.setAttribute("class", "umlcanvas-table-btn-circle is-delete");
+      delColG.appendChild(delColCircle);
+
+      const delColText = document.createElementNS(svgNS, "text");
+      delColText.setAttribute("x", String(delColCx));
+      delColText.setAttribute("y", String(delColCy));
+      delColText.setAttribute("text-anchor", "middle");
+      delColText.setAttribute("dominant-baseline", "central");
+      delColText.setAttribute("class", "umlcanvas-table-btn-text");
+      delColText.textContent = "−";
+      delColG.appendChild(delColText);
+
+      this.interactionLayerEl.appendChild(delColG);
+    }
+
+    // Add Row (+) button at bottom border
+    const addRowG = document.createElementNS(svgNS, "g");
+    addRowG.setAttribute("class", "umlcanvas-table-canvas-btn umlcanvas-table-add-row-btn");
+    addRowG.setAttribute("data-node-id", node.id);
+    addRowG.setAttribute("title", "Add Row");
+    const addRowCx = rows > 1
+      ? node.position.x + node.size.width / 2 - 14
+      : node.position.x + node.size.width / 2;
+    const addRowCy = node.position.y + node.size.height + 16;
+    addRowG.style.transformOrigin = `${addRowCx}px ${addRowCy}px`;
+
+    const addRowHitbox = document.createElementNS(svgNS, "circle");
+    addRowHitbox.setAttribute("cx", String(addRowCx));
+    addRowHitbox.setAttribute("cy", String(addRowCy));
+    addRowHitbox.setAttribute("r", "16");
+    addRowHitbox.setAttribute("class", "umlcanvas-table-btn-hitbox");
+    addRowG.appendChild(addRowHitbox);
+
+    const addRowCircle = document.createElementNS(svgNS, "circle");
+    addRowCircle.setAttribute("cx", String(addRowCx));
+    addRowCircle.setAttribute("cy", String(addRowCy));
+    addRowCircle.setAttribute("r", "11");
+    addRowCircle.setAttribute("class", "umlcanvas-table-btn-circle");
+    addRowG.appendChild(addRowCircle);
+
+    const addRowText = document.createElementNS(svgNS, "text");
+    addRowText.setAttribute("x", String(addRowCx));
+    addRowText.setAttribute("y", String(addRowCy));
+    addRowText.setAttribute("text-anchor", "middle");
+    addRowText.setAttribute("dominant-baseline", "central");
+    addRowText.setAttribute("class", "umlcanvas-table-btn-text");
+    addRowText.textContent = "+";
+    addRowG.appendChild(addRowText);
+
+    this.interactionLayerEl.appendChild(addRowG);
+
+    // Delete Row (-) button at bottom border (only if rows > 1)
+    if (rows > 1) {
+      const delRowG = document.createElementNS(svgNS, "g");
+      delRowG.setAttribute("class", "umlcanvas-table-canvas-btn umlcanvas-table-del-row-btn");
+      delRowG.setAttribute("data-node-id", node.id);
+      delRowG.setAttribute("title", "Delete Row");
+      const delRowCx = node.position.x + node.size.width / 2 + 14;
+      const delRowCy = node.position.y + node.size.height + 16;
+      delRowG.style.transformOrigin = `${delRowCx}px ${delRowCy}px`;
+
+      const delRowHitbox = document.createElementNS(svgNS, "circle");
+      delRowHitbox.setAttribute("cx", String(delRowCx));
+      delRowHitbox.setAttribute("cy", String(delRowCy));
+      delRowHitbox.setAttribute("r", "16");
+      delRowHitbox.setAttribute("class", "umlcanvas-table-btn-hitbox");
+      delRowG.appendChild(delRowHitbox);
+
+      const delRowCircle = document.createElementNS(svgNS, "circle");
+      delRowCircle.setAttribute("cx", String(delRowCx));
+      delRowCircle.setAttribute("cy", String(delRowCy));
+      delRowCircle.setAttribute("r", "11");
+      delRowCircle.setAttribute("class", "umlcanvas-table-btn-circle is-delete");
+      delRowG.appendChild(delRowCircle);
+
+      const delRowText = document.createElementNS(svgNS, "text");
+      delRowText.setAttribute("x", String(delRowCx));
+      delRowText.setAttribute("y", String(delRowCy));
+      delRowText.setAttribute("text-anchor", "middle");
+      delRowText.setAttribute("dominant-baseline", "central");
+      delRowText.setAttribute("class", "umlcanvas-table-btn-text");
+      delRowText.textContent = "−";
+      delRowG.appendChild(delRowText);
+
+      this.interactionLayerEl.appendChild(delRowG);
+    }
+  }
+
   // --- Event Handling ---
 
   private getClientCoords(e: MouseEvent): Point {
@@ -2090,6 +2158,55 @@ export class SvgSceneRenderer {
 
     (e as HandledMouseEvent)._umlHandled = true;
 
+    // Table Action Buttons (+ / − for Rows and Columns) - handled first for smooth, immediate responsiveness
+    const tableAddCol = target?.closest(".umlcanvas-table-add-col-btn");
+    const tableDelCol = target?.closest(".umlcanvas-table-del-col-btn");
+    const tableAddRow = target?.closest(".umlcanvas-table-add-row-btn");
+    const tableDelRow = target?.closest(".umlcanvas-table-del-row-btn");
+
+    if (tableAddCol || tableDelCol || tableAddRow || tableDelRow) {
+      e.stopPropagation();
+      e.preventDefault();
+      if (this.inlineEditorEl) {
+        this.commitInlineEditor();
+      }
+      this.lastTableButtonActionTime = Date.now();
+      if (tableAddCol) {
+        const nodeId = tableAddCol.getAttribute("data-node-id");
+        if (nodeId) {
+          this.editor.addTableColumn(nodeId);
+          if (!this.editor.isNodeSelected(nodeId)) {
+            this.editor.selectNode(nodeId, false);
+          }
+        }
+      } else if (tableDelCol) {
+        const nodeId = tableDelCol.getAttribute("data-node-id");
+        if (nodeId) {
+          this.editor.deleteTableColumn(nodeId);
+          if (!this.editor.isNodeSelected(nodeId)) {
+            this.editor.selectNode(nodeId, false);
+          }
+        }
+      } else if (tableAddRow) {
+        const nodeId = tableAddRow.getAttribute("data-node-id");
+        if (nodeId) {
+          this.editor.addTableRow(nodeId);
+          if (!this.editor.isNodeSelected(nodeId)) {
+            this.editor.selectNode(nodeId, false);
+          }
+        }
+      } else if (tableDelRow) {
+        const nodeId = tableDelRow.getAttribute("data-node-id");
+        if (nodeId) {
+          this.editor.deleteTableRow(nodeId);
+          if (!this.editor.isNodeSelected(nodeId)) {
+            this.editor.selectNode(nodeId, false);
+          }
+        }
+      }
+      return;
+    }
+
     // Detect if click landed on a table cell before commitInlineEditor potentially re-renders
     const preCellEl = target?.closest(".umlcanvas-table-cell");
     const preCellRow = preCellEl?.getAttribute("data-row");
@@ -2146,40 +2263,6 @@ export class SvgSceneRenderer {
     }
 
     if (!target) return;
-
-    // Table Action Buttons (+ / − for Rows and Columns)
-    const tableAddCol = target.closest(".umlcanvas-table-add-col-btn");
-    if (tableAddCol) {
-      e.stopPropagation();
-      e.preventDefault();
-      const nodeId = tableAddCol.getAttribute("data-node-id");
-      if (nodeId) this.editor.addTableColumn(nodeId);
-      return;
-    }
-    const tableDelCol = target.closest(".umlcanvas-table-del-col-btn");
-    if (tableDelCol) {
-      e.stopPropagation();
-      e.preventDefault();
-      const nodeId = tableDelCol.getAttribute("data-node-id");
-      if (nodeId) this.editor.deleteTableColumn(nodeId);
-      return;
-    }
-    const tableAddRow = target.closest(".umlcanvas-table-add-row-btn");
-    if (tableAddRow) {
-      e.stopPropagation();
-      e.preventDefault();
-      const nodeId = tableAddRow.getAttribute("data-node-id");
-      if (nodeId) this.editor.addTableRow(nodeId);
-      return;
-    }
-    const tableDelRow = target.closest(".umlcanvas-table-del-row-btn");
-    if (tableDelRow) {
-      e.stopPropagation();
-      e.preventDefault();
-      const nodeId = tableDelRow.getAttribute("data-node-id");
-      if (nodeId) this.editor.deleteTableRow(nodeId);
-      return;
-    }
 
     // Edge endpoint handle click -> start reconnecting (F-007)
     if (target.classList.contains("umlcanvas-edge-endpoint-handle")) {
@@ -3056,6 +3139,41 @@ export class SvgSceneRenderer {
       this.renderInteractions();
       return;
     }
+
+    if (
+      this.dragMode.type === "none" &&
+      !this.isFreehandMode &&
+      !this.isGrabMode &&
+      !this.isSpacePressed &&
+      this.editor.selectedNodeIds.length <= 1
+    ) {
+      let hoveredTableId: string | undefined;
+      for (const node of this.editor.diagram.nodes) {
+        if (node.kind === "generic.table" && this.editor.isNodeVisible(node.id) && !this.editor.isNodeLocked(node.id)) {
+          const pad = 24;
+          if (
+            canvasPoint.x >= node.position.x - pad &&
+            canvasPoint.x <= node.position.x + node.size.width + 40 &&
+            canvasPoint.y >= node.position.y - pad &&
+            canvasPoint.y <= node.position.y + node.size.height + 40
+          ) {
+            hoveredTableId = node.id;
+            break;
+          }
+        }
+      }
+      if (hoveredTableId !== this.hoveredTableNodeId) {
+        this.hoveredTableNodeId = hoveredTableId;
+        this.renderInteractions();
+      }
+    }
+  }
+
+  private handleMouseLeave(): void {
+    if (this.hoveredTableNodeId) {
+      this.hoveredTableNodeId = undefined;
+      this.renderInteractions();
+    }
   }
 
   private handleMouseUp(e: MouseEvent): void {
@@ -3169,6 +3287,11 @@ export class SvgSceneRenderer {
           node.kind !== "generic.freehand"
         ) {
           if (node.kind === "generic.table") {
+            if (Date.now() - this.lastTableButtonActionTime < 350) {
+              this.dragMode = { type: "none" };
+              this.renderInteractions();
+              return;
+            }
             let r = 0;
             let c = 0;
             if (moveState.clickedCell) {
@@ -3418,6 +3541,13 @@ export class SvgSceneRenderer {
   private handleDblClick(e: MouseEvent): void {
     if (this.isGrabMode) return;
     const target = e.target as Element;
+
+    if (
+      (target && typeof target.closest === "function" && target.closest(".umlcanvas-table-canvas-btn")) ||
+      Date.now() - this.lastTableButtonActionTime < 350
+    ) {
+      return;
+    }
 
     // Double-click on waypoint handle -> remove waypoint
     if (target.classList.contains("umlcanvas-edge-waypoint-handle")) {
@@ -5004,6 +5134,7 @@ export class SvgSceneRenderer {
     this.svgEl.removeEventListener("contextmenu", this.onContextMenuBound);
     this.svgEl.removeEventListener("dragover", this.onDragOverBound);
     this.svgEl.removeEventListener("drop", this.onDropBound);
+    this.svgEl.removeEventListener("mouseleave", this.onMouseLeaveBound);
 
     if (this.unsubscribeEditor) {
       this.unsubscribeEditor();

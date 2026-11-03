@@ -320,6 +320,19 @@ export class UmlCanvasView extends TextFileView {
         }
         const autoDetect = strokeOpts?.autoDetect ?? this.renderer?.isAutoShapeDetection ?? true;
         if (autoDetect) {
+          const emptyConn = this.editor.detectStrokeToEmptySpace(stroke);
+          if (emptyConn && this.renderer) {
+            const startPt = emptyConn.fromNode.position;
+            const clientPoint = this.renderer.canvasToScreenPoint(emptyConn.endPoint);
+            this.renderer.openArrowAttachmentPopup({
+              fromNodeId: emptyConn.fromNode.id,
+              dropCanvasPoint: emptyConn.endPoint,
+              dropClientPoint: clientPoint,
+              startPoint: startPt,
+            });
+            return;
+          }
+
           const result = this.editor.snapStrokeToShape(stroke, {
             select: false,
             fallbackToFreehand: true,
@@ -368,6 +381,29 @@ export class UmlCanvasView extends TextFileView {
       },
       onExternalDrop: (e: DragEvent, canvasPoint: Point) => this.handleExternalDrop(e, canvasPoint),
       onPasteRequested: (canvasPoint?: Point) => void this.pasteFromClipboardOrEditor(canvasPoint),
+      onOpenVaultNote: (cb) => {
+        new NoteSuggestModal(this.app, (file: TFile) => {
+          cb(file);
+        }).open();
+      },
+      onOpenVaultImage: (cb) => {
+        const vaultImages = this.app.vault.getFiles().filter((f: TFile) => isImageFile(f));
+        if (vaultImages.length > 0) {
+          new ImageSuggestModal(this.app, (file: TFile) => {
+            let src = file.path;
+            try {
+              if (typeof this.app.vault.getResourcePath === "function") {
+                src = this.app.vault.getResourcePath(file);
+              }
+            } catch {
+              src = file.path;
+            }
+            cb({ path: file.path, src });
+          }).open();
+        } else {
+          cb({ path: "", src: "" });
+        }
+      },
     });
 
     // Setup Minimap (F-011)

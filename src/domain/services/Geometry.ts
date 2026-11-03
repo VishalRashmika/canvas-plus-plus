@@ -79,6 +79,15 @@ export function getSidePoint(
  * Determines the closest side of a rectangle facing a given external target point.
  */
 export function getFacingSide(position: Point, size: Size, target: Point): Side {
+  if (size.width <= 0 && size.height <= 0) {
+    const dx = target.x - position.x;
+    const dy = target.y - position.y;
+    if (Math.abs(dx) > Math.abs(dy)) {
+      return dx > 0 ? "right" : "left";
+    }
+    return dy > 0 ? "bottom" : "top";
+  }
+
   const center = getRectCenter(position, size);
   const dx = target.x - center.x;
   const dy = target.y - center.y;
@@ -102,6 +111,10 @@ export function getRectPerimeterIntersection(
   rect: { position: Point; size: Size },
   target: Point
 ): Point {
+  if (rect.size.width <= 0 && rect.size.height <= 0) {
+    return { ...rect.position };
+  }
+
   const center = getRectCenter(rect.position, rect.size);
   const dx = target.x - center.x;
   const dy = target.y - center.y;

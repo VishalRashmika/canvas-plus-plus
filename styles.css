@@ -3608,6 +3608,197 @@ body .umlcanvas-moving * {
 
 /* --- Dropdowns & Submenus (File Menu, Connector Menu, etc.) --- */
 
+/* --- Arrow Attachment Popup (Obsidian Canvas-style) --- */
+.umlcanvas-arrow-attachment-popup {
+  position: absolute;
+  z-index: 1000;
+  min-width: 260px;
+  max-width: 340px;
+  background-color: var(--background-secondary, #222);
+  border: 1px solid var(--background-modifier-border, #444);
+  border-radius: var(--radius-m, 8px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-family: var(--font-interface, inherit);
+  color: var(--text-normal, #ddd);
+  backdrop-filter: blur(8px);
+  pointer-events: auto;
+  user-select: none;
+  animation: umlcanvas-popup-appear 0.15s ease-out;
+}
+
+@keyframes umlcanvas-popup-appear {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.umlcanvas-attachment-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px 6px 10px;
+  border-bottom: 1px solid var(--background-modifier-border, #333);
+}
+
+.umlcanvas-attachment-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted, #888);
+}
+
+.umlcanvas-attachment-close-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted, #888);
+  cursor: pointer;
+  padding: 2px 6px;
+  font-size: 14px;
+  line-height: 1;
+  border-radius: 4px;
+}
+
+.umlcanvas-attachment-close-btn:hover {
+  background: var(--background-modifier-hover, rgba(255, 255, 255, 0.1));
+  color: var(--text-normal, #fff);
+}
+
+.umlcanvas-attachment-search-wrap {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--background-modifier-border, #333);
+}
+
+.umlcanvas-attachment-search {
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 12px;
+  border-radius: var(--radius-s, 4px);
+  border: 1px solid var(--background-modifier-border, #444);
+  background-color: var(--background-primary, #181818);
+  color: var(--text-normal, #eee);
+  outline: none;
+  box-sizing: border-box;
+}
+
+.umlcanvas-attachment-search:focus {
+  border-color: var(--interactive-accent, #7057ff);
+}
+
+.umlcanvas-attachment-tip {
+  font-size: 10px;
+  color: var(--text-muted, #888);
+  padding: 4px 10px;
+  background-color: var(--background-secondary-alt, rgba(0, 0, 0, 0.15));
+  border-bottom: 1px solid var(--background-modifier-border, #333);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.umlcanvas-attachment-list {
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  max-height: 280px;
+  overflow-y: auto;
+  gap: 2px;
+}
+
+.umlcanvas-attachment-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: var(--radius-s, 4px);
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  text-align: left;
+  width: 100%;
+  box-sizing: border-box;
+  color: var(--text-normal, inherit);
+  transition: background-color 0.12s ease;
+}
+
+.umlcanvas-attachment-item:hover,
+.umlcanvas-attachment-item.is-active {
+  background-color: var(--background-modifier-hover, rgba(255, 255, 255, 0.08));
+}
+
+.umlcanvas-attachment-item.is-active {
+  background-color: var(--interactive-accent, #7057ff);
+  color: var(--text-on-accent, #fff);
+}
+
+.umlcanvas-attachment-item-icon {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--text-muted, #aaa);
+}
+
+.umlcanvas-attachment-item-icon svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  fill: none;
+}
+
+.umlcanvas-attachment-item.is-active .umlcanvas-attachment-item-icon {
+  color: var(--text-on-accent, #fff);
+}
+
+.umlcanvas-attachment-item-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.umlcanvas-attachment-item-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.umlcanvas-attachment-item-desc {
+  font-size: 10px;
+  color: var(--text-muted, #888);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.umlcanvas-attachment-item.is-active .umlcanvas-attachment-item-desc {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.umlcanvas-attachment-item-shortcut {
+  font-size: 10px;
+  font-family: var(--font-monospace, monospace);
+  padding: 1px 5px;
+  border-radius: 3px;
+  background-color: var(--background-modifier-border, rgba(255, 255, 255, 0.1));
+  color: var(--text-muted, #999);
+}
+
+.umlcanvas-attachment-item.is-active .umlcanvas-attachment-item-shortcut {
+  background-color: rgba(0, 0, 0, 0.25);
+  color: #fff;
+}
+
 .umlcanvas-menu-dropdown {
   position: absolute;
   z-index: 100;

@@ -79,6 +79,7 @@ export class JsonCanvasSerializer {
         toNodeId: edge.toNodeId,
         toPortId: edge.toPortId,
         toSide: edge.toSide,
+        toPoint: edge.toPoint,
         routing: edge.routing,
         waypoints: edge.waypoints,
         labels: edge.labels ?? [],
@@ -265,8 +266,15 @@ export class JsonCanvasSerializer {
             `Edge '${er.id}' missing valid 'fromNodeId'`
           );
         }
-        if (typeof er.toNodeId !== "string" || !er.toNodeId) {
-          throw new InvalidDiagramJsonError(`Edge '${er.id}' missing valid 'toNodeId'`);
+        const erPoint = er.toPoint as { x: number; y: number } | undefined;
+        const hasValidPoint =
+          Boolean(erPoint && typeof erPoint.x === "number" && typeof erPoint.y === "number");
+
+        if (
+          (typeof er.toNodeId !== "string" || !er.toNodeId) &&
+          !hasValidPoint
+        ) {
+          throw new InvalidDiagramJsonError(`Edge '${er.id}' missing valid 'toNodeId' or 'toPoint'`);
         }
 
         const routing =
@@ -279,7 +287,10 @@ export class JsonCanvasSerializer {
             id: er.id,
             kind: typeof er.kind === "string" && er.kind ? er.kind : "generic.edge",
             fromNodeId: er.fromNodeId,
-            toNodeId: er.toNodeId,
+            toNodeId: typeof er.toNodeId === "string" ? er.toNodeId : "",
+            toPoint: erPoint && hasValidPoint
+              ? { x: erPoint.x, y: erPoint.y }
+              : undefined,
             fromPortId:
               typeof er.fromPortId === "string" ? er.fromPortId : undefined,
             fromSide:

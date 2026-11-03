@@ -404,14 +404,29 @@ export class SvgExporter {
     theme: "light" | "dark" = "light"
   ): string {
     const fromNode = diagram.nodes.find((n) => n.id === edge.fromNodeId);
-    const toNode = diagram.nodes.find((n) => n.id === edge.toNodeId);
+    const toNode = edge.toNodeId ? diagram.nodes.find((n) => n.id === edge.toNodeId) : undefined;
 
-    if (!fromNode || !toNode) return "";
+    if (!fromNode || (!toNode && !edge.toPoint)) return "";
 
     const fromPort = fromNode.ports?.find((p) => p.id === edge.fromPortId);
-    const toPort = toNode.ports?.find((p) => p.id === edge.toPortId);
+    const toPort = toNode?.ports?.find((p) => p.id === edge.toPortId);
     const fromSide = fromPort?.side ?? edge.fromSide;
     const toSide = toPort?.side ?? edge.toSide;
+
+    const targetBoundary = toNode
+      ? {
+          id: toNode.id,
+          position: toNode.position,
+          size: toNode.size,
+          side: toSide,
+          portOffset: toPort?.offset,
+          kind: toNode.kind,
+        }
+      : {
+          position: edge.toPoint!,
+          size: { width: 0, height: 0 },
+          side: toSide,
+        };
 
     const routingResult = defaultRoutingService.route(
       {
@@ -422,14 +437,7 @@ export class SvgExporter {
         portOffset: fromPort?.offset,
         kind: fromNode.kind,
       },
-      {
-        id: toNode.id,
-        position: toNode.position,
-        size: toNode.size,
-        side: toSide,
-        portOffset: toPort?.offset,
-        kind: toNode.kind,
-      },
+      targetBoundary,
       {
         routing: edge.routing,
         manualWaypoints: edge.waypoints,

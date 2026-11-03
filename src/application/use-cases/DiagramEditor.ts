@@ -737,6 +737,7 @@ export class DiagramEditor {
       kind,
       fromNodeId,
       toNodeId,
+      toPoint: options?.toPoint,
       fromPortId: options?.fromPortId,
       fromSide: options?.fromSide,
       toPortId: options?.toPortId,
@@ -1322,12 +1323,55 @@ export class DiagramEditor {
   reconnectEdge(
     edgeId: string,
     endpoint: "source" | "target",
-    target: { nodeId: string; portId?: string; side?: Side }
+    target: { nodeId?: string; portId?: string; side?: Side; point?: Point }
   ): void {
-    const targetNode = this.diagram.nodes.find((n) => n.id === target.nodeId);
-    if (!targetNode) return;
+    if (target.nodeId) {
+      const targetNode = this.diagram.nodes.find((n) => n.id === target.nodeId);
+      if (!targetNode) return;
+    } else if (!target.point) {
+      return;
+    }
     const cmd = new ReconnectEdgeCommand(this.diagram, edgeId, endpoint, target);
     this.commandStack.execute(cmd);
+  }
+
+  detectStrokeToEmptySpace(stroke: Stroke): {
+    fromNode: DiagramNode;
+    endPoint: Point;
+    isArrow: boolean;
+  } | null {
+    if (!stroke || !stroke.points || stroke.points.length < 2) return null;
+    const rec = defaultShapeRecognizer.recognize(stroke);
+    const sp = rec.startPoint ?? stroke.points[0];
+    const ep = rec.endPoint ?? stroke.points[stroke.points.length - 1];
+
+    let fromNode: DiagramNode | null = null;
+    let minDist = 80;
+    for (const node of this.diagram.nodes) {
+      if (node.kind === "generic.freehand") continue;
+      const d = this.distanceToNode(sp, node);
+      if (d < minDist) {
+        minDist = d;
+        fromNode = node;
+      }
+    }
+    if (!fromNode) return null;
+
+    // Ensure endPoint is in empty canvas space (not touching another node)
+    for (const node of this.diagram.nodes) {
+      if (node.id === fromNode.id || node.kind === "generic.freehand") continue;
+      const d = this.distanceToNode(ep, node);
+      if (d < 50) return null;
+    }
+
+    const arrowCheck = defaultShapeRecognizer.detectArrowHead(stroke.points);
+    const isArrow = rec.shape === "arrow" || arrowCheck.hasArrowHead;
+
+    return {
+      fromNode,
+      endPoint: ep,
+      isArrow,
+    };
   }
 
   updateEdgeWaypoints(edgeId: string, waypoints?: Point[]): void {

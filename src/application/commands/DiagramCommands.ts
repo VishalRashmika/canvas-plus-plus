@@ -1370,15 +1370,16 @@ export class UpdateEdgeRoutingCommand implements Command {
 }
 
 export interface ReconnectEndpointParams {
-  nodeId: string;
+  nodeId?: string;
   portId?: string;
   side?: Side;
+  point?: Point;
 }
 
 export class ReconnectEdgeCommand implements Command {
   readonly description = "Reconnect edge endpoint";
-  private prevFrom: { nodeId: string; portId?: string; side?: Side };
-  private prevTo: { nodeId: string; portId?: string; side?: Side };
+  private prevFrom: { nodeId: string; portId?: string; side?: Side; point?: Point };
+  private prevTo: { nodeId: string; portId?: string; side?: Side; point?: Point };
 
   constructor(
     private readonly diagram: Diagram,
@@ -1396,6 +1397,7 @@ export class ReconnectEdgeCommand implements Command {
       nodeId: edge?.toNodeId ?? "",
       portId: edge?.toPortId,
       side: edge?.toSide,
+      point: edge?.toPoint ? { ...edge.toPoint } : undefined,
     };
   }
 
@@ -1403,13 +1405,22 @@ export class ReconnectEdgeCommand implements Command {
     const edge = this.diagram.edges.find((e) => e.id === this.edgeId);
     if (!edge) return;
     if (this.endpoint === "source") {
-      edge.fromNodeId = this.target.nodeId;
+      if (this.target.nodeId !== undefined) {
+        edge.fromNodeId = this.target.nodeId;
+      }
       edge.fromPortId = this.target.portId;
       edge.fromSide = this.target.side;
     } else {
-      edge.toNodeId = this.target.nodeId;
+      if (this.target.nodeId !== undefined) {
+        edge.toNodeId = this.target.nodeId;
+      }
       edge.toPortId = this.target.portId;
       edge.toSide = this.target.side;
+      if (this.target.point !== undefined) {
+        edge.toPoint = { ...this.target.point };
+      } else if (this.target.nodeId) {
+        edge.toPoint = undefined;
+      }
     }
   }
 
@@ -1424,6 +1435,7 @@ export class ReconnectEdgeCommand implements Command {
       edge.toNodeId = this.prevTo.nodeId;
       edge.toPortId = this.prevTo.portId;
       edge.toSide = this.prevTo.side;
+      edge.toPoint = this.prevTo.point ? { ...this.prevTo.point } : undefined;
     }
   }
 }

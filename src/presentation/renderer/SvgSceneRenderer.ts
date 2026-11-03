@@ -22,6 +22,20 @@ import { getSidePoint, getRectCenter, getFacingSide } from "./ConnectorGeometry"
 import { defaultRoutingService } from "../../domain/services/RoutingService";
 import { defaultSnappingService, AlignmentGuides } from "../../domain/services/SnappingService";
 import { defaultEdgeStyleRegistry, EdgeStyleDefinition } from "./EdgeStyleRegistry";
+import {
+  ArrowAttachmentPopup,
+  ArrowAttachmentItem,
+  DEFAULT_ATTACHMENT_ITEMS,
+} from "../views/ArrowAttachmentPopup";
+
+export interface ArrowAttachmentContext {
+  fromNodeId: string;
+  fromPortId?: string;
+  fromSide?: Side;
+  dropCanvasPoint: Point;
+  dropClientPoint: Point;
+  startPoint: Point;
+}
 import { Stroke, StrokePoint } from "../../domain/services/ShapeRecognizer";
 import { resolveCanvasColor, isCanvasColorPreset } from "../../domain/value-objects/CanvasColor";
 import { defaultCustomChipRegistry } from "../../domain/services/CustomChipRegistry";
@@ -65,6 +79,8 @@ export interface SvgSceneRendererOptions {
     el: HTMLElement,
     sourcePath: string
   ) => Promise<void> | void;
+  onOpenVaultNote?: (callback: (noteFile: any) => void) => void;
+  onOpenVaultImage?: (callback: (imageFileOrUrl: any) => void) => void;
 }
 
 type DragMode =
@@ -241,6 +257,10 @@ export class SvgSceneRenderer {
     el: HTMLElement,
     sourcePath: string
   ) => Promise<void> | void;
+  private arrowAttachmentPopup: ArrowAttachmentPopup | null = null;
+  private arrowAttachmentState: ArrowAttachmentContext | null = null;
+  private onOpenVaultNote?: (callback: (noteFile: any) => void) => void;
+  private onOpenVaultImage?: (callback: (imageFileOrUrl: any) => void) => void;
 
   constructor(
     container: HTMLElement,
@@ -262,6 +282,8 @@ export class SvgSceneRenderer {
     this.onPdfPick = options?.onPdfPick;
     this.onPdfChangePage = options?.onPdfChangePage;
     this.onChipEdit = options?.onChipEdit;
+    this.onOpenVaultNote = options?.onOpenVaultNote;
+    this.onOpenVaultImage = options?.onOpenVaultImage;
     this.onPasteRequested = options?.onPasteRequested;
     this.onExternalDrop = options?.onExternalDrop;
     this.onRenderMarkdown = options?.onRenderMarkdown;
@@ -1228,19 +1250,24 @@ export class SvgSceneRenderer {
 
     for (const edge of this.editor.diagram.edges) {
       const fromNode = nodeMap.get(edge.fromNodeId);
-      const toNode = nodeMap.get(edge.toNodeId);
-      if (!fromNode || !toNode) continue;
+      const toNode = edge.toNodeId ? nodeMap.get(edge.toNodeId) : undefined;
+      if (!fromNode || (!toNode && !edge.toPoint)) continue;
+
+      const targetX = toNode ? toNode.position.x : edge.toPoint!.x;
+      const targetY = toNode ? toNode.position.y : edge.toPoint!.y;
+      const targetW = toNode ? toNode.size.width : 0;
+      const targetH = toNode ? toNode.size.height : 0;
 
       if (visibleRect) {
-        const minX = Math.min(fromNode.position.x, toNode.position.x);
-        const minY = Math.min(fromNode.position.y, toNode.position.y);
+        const minX = Math.min(fromNode.position.x, targetX);
+        const minY = Math.min(fromNode.position.y, targetY);
         const maxX = Math.max(
           fromNode.position.x + fromNode.size.width,
-          toNode.position.x + toNode.size.width
+          targetX + targetW
         );
         const maxY = Math.max(
           fromNode.position.y + fromNode.size.height,
-          toNode.position.y + toNode.size.height
+          targetY + targetH
         );
         const edgeBounds = rectFromBounds(minX, minY, maxX - minX, maxY - minY);
         if (!intersects(visibleRect, edgeBounds)) {
@@ -1250,10 +1277,25 @@ export class SvgSceneRenderer {
 
       // Look up specific ports if defined
       const fromPort = fromNode.ports.find((p) => p.id === edge.fromPortId);
-      const toPort = toNode.ports.find((p) => p.id === edge.toPortId);
+      const toPort = toNode?.ports.find((p) => p.id === edge.toPortId);
 
       const fromSide = fromPort?.side ?? edge.fromSide;
       const toSide = toPort?.side ?? edge.toSide;
+
+      const targetBoundary = toNode
+        ? {
+            id: toNode.id,
+            position: toNode.position,
+            size: toNode.size,
+            side: toSide,
+            portOffset: toPort?.offset,
+            kind: toNode.kind,
+          }
+        : {
+            position: edge.toPoint!,
+            size: { width: 0, height: 0 },
+            side: toSide,
+          };
 
       // Calculate edge route (supports straight & orthogonal with obstacle avoidance)
       const routingResult = defaultRoutingService.route(
@@ -1265,14 +1307,7 @@ export class SvgSceneRenderer {
           portOffset: fromPort?.offset,
           kind: fromNode.kind,
         },
-        {
-          id: toNode.id,
-          position: toNode.position,
-          size: toNode.size,
-          side: toSide,
-          portOffset: toPort?.offset,
-          kind: toNode.kind,
-        },
+        targetBoundary,
         {
           routing: edge.routing,
           obstacles: visibleNodes,
@@ -2034,13 +2069,30 @@ export class SvgSceneRenderer {
       const edge = this.editor.diagram.edges.find((e) => e.id === edgeId);
       if (!edge) continue;
       const fromNode = this.editor.diagram.nodes.find((n) => n.id === edge.fromNodeId);
-      const toNode = this.editor.diagram.nodes.find((n) => n.id === edge.toNodeId);
-      if (!fromNode || !toNode) continue;
+      const toNode = edge.toNodeId
+        ? this.editor.diagram.nodes.find((n) => n.id === edge.toNodeId)
+        : undefined;
+      if (!fromNode || (!toNode && !edge.toPoint)) continue;
 
       const fromPort = fromNode.ports?.find((p) => p.id === edge.fromPortId);
-      const toPort = toNode.ports?.find((p) => p.id === edge.toPortId);
+      const toPort = toNode?.ports?.find((p) => p.id === edge.toPortId);
       const fromSide = fromPort?.side ?? edge.fromSide;
       const toSide = toPort?.side ?? edge.toSide;
+
+      const targetBoundary = toNode
+        ? {
+            id: toNode.id,
+            position: toNode.position,
+            size: toNode.size,
+            side: toSide,
+            portOffset: toPort?.offset,
+            kind: toNode.kind,
+          }
+        : {
+            position: edge.toPoint!,
+            size: { width: 0, height: 0 },
+            side: toSide,
+          };
 
       const routingResult = defaultRoutingService.route(
         {
@@ -2051,14 +2103,7 @@ export class SvgSceneRenderer {
           portOffset: fromPort?.offset,
           kind: fromNode.kind,
         },
-        {
-          id: toNode.id,
-          position: toNode.position,
-          size: toNode.size,
-          side: toSide,
-          portOffset: toPort?.offset,
-          kind: toNode.kind,
-        },
+        targetBoundary,
         {
           routing: edge.routing,
           manualWaypoints: edge.waypoints,
@@ -2175,6 +2220,28 @@ export class SvgSceneRenderer {
       }
       if (previewDash) {
         line.setAttribute("stroke-dasharray", previewDash);
+      }
+      this.interactionLayerEl.appendChild(line);
+    }
+
+    // Arrow attachment preview line (when popup is open)
+    if (this.arrowAttachmentState) {
+      const line = document.createElementNS(svgNS, "line");
+      line.setAttribute("x1", String(this.arrowAttachmentState.startPoint.x));
+      line.setAttribute("y1", String(this.arrowAttachmentState.startPoint.y));
+      line.setAttribute("x2", String(this.arrowAttachmentState.dropCanvasPoint.x));
+      line.setAttribute("y2", String(this.arrowAttachmentState.dropCanvasPoint.y));
+      line.setAttribute("class", "umlcanvas-edge-preview-line");
+      const activeKind = this.editor.activeEdgeKind ?? "uml.association";
+      const activeStyle = defaultEdgeStyleRegistry.get(activeKind);
+      const previewMarkerEnd =
+        this.editor.defaultMarkerEnd !== undefined
+          ? this.editor.defaultMarkerEnd === "none"
+            ? undefined
+            : this.normalizeMarkerId(this.editor.defaultMarkerEnd)
+          : activeStyle.markerEndId ?? "open-arrow";
+      if (previewMarkerEnd) {
+        line.setAttribute("marker-end", `url(#${previewMarkerEnd})`);
       }
       this.interactionLayerEl.appendChild(line);
     }
@@ -3511,6 +3578,7 @@ export class SvgSceneRenderer {
 
   private handleMouseUp(e: MouseEvent): void {
     const clientPoint = this.getClientCoords(e);
+    const canvasPoint = screenToCanvas(clientPoint, this.transform);
 
     if (this.dragMode.type === "freehand") {
       if (this.freehandPathEl) {
@@ -3774,10 +3842,29 @@ export class SvgSceneRenderer {
           kind: this.editor.activeEdgeKind,
           routing: this.editor.defaultRouting,
         });
+        this.dragMode = { type: "none" };
+        this.renderInteractions();
+        return;
       }
 
+      const edgeDrag = this.dragMode;
       this.dragMode = { type: "none" };
       this.renderInteractions();
+
+      const dx = edgeDrag.currentCanvasPoint.x - edgeDrag.startPoint.x;
+      const dy = edgeDrag.currentCanvasPoint.y - edgeDrag.startPoint.y;
+      const dist = Math.hypot(dx, dy);
+
+      if (dist >= 10) {
+        this.openArrowAttachmentPopup({
+          fromNodeId: edgeDrag.fromNodeId,
+          fromPortId: edgeDrag.fromPortId,
+          fromSide: edgeDrag.fromSide,
+          dropCanvasPoint: edgeDrag.currentCanvasPoint,
+          dropClientPoint: clientPoint,
+          startPoint: edgeDrag.startPoint,
+        });
+      }
       return;
     }
 
@@ -3802,6 +3889,14 @@ export class SvgSceneRenderer {
             nodeId: targetNodeId,
             portId: targetPortId,
             side: targetSide,
+          }
+        );
+      } else if (reconnectState.endpoint === "target") {
+        this.editor.reconnectEdge(
+          reconnectState.edgeId,
+          reconnectState.endpoint,
+          {
+            point: canvasPoint,
           }
         );
       }
@@ -3873,6 +3968,8 @@ export class SvgSceneRenderer {
 
   private handleDblClick(e: MouseEvent): void {
     if (this.isGrabMode) return;
+    const clientPoint = this.getClientCoords(e);
+    const canvasPoint = screenToCanvas(clientPoint, this.transform);
     const target = e.target as Element;
 
     if (
@@ -3888,6 +3985,29 @@ export class SvgSceneRenderer {
       const waypointIndex = parseInt(target.getAttribute("data-waypoint-index")!, 10);
       this.editor.removeEdgeWaypoint(edgeId, waypointIndex);
       return;
+    }
+
+    // Double-click on edge endpoint handle for dangling edges -> reopen attachment popup
+    if (target.classList.contains("umlcanvas-edge-endpoint-handle")) {
+      const edgeId = target.getAttribute("data-edge-id")!;
+      const endpoint = target.getAttribute("data-endpoint");
+      if (endpoint === "target") {
+        const edge = this.editor.diagram.edges.find((e) => e.id === edgeId);
+        if (edge && edge.toPoint && !edge.toNodeId) {
+          const fromNode = this.editor.diagram.nodes.find((n) => n.id === edge.fromNodeId);
+          if (fromNode) {
+            this.openArrowAttachmentPopup({
+              fromNodeId: edge.fromNodeId,
+              fromPortId: edge.fromPortId,
+              fromSide: edge.fromSide,
+              dropCanvasPoint: { ...edge.toPoint },
+              dropClientPoint: clientPoint,
+              startPoint: fromNode.position,
+            });
+            return;
+          }
+        }
+      }
     }
 
     // Double-click on resize handle -> auto-resize node (F-Obsidian-Notes-Scalability)
@@ -3996,8 +4116,6 @@ export class SvgSceneRenderer {
     }
 
     // Double-click empty canvas -> Add node
-    const clientPoint = this.getClientCoords(e);
-    const canvasPoint = screenToCanvas(clientPoint, this.transform);
     const newNode = this.editor.addNode({
       position: {
         x: Math.round(canvasPoint.x - 80),
@@ -5303,8 +5421,13 @@ export class SvgSceneRenderer {
       }
     }
 
-    // Escape: exit grab mode or freehand mode or deselect
+    // Escape: dismiss arrow attachment popup, exit grab mode or freehand mode or deselect
     if (e.key === "Escape") {
+      if (this.arrowAttachmentState) {
+        e.preventDefault();
+        this.dismissArrowAttachmentPopupToEmptySpace();
+        return;
+      }
       if (this.isGrabMode) {
         e.preventDefault();
         this.setGrabMode(false);
@@ -5451,7 +5574,228 @@ export class SvgSceneRenderer {
     return Math.round(Math.max(0.15, Math.min(1.0, bodyHeight / estHeight)) * 100) / 100;
   }
 
+  public canvasToScreenPoint(pt: Point): Point {
+    return canvasToScreen(pt, this.transform);
+  }
+
+  public openArrowAttachmentPopup(context: ArrowAttachmentContext): ArrowAttachmentPopup {
+    this.closeArrowAttachmentPopup();
+    this.arrowAttachmentState = context;
+    this.renderInteractions();
+
+    const screenPos = canvasToScreen(context.dropCanvasPoint, this.transform);
+
+    const popup = new ArrowAttachmentPopup({
+      container: this.container,
+      position: screenPos,
+      canvasPoint: context.dropCanvasPoint,
+      fromNodeId: context.fromNodeId,
+      fromPortId: context.fromPortId,
+      fromSide: context.fromSide,
+      startPoint: context.startPoint,
+      onSelect: (item) => {
+        this.attachShapeToArrow(item);
+      },
+      onDismissToEmpty: () => {
+        this.dismissArrowAttachmentPopupToEmptySpace();
+      },
+      onOpenVaultNote: this.onOpenVaultNote
+        ? () => {
+            this.onOpenVaultNote?.((file) => {
+              const item = DEFAULT_ATTACHMENT_ITEMS.find((it) => it.id === "vault-note")!;
+              const res = this.attachShapeToArrow(item);
+              if (res && file) {
+                this.editor.updateNode(res.node.id, {
+                  title: file.basename ?? file.name ?? "Note",
+                  metadata: { filePath: file.path },
+                  customData: { filePath: file.path },
+                });
+              }
+            });
+          }
+        : undefined,
+      onOpenVaultImage: this.onOpenVaultImage
+        ? () => {
+            this.onOpenVaultImage?.((img) => {
+              const item = DEFAULT_ATTACHMENT_ITEMS.find((it) => it.id === "image")!;
+              const res = this.attachShapeToArrow(item);
+              if (res && img) {
+                const src = typeof img === "string" ? img : img.path;
+                this.editor.updateNode(res.node.id, {
+                  metadata: { src },
+                  customData: { src },
+                });
+              }
+            });
+          }
+        : undefined,
+    });
+
+    popup.open();
+    this.arrowAttachmentPopup = popup;
+    return popup;
+  }
+
+  public closeArrowAttachmentPopup(): void {
+    if (this.arrowAttachmentPopup) {
+      const p = this.arrowAttachmentPopup;
+      this.arrowAttachmentPopup = null;
+      p.close();
+    }
+    this.arrowAttachmentState = null;
+    this.renderInteractions();
+  }
+
+  public isArrowAttachmentPopupOpen(): boolean {
+    return Boolean(this.arrowAttachmentPopup && this.arrowAttachmentPopup.isOpen);
+  }
+
+  public getArrowAttachmentPopup(): ArrowAttachmentPopup | null {
+    return this.arrowAttachmentPopup;
+  }
+
+  public dismissArrowAttachmentPopupToEmptySpace(): DiagramEdge | null {
+    if (!this.arrowAttachmentState) return null;
+    const ctx = this.arrowAttachmentState;
+    this.closeArrowAttachmentPopup();
+
+    const edge = this.editor.addEdge(ctx.fromNodeId, "", {
+      fromPortId: ctx.fromPortId,
+      fromSide: ctx.fromSide,
+      toPoint: ctx.dropCanvasPoint,
+      kind: this.editor.activeEdgeKind,
+      routing: this.editor.defaultRouting,
+    });
+
+    this.editor.clearSelection();
+    this.editor.selectEdge(edge.id, false);
+    this.render();
+    return edge;
+  }
+
+  public attachShapeToArrow(
+    itemOrId: ArrowAttachmentItem | string
+  ): { node: DiagramNode; edge: DiagramEdge } | null {
+    if (!this.arrowAttachmentState) return null;
+    const ctx = this.arrowAttachmentState;
+    this.closeArrowAttachmentPopup();
+
+    let item: ArrowAttachmentItem | undefined;
+    if (typeof itemOrId === "string") {
+      item = DEFAULT_ATTACHMENT_ITEMS.find((it) => it.id === itemOrId || it.kind === itemOrId);
+      if (!item) {
+        item = {
+          id: itemOrId,
+          kind: itemOrId,
+          label: itemOrId,
+          title: itemOrId,
+          description: "",
+          defaultSize: { width: 140, height: 80 },
+        };
+      }
+    } else {
+      item = itemOrId;
+    }
+
+    const dx = ctx.dropCanvasPoint.x - ctx.startPoint.x;
+    const dy = ctx.dropCanvasPoint.y - ctx.startPoint.y;
+    const w = item.defaultSize.width;
+    const h = item.defaultSize.height;
+
+    let toSide: Side;
+    let posX = ctx.dropCanvasPoint.x;
+    let posY = ctx.dropCanvasPoint.y;
+
+    if (Math.abs(dx) >= Math.abs(dy)) {
+      if (dx >= 0) {
+        toSide = "left";
+        posX = Math.round(ctx.dropCanvasPoint.x);
+        posY = Math.round(ctx.dropCanvasPoint.y - h / 2);
+      } else {
+        toSide = "right";
+        posX = Math.round(ctx.dropCanvasPoint.x - w);
+        posY = Math.round(ctx.dropCanvasPoint.y - h / 2);
+      }
+    } else {
+      if (dy >= 0) {
+        toSide = "top";
+        posX = Math.round(ctx.dropCanvasPoint.x - w / 2);
+        posY = Math.round(ctx.dropCanvasPoint.y);
+      } else {
+        toSide = "bottom";
+        posX = Math.round(ctx.dropCanvasPoint.x - w / 2);
+        posY = Math.round(ctx.dropCanvasPoint.y - h);
+      }
+    }
+
+    const nodeParams: any = {
+      kind: item.kind,
+      title: item.title,
+      position: { x: posX, y: posY },
+      size: { width: w, height: h },
+    };
+    if (item.color) {
+      nodeParams.style = { color: item.color };
+    }
+    if (item.customData) {
+      nodeParams.customData = JSON.parse(JSON.stringify(item.customData));
+    }
+
+    const newNode = this.editor.addNode(nodeParams);
+
+    const edge = this.editor.addEdge(ctx.fromNodeId, newNode.id, {
+      fromPortId: ctx.fromPortId,
+      fromSide: ctx.fromSide,
+      toSide,
+      kind: this.editor.activeEdgeKind,
+      routing: this.editor.defaultRouting,
+    });
+
+    if (item.id === "vault-note" && this.onOpenVaultNote) {
+      this.onOpenVaultNote((file) => {
+        if (file) {
+          this.editor.updateNode(newNode.id, {
+            title: file.basename ?? file.name ?? "Note",
+            metadata: { filePath: file.path },
+            customData: { filePath: file.path },
+          });
+        }
+      });
+    }
+
+    if (item.id === "image" && this.onOpenVaultImage) {
+      this.onOpenVaultImage((img) => {
+        if (img) {
+          const src = typeof img === "string" ? img : (img.src || img.path);
+          this.editor.updateNode(newNode.id, {
+            metadata: { src },
+            customData: { src },
+          });
+        }
+      });
+    }
+
+    this.editor.clearSelection();
+    this.editor.selectNode(newNode.id, false);
+    this.render();
+
+    // Start inline editor for instant typing!
+    if (item.kind === "generic.table") {
+      this.startInlineEditor(newNode, { row: 0, col: 0 });
+    } else if (
+      item.kind === "generic.rectangle" ||
+      item.kind === "generic.stickyNote" ||
+      item.kind === "generic.text" ||
+      item.kind === "uml.class"
+    ) {
+      this.startInlineEditor(newNode);
+    }
+
+    return { node: newNode, edge };
+  }
+
   destroy(): void {
+    this.closeArrowAttachmentPopup();
     this.cleanupInlineEditor();
 
     this.container.classList.remove("umlcanvas-moving");

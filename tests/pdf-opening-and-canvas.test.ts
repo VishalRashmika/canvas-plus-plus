@@ -1083,4 +1083,172 @@ describe("Open PDF Files Inside Canvas Tests", () => {
       }
     });
   });
+
+  describe("PDF Refresh Optimization & Canvas Drawing Efficiency", () => {
+    it("should preserve the PDF DOM element and iframe without refreshing when drawing a line or adding shapes", () => {
+      const pdfNode = editor.addNode({
+        kind: "generic.pdf",
+        title: "Paper.pdf",
+        position: { x: 50, y: 50 },
+        customData: {
+          filePath: "docs/Paper.pdf",
+          src: "app://local/docs/Paper.pdf",
+        },
+      });
+
+      // Initial render on canvas open
+      renderer.render();
+
+      const initialPdfGroup = container.querySelector(`[data-node-id="${pdfNode.id}"]`);
+      const initialIframe = initialPdfGroup?.querySelector(".umlcanvas-pdf-frame");
+      expect(initialPdfGroup).not.toBeNull();
+      expect(initialIframe).not.toBeNull();
+
+      // Track setAttribute calls on initialIframe to ensure src is not refreshed/reloaded
+      const srcAssignments: string[] = [];
+      const origSetAttribute = initialIframe!.setAttribute.bind(initialIframe);
+      initialIframe!.setAttribute = function (name: string, value: string) {
+        if (name === "src") {
+          srcAssignments.push(value);
+        }
+        origSetAttribute(name, value);
+      };
+
+      // Draw a new freehand line on the canvas
+      editor.addNode({
+        kind: "generic.freehand",
+        position: { x: 200, y: 200 },
+        size: { width: 100, height: 50 },
+        customData: {
+          pathData: "M 200 200 L 300 250",
+        },
+      });
+
+      // Re-render after drawing line
+      renderer.render();
+
+      // The PDF group and iframe must be the exact same DOM node instances (NOT destroyed and recreated)
+      const afterLinePdfGroup = container.querySelector(`[data-node-id="${pdfNode.id}"]`);
+      const afterLineIframe = afterLinePdfGroup?.querySelector(".umlcanvas-pdf-frame");
+
+      expect(afterLinePdfGroup).toBe(initialPdfGroup);
+      expect(afterLineIframe).toBe(initialIframe);
+
+      // Verify iframe.src was NOT reassigned (which would cause the PDF viewer to reload)
+      expect(srcAssignments.length).toBe(0);
+
+      // Draw another line or edge
+      editor.addEdge(pdfNode.id, "generic-node-other");
+      renderer.render();
+
+      const afterEdgePdfGroup = container.querySelector(`[data-node-id="${pdfNode.id}"]`);
+      const afterEdgeIframe = afterEdgePdfGroup?.querySelector(".umlcanvas-pdf-frame");
+      expect(afterEdgePdfGroup).toBe(initialPdfGroup);
+      expect(afterEdgeIframe).toBe(initialIframe);
+      expect(srcAssignments.length).toBe(0);
+    });
+
+    it("should update PDF position and dimensions in place without recreating iframe during move or resize", () => {
+      const pdfNode = editor.addNode({
+        kind: "generic.pdf",
+        title: "Document",
+        position: { x: 60, y: 80 },
+        size: { width: 340, height: 440 },
+        customData: {
+          src: "app://local/docs/Document.pdf",
+        },
+      });
+
+      renderer.render();
+
+      const initialPdfGroup = container.querySelector(`[data-node-id="${pdfNode.id}"]`);
+      const initialIframe = initialPdfGroup?.querySelector(".umlcanvas-pdf-frame");
+
+      // Move PDF node
+      pdfNode.position = { x: 150, y: 200 };
+      renderer.render();
+
+      const afterMoveGroup = container.querySelector(`[data-node-id="${pdfNode.id}"]`);
+      const afterMoveIframe = afterMoveGroup?.querySelector(".umlcanvas-pdf-frame");
+
+      expect(afterMoveGroup).toBe(initialPdfGroup);
+      expect(afterMoveIframe).toBe(initialIframe);
+      expect(afterMoveGroup?.getAttribute("transform")).toBe("translate(150, 200)");
+
+      // Resize PDF node
+      pdfNode.size = { width: 400, height: 500 };
+      renderer.render();
+
+      const afterResizeGroup = container.querySelector(`[data-node-id="${pdfNode.id}"]`);
+      const afterResizeIframe = afterResizeGroup?.querySelector(".umlcanvas-pdf-frame");
+
+      expect(afterResizeGroup).toBe(initialPdfGroup);
+      expect(afterResizeIframe).toBe(initialIframe);
+
+      const card = afterResizeGroup?.querySelector(".umlcanvas-pdf-card");
+      expect(card?.getAttribute("width")).toBe("400");
+      expect(card?.getAttribute("height")).toBe("500");
+    });
+
+    it("should update iframe src only when changing the PDF document or target page", () => {
+      const pdfNode = editor.addNode({
+        kind: "generic.pdf",
+        title: "Report",
+        position: { x: 10, y: 10 },
+        customData: {
+          filePath: "docs/Report.pdf",
+          src: "app://local/docs/Report.pdf",
+          subpath: "#page=1",
+        },
+      });
+
+      renderer.render();
+
+      const iframe = container.querySelector(".umlcanvas-pdf-frame");
+      expect(iframe?.getAttribute("src")).toBe("app://local/docs/Report.pdf#page=1");
+
+      // Update target page to page 10
+      pdfNode.customData = { ...pdfNode.customData, subpath: "#page=10" };
+      renderer.render();
+
+      expect(iframe?.getAttribute("src")).toBe("app://local/docs/Report.pdf#page=10");
+
+      // Change document to manual.pdf
+      pdfNode.customData = { ...pdfNode.customData, src: "app://local/docs/Manual.pdf", subpath: "" };
+      renderer.render();
+
+      expect(iframe?.getAttribute("src")).toBe("app://local/docs/Manual.pdf");
+    });
+
+    it("should recreate renderer and reload PDF fresh when opening canvas after closing", () => {
+      const pdfNode = editor.addNode({
+        kind: "generic.pdf",
+        title: "Doc",
+        position: { x: 20, y: 20 },
+        customData: {
+          src: "app://local/docs/Doc.pdf",
+        },
+      });
+
+      renderer.render();
+      const firstIframe = container.querySelector(".umlcanvas-pdf-frame");
+      expect(firstIframe).not.toBeNull();
+
+      // Simulate closing canvas: destroy renderer and empty container
+      renderer.destroy();
+      container.empty();
+
+      expect(container.querySelector(".umlcanvas-pdf-frame")).toBeNull();
+
+      // Simulate opening canvas after closing: create new renderer instance
+      const newRenderer = new SvgSceneRenderer(container as any, editor);
+      newRenderer.render();
+
+      const reopenedIframe = container.querySelector(".umlcanvas-pdf-frame");
+      expect(reopenedIframe).not.toBeNull();
+      expect(reopenedIframe).not.toBe(firstIframe);
+      expect(reopenedIframe?.getAttribute("src")).toBe("app://local/docs/Doc.pdf");
+      newRenderer.destroy();
+    });
+  });
 });

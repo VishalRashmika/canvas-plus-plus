@@ -275,6 +275,9 @@ export class UmlCanvasView extends TextFileView {
 
     this.editor = new DiagramEditor(diagram);
 
+    // Resolve resource paths for vault PDFs and images before initial render
+    this.resolveVaultResourcePaths();
+
     const settings = this.plugin?.settings;
 
     // Setup debounced autosave via Obsidian's requestSave

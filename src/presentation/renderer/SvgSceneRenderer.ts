@@ -6,7 +6,7 @@ import { Group } from "../../domain/entities/Group";
 import { Point, point } from "../../domain/value-objects/Point";
 import { Rect, Size, rect, rectFromBounds, intersects, contains, center } from "../../domain/value-objects/Rect";
 import { Side } from "../../domain/types";
-import { ShapeRegistry, defaultShapeRegistry, getTableDataFromNode } from "./ShapeRegistry";
+import { ShapeRegistry, defaultShapeRegistry, getTableDataFromNode, safeCreateEl, safeCreateDiv } from "./ShapeRegistry";
 import {
   estimateMarkdownContentHeight,
   wrapTextToLines,
@@ -1466,13 +1466,56 @@ export class SvgSceneRenderer {
     }
   }
 
+  private safeRemove(el: Element | null | undefined): void {
+    if (!el) return;
+    if (typeof el.remove === "function") {
+      el.remove();
+    } else if (el.parentElement && typeof (el.parentElement as any).removeChild === "function") {
+      el.parentElement.removeChild(el);
+    }
+  }
+
   private renderNodes(): void {
     const svgNS = "http://www.w3.org/2000/svg";
-    this.nodesLayerEl.textContent = "";
 
     const visibleRect = this.isVirtualizationActive()
       ? this.getVisibleCanvasRect()
       : null;
+
+    const diagramNodeMap = new Map<string, DiagramNode>(
+      this.editor.diagram.nodes.map((n) => [n.id, n])
+    );
+    const existingChildren = Array.from(this.nodesLayerEl.children ?? []) as SVGGElement[];
+    const existingNodeMap = new Map<string, SVGGElement>();
+
+    for (const child of existingChildren) {
+      const nodeId = child.getAttribute("data-node-id");
+      if (nodeId) {
+        existingNodeMap.set(nodeId, child);
+      } else {
+        this.safeRemove(child);
+      }
+    }
+
+    // Clean up DOM:
+    // Remove nodes that are no longer in the diagram, or are hidden/virtualized out.
+    // Non-PDF nodes are removed so they can be freshly rendered.
+    // PDF nodes are kept attached in the DOM so their embedded iframe is NOT reloaded or refreshed.
+    for (const [nodeId, childEl] of existingNodeMap.entries()) {
+      const node = diagramNodeMap.get(nodeId);
+      const isVisible =
+        node &&
+        this.editor.isNodeVisible(nodeId) &&
+        (!visibleRect || intersects(visibleRect, rect(node.position, node.size)));
+
+      if (!node || !isVisible) {
+        this.safeRemove(childEl);
+        existingNodeMap.delete(nodeId);
+      } else if (node.kind !== "generic.pdf") {
+        this.safeRemove(childEl);
+        existingNodeMap.delete(nodeId);
+      }
+    }
 
     for (const node of this.editor.diagram.nodes) {
       if (!this.editor.isNodeVisible(node.id)) {
@@ -1483,144 +1526,429 @@ export class SvgSceneRenderer {
         continue;
       }
 
-      const nodeGroup = document.createElementNS(svgNS, "g");
-      nodeGroup.setAttribute("class", "umlcanvas-node");
-      nodeGroup.setAttribute("data-node-id", node.id);
-      nodeGroup.setAttribute(
-        "transform",
-        `translate(${node.position.x}, ${node.position.y})`
-      );
-
-      const isSelected = this.editor.isNodeSelected(node.id);
-      const isLocked = this.editor.isNodeLocked(node.id);
-      if (isLocked) {
-        nodeGroup.classList.add("umlcanvas-node-locked");
-      }
-      if (this.editingNodeId === node.id) {
-        nodeGroup.classList.add("umlcanvas-node-editing");
+      if (node.kind === "generic.pdf") {
+        const existingPdfGroup = existingNodeMap.get(node.id);
+        if (existingPdfGroup) {
+          this.updateExistingPdfNode(existingPdfGroup, node, svgNS);
+          continue;
+        }
       }
 
-      if (node.style?.color) {
-        nodeGroup.setAttribute("data-color", node.style.color);
-        const resolvedColor = resolveCanvasColor(node.style.color);
-        if (resolvedColor) {
-          nodeGroup.setCssProps({ "--canvas-color": resolvedColor });
-        }
-        if (isCanvasColorPreset(node.style.color)) {
-          nodeGroup.classList.add(`is-color-${node.style.color}`);
-        } else {
-          nodeGroup.classList.add("has-custom-color");
-        }
-      } else if (node.style?.strokeColor) {
-        nodeGroup.setAttribute("data-color", node.style.strokeColor);
-        nodeGroup.setCssProps({ "--canvas-color": node.style.strokeColor });
+      const nodeGroup = this.renderNodeGroup(node, svgNS);
+      this.nodesLayerEl.appendChild(nodeGroup);
+    }
+  }
+
+  private renderNodeGroup(node: DiagramNode, svgNS: string): SVGGElement {
+    const nodeGroup = document.createElementNS(svgNS, "g") as SVGGElement;
+    nodeGroup.setAttribute("class", "umlcanvas-node");
+    nodeGroup.setAttribute("data-node-id", node.id);
+    nodeGroup.setAttribute(
+      "transform",
+      `translate(${node.position.x}, ${node.position.y})`
+    );
+
+    const isSelected = this.editor.isNodeSelected(node.id);
+    const isLocked = this.editor.isNodeLocked(node.id);
+    if (isLocked) {
+      nodeGroup.classList.add("umlcanvas-node-locked");
+    }
+    if (this.editingNodeId === node.id) {
+      nodeGroup.classList.add("umlcanvas-node-editing");
+    }
+
+    if (node.style?.color) {
+      nodeGroup.setAttribute("data-color", node.style.color);
+      const resolvedColor = resolveCanvasColor(node.style.color);
+      if (resolvedColor) {
+        (nodeGroup as any).setCssProps?.({ "--canvas-color": resolvedColor });
+      }
+      if (isCanvasColorPreset(node.style.color)) {
+        nodeGroup.classList.add(`is-color-${node.style.color}`);
+      } else {
         nodeGroup.classList.add("has-custom-color");
       }
+    } else if (node.style?.strokeColor) {
+      nodeGroup.setAttribute("data-color", node.style.strokeColor);
+      (nodeGroup as any).setCssProps?.({ "--canvas-color": node.style.strokeColor });
+      nodeGroup.classList.add("has-custom-color");
+    }
 
-      // Transparent hitbox covering node boundary for reliable grabbing & moving
-      // Note: generic.freehand uses a stroked path hitbox so empty space inside the bounding box can be clicked through and deselected
-      if (node.kind !== "generic.freehand") {
-        const hitbox = document.createElementNS(svgNS, "rect");
-        hitbox.setAttribute("x", "0");
-        hitbox.setAttribute("y", "0");
-        hitbox.setAttribute("width", String(node.size.width));
-        hitbox.setAttribute("height", String(node.size.height));
-        hitbox.setAttribute("fill", "transparent");
-        hitbox.setAttribute("class", "umlcanvas-node-hitbox");
-        nodeGroup.appendChild(hitbox);
-      }
+    // Transparent hitbox covering node boundary for reliable grabbing & moving
+    // Note: generic.freehand uses a stroked path hitbox so empty space inside the bounding box can be clicked through and deselected
+    if (node.kind !== "generic.freehand") {
+      const hitbox = document.createElementNS(svgNS, "rect");
+      hitbox.setAttribute("x", "0");
+      hitbox.setAttribute("y", "0");
+      hitbox.setAttribute("width", String(node.size.width));
+      hitbox.setAttribute("height", String(node.size.height));
+      hitbox.setAttribute("fill", "transparent");
+      hitbox.setAttribute("class", "umlcanvas-node-hitbox");
+      nodeGroup.appendChild(hitbox);
+    }
 
-      const shapeDef = this.shapeRegistry.get(node.kind);
-      const renderedShape = shapeDef.renderSvg(node, { isSelected });
-      nodeGroup.appendChild(renderedShape);
+    const shapeDef = this.shapeRegistry.get(node.kind);
+    const renderedShape = shapeDef.renderSvg(node, { isSelected });
+    nodeGroup.appendChild(renderedShape);
 
-      // Render markdown for obsidian note embeds
-      if (node.kind === "obsidian.note" || (node.metadata?.filePath && node.kind !== "generic.image" && node.kind !== "generic.pdf")) {
-        const bodyEl = renderedShape.querySelector<HTMLElement>(
-          ".umlcanvas-obsidian-note-body"
-        );
-        if (bodyEl && this.onRenderMarkdown) {
-          const filePath =
-            (node.metadata?.filePath as string) ||
-            (node.customData?.filePath as string) ||
-            "";
-          const markdown =
-            (node.customData?.content as string) ||
-            (node.customData?.snippet as string) ||
-            "";
-          if (markdown) {
-            const renderPromise = this.onRenderMarkdown(markdown, bodyEl, filePath);
-            const onComplete = () => {
-              if (node.customData?.scaleMode === "fit" && bodyEl.scrollHeight > 0) {
-                const actualH = bodyEl.scrollHeight;
-                const prevH = typeof node.customData.contentHeight === "number" ? node.customData.contentHeight : 0;
-                if (!prevH || Math.abs(prevH - actualH) > 30) {
-                  node.customData.contentHeight = actualH;
-                  const scaler = renderedShape.querySelector<HTMLElement>(".umlcanvas-obsidian-note-scale-wrapper");
-                  if (scaler) {
-                    const bodyH = Math.max(10, node.size.height - 32);
-                    const newScale = Math.round(Math.max(0.15, Math.min(1.0, bodyH / actualH)) * 100) / 100;
-                    scaler.style.transform = `scale(${newScale})`;
-                    scaler.style.width = `${Math.round((100 / newScale) * 100) / 100}%`;
-                    scaler.style.minHeight = `${Math.round((bodyH / newScale) * 100) / 100}px`;
-                    renderedShape.setAttribute("data-scale", String(newScale));
-                    const badge = renderedShape.querySelector<SVGTextElement>(".umlcanvas-obsidian-note-scale-badge");
-                    if (badge) badge.textContent = `${Math.round(newScale * 100)}%`;
-                  }
+    // Render markdown for obsidian note embeds
+    if (node.kind === "obsidian.note" || (node.metadata?.filePath && node.kind !== "generic.image" && node.kind !== "generic.pdf")) {
+      const bodyEl = renderedShape.querySelector<HTMLElement>(
+        ".umlcanvas-obsidian-note-body"
+      );
+      if (bodyEl && this.onRenderMarkdown) {
+        const filePath =
+          (node.metadata?.filePath as string) ||
+          (node.customData?.filePath as string) ||
+          "";
+        const markdown =
+          (node.customData?.content as string) ||
+          (node.customData?.snippet as string) ||
+          "";
+        if (markdown) {
+          const renderPromise = this.onRenderMarkdown(markdown, bodyEl, filePath);
+          const onComplete = () => {
+            if (node.customData?.scaleMode === "fit" && bodyEl.scrollHeight > 0) {
+              const actualH = bodyEl.scrollHeight;
+              const prevH = typeof node.customData.contentHeight === "number" ? node.customData.contentHeight : 0;
+              if (!prevH || Math.abs(prevH - actualH) > 30) {
+                node.customData.contentHeight = actualH;
+                const scaler = renderedShape.querySelector<HTMLElement>(".umlcanvas-obsidian-note-scale-wrapper");
+                if (scaler) {
+                  const bodyH = Math.max(10, node.size.height - 32);
+                  const newScale = Math.round(Math.max(0.15, Math.min(1.0, bodyH / actualH)) * 100) / 100;
+                  scaler.style.transform = `scale(${newScale})`;
+                  scaler.style.width = `${Math.round((100 / newScale) * 100) / 100}%`;
+                  scaler.style.minHeight = `${Math.round((bodyH / newScale) * 100) / 100}px`;
+                  renderedShape.setAttribute("data-scale", String(newScale));
+                  const badge = renderedShape.querySelector<SVGTextElement>(".umlcanvas-obsidian-note-scale-badge");
+                  if (badge) badge.textContent = `${Math.round(newScale * 100)}%`;
                 }
               }
-            };
-            if (renderPromise instanceof Promise) {
-              void renderPromise.then(onComplete);
-            } else {
-              onComplete();
             }
-          }
-        }
-      }
-
-      // Render ports & port handles (F-007, F-031)
-      const ports = shapeDef.getPorts(node);
-      for (const port of ports) {
-        const pt = getSidePoint({ x: 0, y: 0 }, node.size, port.side, port.offset, node.kind);
-        const handle = document.createElementNS(svgNS, "circle");
-        handle.setAttribute("cx", String(pt.x));
-        handle.setAttribute("cy", String(pt.y));
-        handle.setAttribute("r", "5");
-        handle.setAttribute("class", "umlcanvas-port-handle");
-        handle.setAttribute("data-port-id", port.id);
-        handle.setAttribute("data-side", port.side);
-        nodeGroup.appendChild(handle);
-
-        // Named port label (F-031)
-        if (port.name && !["top", "right", "bottom", "left"].includes(port.name)) {
-          const pLabel = document.createElementNS(svgNS, "text");
-          let lx = pt.x;
-          let ly = pt.y;
-          let anchor = "middle";
-
-          if (port.side === "left") {
-            lx += 8;
-            anchor = "start";
-          } else if (port.side === "right") {
-            lx -= 8;
-            anchor = "end";
-          } else if (port.side === "top") {
-            ly += 12;
+          };
+          if (renderPromise instanceof Promise) {
+            void renderPromise.then(onComplete);
           } else {
-            ly -= 6;
+            onComplete();
           }
-
-          pLabel.setAttribute("x", String(lx));
-          pLabel.setAttribute("y", String(ly));
-          pLabel.setAttribute("text-anchor", anchor);
-          pLabel.setAttribute("class", "umlcanvas-port-label");
-          pLabel.textContent = port.name;
-          nodeGroup.appendChild(pLabel);
         }
       }
+    }
 
-      this.nodesLayerEl.appendChild(nodeGroup);
+    // Render ports & port handles (F-007, F-031)
+    const ports = shapeDef.getPorts(node);
+    for (const port of ports) {
+      const pt = getSidePoint({ x: 0, y: 0 }, node.size, port.side, port.offset, node.kind);
+      const handle = document.createElementNS(svgNS, "circle");
+      handle.setAttribute("cx", String(pt.x));
+      handle.setAttribute("cy", String(pt.y));
+      handle.setAttribute("r", "5");
+      handle.setAttribute("class", "umlcanvas-port-handle");
+      handle.setAttribute("data-port-id", port.id);
+      handle.setAttribute("data-side", port.side);
+      nodeGroup.appendChild(handle);
+
+      // Named port label (F-031)
+      if (port.name && !["top", "right", "bottom", "left"].includes(port.name)) {
+        const pLabel = document.createElementNS(svgNS, "text");
+        let lx = pt.x;
+        let ly = pt.y;
+        let anchor = "middle";
+
+        if (port.side === "left") {
+          lx += 8;
+          anchor = "start";
+        } else if (port.side === "right") {
+          lx -= 8;
+          anchor = "end";
+        } else if (port.side === "top") {
+          ly += 12;
+        } else {
+          ly -= 6;
+        }
+
+        pLabel.setAttribute("x", String(lx));
+        pLabel.setAttribute("y", String(ly));
+        pLabel.setAttribute("text-anchor", anchor);
+        pLabel.setAttribute("class", "umlcanvas-port-label");
+        pLabel.textContent = port.name;
+        nodeGroup.appendChild(pLabel);
+      }
+    }
+
+    return nodeGroup;
+  }
+
+  private updateExistingPdfNode(
+    nodeGroup: SVGGElement,
+    node: DiagramNode,
+    svgNS: string
+  ): void {
+    const isSelected = this.editor.isNodeSelected(node.id);
+    const isLocked = this.editor.isNodeLocked(node.id);
+
+    // 1. Position transform
+    nodeGroup.setAttribute(
+      "transform",
+      `translate(${node.position.x}, ${node.position.y})`
+    );
+
+    // 2. Locked & Editing classes
+    if (isLocked) {
+      nodeGroup.classList.add("umlcanvas-node-locked");
+    } else {
+      nodeGroup.classList.remove("umlcanvas-node-locked");
+    }
+    if (this.editingNodeId === node.id) {
+      nodeGroup.classList.add("umlcanvas-node-editing");
+    } else {
+      nodeGroup.classList.remove("umlcanvas-node-editing");
+    }
+
+    // 3. Styling / color
+    if (node.style?.color) {
+      nodeGroup.setAttribute("data-color", node.style.color);
+      const resolvedColor = resolveCanvasColor(node.style.color);
+      if (resolvedColor) {
+        (nodeGroup as any).setCssProps?.({ "--canvas-color": resolvedColor });
+      }
+      if (isCanvasColorPreset(node.style.color)) {
+        nodeGroup.classList.add(`is-color-${node.style.color}`);
+      } else {
+        nodeGroup.classList.add("has-custom-color");
+      }
+    } else if (node.style?.strokeColor) {
+      nodeGroup.setAttribute("data-color", node.style.strokeColor);
+      (nodeGroup as any).setCssProps?.({ "--canvas-color": node.style.strokeColor });
+      nodeGroup.classList.add("has-custom-color");
+    } else {
+      nodeGroup.classList.remove("has-custom-color");
+    }
+
+    const w = node.size.width;
+    const h = node.size.height;
+    const r = 8;
+    const headerH = 32;
+    const bodyH = Math.max(10, h - headerH);
+
+    // 4. Hitbox
+    const hitbox = nodeGroup.querySelector<SVGRectElement>(".umlcanvas-node-hitbox");
+    if (hitbox) {
+      hitbox.setAttribute("width", String(w));
+      hitbox.setAttribute("height", String(h));
+    }
+
+    // 5. Card container / background rect
+    const bgRect = nodeGroup.querySelector<SVGRectElement>(".umlcanvas-pdf-card");
+    if (bgRect) {
+      bgRect.setAttribute("width", String(w));
+      bgRect.setAttribute("height", String(h));
+      if (isSelected) {
+        bgRect.classList.add("umlcanvas-node-selected");
+      } else {
+        bgRect.classList.remove("umlcanvas-node-selected");
+      }
+      if (node.style?.fillColor) {
+        bgRect.setAttribute("fill", node.style.fillColor);
+      }
+      if (node.style?.strokeColor) {
+        bgRect.setAttribute("stroke", node.style.strokeColor);
+      }
+    }
+
+    // 6. Header background path
+    const headerRect = nodeGroup.querySelector<SVGPathElement>(".umlcanvas-pdf-header-bg");
+    if (headerRect) {
+      headerRect.setAttribute(
+        "d",
+        `M 0 ${r} A ${r} ${r} 0 0 1 ${r} 0 L ${w - r} 0 A ${r} ${r} 0 0 1 ${w} ${r} L ${w} ${headerH} L 0 ${headerH} Z`
+      );
+    }
+
+    // 7. Header separator line
+    const sepLine = nodeGroup.querySelector<SVGLineElement>(".umlcanvas-pdf-header-sep");
+    if (sepLine) {
+      sepLine.setAttribute("x2", String(w));
+    }
+
+    // 8. Title text
+    const rawTitle = node.labels[0]?.text || (node.metadata?.filePath as string) || "PDF Document";
+    const title = rawTitle.replace(/\.pdf$/i, "");
+    const subpath =
+      (node.metadata?.subpath as string) || (node.customData?.subpath as string) || "";
+    const rightMargin = subpath ? (w >= 240 ? 80 : 35) : 30;
+    const maxChars = Math.max(8, Math.floor((w - rightMargin) / 7.5));
+    const titleText = nodeGroup.querySelector<SVGTextElement>(".umlcanvas-pdf-title");
+    if (titleText) {
+      titleText.textContent = title.length > maxChars ? `${title.slice(0, maxChars - 2)}…` : title;
+      titleText.setAttribute("title", rawTitle);
+      applyFontToSvgElement(titleText, getNodeFontStyle(node));
+    }
+
+    // 9. Subpath / Page badge
+    let pageBadge = nodeGroup.querySelector(".umlcanvas-pdf-page-badge") as SVGTextElement | null;
+    if (subpath && w >= 220) {
+      const pageMatch = subpath.match(/page=(\d+)/i);
+      const badgeText = pageMatch ? `p. ${pageMatch[1]}` : subpath.replace(/^#/, "");
+      if (!pageBadge) {
+        pageBadge = document.createElementNS(svgNS, "text") as unknown as SVGTextElement;
+        pageBadge.setAttribute("class", "umlcanvas-pdf-page-badge");
+        const shape = nodeGroup.querySelector(".umlcanvas-shape-pdf");
+        if (shape && pageBadge) {
+          shape.appendChild(pageBadge);
+        }
+      }
+      if (pageBadge) {
+        pageBadge.setAttribute("x", String(w - 38));
+        pageBadge.setAttribute("y", "21");
+        pageBadge.textContent = badgeText;
+        pageBadge.setAttribute("title", `Target: ${subpath}`);
+      }
+    } else if (pageBadge) {
+      this.safeRemove(pageBadge);
+    }
+
+    // 10. Clickable Open Icon in Header (↗)
+    const openIcon = nodeGroup.querySelector<SVGTextElement>(".umlcanvas-pdf-open-btn");
+    if (openIcon) {
+      openIcon.setAttribute("x", String(w - 20));
+      const pdfFilePath =
+        (node.metadata?.filePath as string) || (node.customData?.filePath as string) || "";
+      const targetPathWithSubpath = subpath
+        ? `${pdfFilePath}${subpath.startsWith("#") ? subpath : "#" + subpath}`
+        : pdfFilePath;
+      openIcon.setAttribute("data-file-path", targetPathWithSubpath);
+    }
+
+    // 11. ForeignObject dimensions
+    const foreign = nodeGroup.querySelector<SVGForeignObjectElement>(".umlcanvas-pdf-foreign");
+    if (foreign) {
+      foreign.setAttribute("width", String(w));
+      foreign.setAttribute("height", String(bodyH));
+    }
+
+    // 12. Fallback SVG elements
+    const pageW = Math.round(w * 0.72);
+    const pageH = Math.round(bodyH * 0.78);
+    const pageX = Math.round((w - pageW) / 2);
+    const pageY = Math.round(headerH + (bodyH - pageH) / 2);
+
+    const fallbackPage = nodeGroup.querySelector<SVGRectElement>(".umlcanvas-pdf-fallback-page");
+    if (fallbackPage) {
+      fallbackPage.setAttribute("x", String(pageX));
+      fallbackPage.setAttribute("y", String(pageY));
+      fallbackPage.setAttribute("width", String(pageW));
+      fallbackPage.setAttribute("height", String(pageH));
+    }
+    const fallbackTitle = nodeGroup.querySelector<SVGTextElement>(".umlcanvas-pdf-fallback-text");
+    if (fallbackTitle) {
+      fallbackTitle.setAttribute("x", String(w / 2));
+      fallbackTitle.setAttribute("y", String(pageY + pageH / 2));
+      fallbackTitle.textContent = `${title}.pdf`;
+    }
+
+    // 13. Rich HTML PDF Body via foreignObject (loads PDF via iframe or embed)
+    // ONLY update iframe src if target URL has ACTUALLY changed.
+    // If it hasn't changed, never touch or reassign src to prevent reloading the PDF!
+    const src =
+      (node.customData?.src as string) ||
+      (node.metadata?.src as string) ||
+      (node.customData?.filePath as string) ||
+      (node.metadata?.filePath as string) ||
+      "";
+
+    let fullSrc = src;
+    if (src && subpath) {
+      if (src.includes("#")) {
+        fullSrc = `${src.split("#")[0]}${subpath.startsWith("#") ? subpath : "#" + subpath}`;
+      } else {
+        fullSrc = `${src}${subpath.startsWith("#") ? subpath : "#" + subpath}`;
+      }
+    }
+
+    const iframe = nodeGroup.querySelector<HTMLIFrameElement>(".umlcanvas-pdf-frame");
+    const placeholder = nodeGroup.querySelector<HTMLElement>(".umlcanvas-pdf-placeholder");
+
+    if (fullSrc) {
+      if (iframe) {
+        const currentSrc = iframe.getAttribute("data-pdf-src") || iframe.getAttribute("src");
+        if (currentSrc !== fullSrc) {
+          iframe.setAttribute("data-pdf-src", fullSrc);
+          iframe.setAttribute("src", fullSrc);
+        }
+      } else {
+        const containerDiv = nodeGroup.querySelector<HTMLElement>(".umlcanvas-pdf-container");
+        if (containerDiv) {
+          if (placeholder) this.safeRemove(placeholder);
+          const newIframe = safeCreateEl("iframe", {
+            cls: "umlcanvas-pdf-frame",
+            attr: {
+              src: fullSrc,
+              type: "application/pdf",
+              frameborder: "0",
+              title: title || "PDF Document",
+              "data-pdf-src": fullSrc,
+            },
+          });
+          containerDiv.appendChild(newIframe);
+        }
+      }
+    } else if (!iframe && !placeholder) {
+      const containerDiv = nodeGroup.querySelector<HTMLElement>(".umlcanvas-pdf-container");
+      if (containerDiv) {
+        const newPlaceholder = safeCreateDiv({
+          cls: "umlcanvas-pdf-placeholder",
+          text: "PDF Document (drop or select file)",
+        });
+        containerDiv.appendChild(newPlaceholder);
+      }
+    }
+
+    // 14. Port handles: recreate port handles if size changed
+    const oldHandles = Array.from(nodeGroup.querySelectorAll(".umlcanvas-port-handle"));
+    for (const p of oldHandles) this.safeRemove(p);
+    const oldLabels = Array.from(nodeGroup.querySelectorAll(".umlcanvas-port-label"));
+    for (const p of oldLabels) this.safeRemove(p);
+
+    const shapeDef = this.shapeRegistry.get(node.kind);
+    const ports = shapeDef.getPorts(node);
+    for (const port of ports) {
+      const pt = getSidePoint({ x: 0, y: 0 }, node.size, port.side, port.offset, node.kind);
+      const handle = document.createElementNS(svgNS, "circle");
+      handle.setAttribute("cx", String(pt.x));
+      handle.setAttribute("cy", String(pt.y));
+      handle.setAttribute("r", "5");
+      handle.setAttribute("class", "umlcanvas-port-handle");
+      handle.setAttribute("data-port-id", port.id);
+      handle.setAttribute("data-side", port.side);
+      nodeGroup.appendChild(handle);
+
+      if (port.name && !["top", "right", "bottom", "left"].includes(port.name)) {
+        const pLabel = document.createElementNS(svgNS, "text");
+        let lx = pt.x;
+        let ly = pt.y;
+        let anchor = "middle";
+
+        if (port.side === "left") {
+          lx += 8;
+          anchor = "start";
+        } else if (port.side === "right") {
+          lx -= 8;
+          anchor = "end";
+        } else if (port.side === "top") {
+          ly += 12;
+        } else {
+          ly -= 6;
+        }
+
+        pLabel.setAttribute("x", String(lx));
+        pLabel.setAttribute("y", String(ly));
+        pLabel.setAttribute("text-anchor", anchor);
+        pLabel.setAttribute("class", "umlcanvas-port-label");
+        pLabel.textContent = port.name;
+        nodeGroup.appendChild(pLabel);
+      }
     }
   }
 

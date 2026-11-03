@@ -1395,6 +1395,7 @@ export class ShapeRegistry {
               type: "application/pdf",
               frameborder: "0",
               title: title || "PDF Document",
+              "data-pdf-src": fullSrc,
             },
           });
           containerDiv.appendChild(iframe);
@@ -4580,7 +4581,7 @@ export function calculateNoteContentScale(
   };
 }
 
-function safeCreateDiv(options?: { cls?: string; text?: string; attr?: Record<string, string | number | boolean> }): HTMLDivElement {
+export function safeCreateDiv(options?: { cls?: string; text?: string; attr?: Record<string, string | number | boolean> }): HTMLDivElement {
   if (typeof createDiv === "function") {
     return createDiv(options);
   }
@@ -4610,7 +4611,7 @@ function safeCreateDiv(options?: { cls?: string; text?: string; attr?: Record<st
   } as unknown as HTMLDivElement;
 }
 
-function safeCreateEl(tag: string, options?: { cls?: string; attr?: Record<string, string> }): HTMLElement {
+export function safeCreateEl(tag: string, options?: { cls?: string; attr?: Record<string, string> }): HTMLElement {
   if (typeof document !== "undefined") {
     const el = document.createElement(tag);
     if (options?.cls) {

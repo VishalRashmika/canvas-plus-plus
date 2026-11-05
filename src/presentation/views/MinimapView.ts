@@ -51,7 +51,24 @@ export class MinimapView {
     this.setVisible(!this.isVisible);
   }
 
-  update(): void {
+  updateViewport(): void {
+    if (!this.isVisible) return;
+    const transform = this.renderer.currentTransform;
+    const viewW = this.renderer.containerWidth;
+    const viewH = this.renderer.containerHeight;
+
+    const camX = -transform.panX / transform.zoom;
+    const camY = -transform.panY / transform.zoom;
+    const camW = viewW / transform.zoom;
+    const camH = viewH / transform.zoom;
+
+    this.viewportIndicator.setAttribute("x", String(camX));
+    this.viewportIndicator.setAttribute("y", String(camY));
+    this.viewportIndicator.setAttribute("width", String(camW));
+    this.viewportIndicator.setAttribute("height", String(camH));
+  }
+
+  updateContent(): void {
     if (!this.isVisible) return;
 
     const diagram = this.editor.diagram;
@@ -127,21 +144,12 @@ export class MinimapView {
         },
       });
     }
+  }
 
-    // 3. Update Camera Indicator
-    const transform = this.renderer.currentTransform;
-    const viewW = this.renderer.containerWidth;
-    const viewH = this.renderer.containerHeight;
-
-    const camX = -transform.panX / transform.zoom;
-    const camY = -transform.panY / transform.zoom;
-    const camW = viewW / transform.zoom;
-    const camH = viewH / transform.zoom;
-
-    this.viewportIndicator.setAttribute("x", String(camX));
-    this.viewportIndicator.setAttribute("y", String(camY));
-    this.viewportIndicator.setAttribute("width", String(camW));
-    this.viewportIndicator.setAttribute("height", String(camH));
+  update(): void {
+    if (!this.isVisible) return;
+    this.updateContent();
+    this.updateViewport();
   }
 
   private setupEvents(): void {
@@ -173,7 +181,7 @@ export class MinimapView {
         panX: newPanX,
         panY: newPanY,
       });
-      this.update();
+      this.updateViewport();
     };
 
     this.containerEl.addEventListener("mousedown", (e) => {

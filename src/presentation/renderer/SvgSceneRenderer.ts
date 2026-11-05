@@ -19,7 +19,7 @@ import {
   clampZoom,
 } from "./ViewportMath";
 import { getSidePoint, getRectCenter, getFacingSide } from "./ConnectorGeometry";
-import { defaultRoutingService } from "../../domain/services/RoutingService";
+import { defaultRoutingService, RoutingResult } from "../../domain/services/RoutingService";
 import { defaultSnappingService, AlignmentGuides } from "../../domain/services/SnappingService";
 import { defaultEdgeStyleRegistry, EdgeStyleDefinition } from "./EdgeStyleRegistry";
 import {
@@ -228,6 +228,17 @@ export class SvgSceneRenderer {
   private hoveredTableNodeId?: string;
   private lastTableButtonActionTime = 0;
 
+  // High-performance retained DOM maps and route cache
+  private nodeElements = new Map<string, SVGGElement>();
+  private nodeSignatures = new Map<string, string>();
+  private edgeElements = new Map<string, SVGGElement>();
+  private edgeSignatures = new Map<string, string>();
+  private edgeRouteCache = new Map<string, { key: string; result: RoutingResult }>();
+  private groupElements = new Map<string, SVGGElement>();
+  private groupSignatures = new Map<string, string>();
+  private lastVirtualizationCenter: Point | null = null;
+  private onWindowResizeBound: () => void;
+
   // Bound event listeners for cleanup
   private onWheelBound: (e: WheelEvent) => void;
   private onMouseDownBound: (e: MouseEvent) => void;
@@ -432,6 +443,11 @@ export class SvgSceneRenderer {
     this.svgEl.addEventListener("drop", this.onDropBound);
     this.svgEl.addEventListener("mouseleave", this.onMouseLeaveBound);
 
+    this.onWindowResizeBound = () => {
+      this.cachedContainerRect = null;
+    };
+    window.addEventListener("resize", this.onWindowResizeBound);
+
     this.unsubscribeEditor = this.editor.subscribe(() => {
       this.render();
     });
@@ -452,19 +468,27 @@ export class SvgSceneRenderer {
     };
     this.updateViewportTransform();
     if (this.isVirtualizationActive()) {
-      this.render();
+      const last = this.lastVirtualizationCenter;
+      const dx = last ? Math.abs(this.transform.panX - last.x) : Infinity;
+      const dy = last ? Math.abs(this.transform.panY - last.y) : Infinity;
+      if (dx > 120 || dy > 120) {
+        this.lastVirtualizationCenter = { x: this.transform.panX, y: this.transform.panY };
+        this.render();
+      }
     }
   }
 
   public getVisibleCanvasRect(margin = 200): Rect {
     const width =
       this.container.clientWidth ||
+      this.cachedContainerRect?.width ||
       (typeof this.container.getBoundingClientRect === "function"
         ? this.container.getBoundingClientRect().width
         : 0) ||
       800;
     const height =
       this.container.clientHeight ||
+      this.cachedContainerRect?.height ||
       (typeof this.container.getBoundingClientRect === "function"
         ? this.container.getBoundingClientRect().height
         : 0) ||
@@ -1029,11 +1053,37 @@ export class SvgSceneRenderer {
 
   private renderGroups(): void {
     const svgNS = "http://www.w3.org/2000/svg";
-    this.groupsLayerEl.textContent = "";
 
     const visibleRect = this.isVirtualizationActive()
       ? this.getVisibleCanvasRect()
       : null;
+
+    const diagramGroupMap = new Map<string, Group>(
+      this.editor.diagram.groups.map((g) => [g.id, g])
+    );
+
+    const existingChildren = Array.from(this.groupsLayerEl.children ?? []) as SVGGElement[];
+    const domGroupMap = new Map<string, SVGGElement>();
+    for (const child of existingChildren) {
+      const groupId = child.getAttribute("data-group-id");
+      if (groupId) {
+        domGroupMap.set(groupId, child);
+        if (!this.groupElements.has(groupId)) {
+          this.groupElements.set(groupId, child);
+        }
+      } else {
+        this.safeRemove(child);
+      }
+    }
+
+    for (const [groupId, childEl] of domGroupMap.entries()) {
+      const grp = diagramGroupMap.get(groupId);
+      if (!grp) {
+        this.safeRemove(childEl);
+        this.groupElements.delete(groupId);
+        this.groupSignatures.delete(groupId);
+      }
+    }
 
     const sortedGroups = [...this.editor.diagram.groups].sort((a, b) => {
       const boundsA = this.getGroupBounds(a);
@@ -1054,190 +1104,218 @@ export class SvgSceneRenderer {
         visibleRect &&
         !intersects(visibleRect, bounds)
       ) {
+        const existingEl = this.groupElements.get(group.id);
+        if (existingEl) {
+          this.safeRemove(existingEl);
+          this.groupElements.delete(group.id);
+          this.groupSignatures.delete(group.id);
+        }
         continue;
       }
 
       const isSelected = this.editor.isGroupSelected(group.id);
       const isCollapsed = group.collapsed;
       const isLocked = group.locked ?? false;
+      const groupSignature = `${gx},${gy},${gw},${gh}|${group.name ?? ""}|${group.color ?? ""}|${isSelected}|${isCollapsed}|${isLocked}|${this.editingGroupId === group.id}|${group.nodeIds.length}`;
 
-      const groupEl = document.createElementNS(svgNS, "g");
-      groupEl.setAttribute("class", "umlcanvas-group");
-      groupEl.setAttribute("data-group-id", group.id);
+      const existingEl = this.groupElements.get(group.id);
+      const previousSignature = this.groupSignatures.get(group.id);
 
-      if (isSelected) {
-        groupEl.classList.add("is-selected");
-      }
-      if (isCollapsed) {
-        groupEl.classList.add("is-collapsed");
-      }
-      if (isLocked) {
-        groupEl.classList.add("is-locked");
-      }
-      if (this.editingGroupId === group.id) {
-        groupEl.classList.add("umlcanvas-group-editing");
+      if (existingEl && (existingEl.parentElement as unknown) === this.groupsLayerEl && groupSignature === previousSignature) {
+        continue;
       }
 
-      if (group.color) {
-        groupEl.setAttribute("data-color", group.color);
-        const resolvedColor = resolveCanvasColor(group.color);
-        if (resolvedColor) {
-          const styledEl = groupEl as unknown as HTMLElement;
-          if (typeof (groupEl as { setCssProps?: (props: Record<string, string>) => void }).setCssProps === "function") {
-            (groupEl as { setCssProps: (props: Record<string, string>) => void }).setCssProps({ "--canvas-color": resolvedColor });
-          }
-          if (styledEl.style && typeof styledEl.style.setProperty === "function") {
-            styledEl.style.setProperty("--canvas-color", resolvedColor);
-          } else if (styledEl.style) {
-            styledEl.style["--canvas-color" as unknown as number] = resolvedColor;
-          }
-        }
-        if (isCanvasColorPreset(group.color)) {
-          groupEl.classList.add(`is-color-${group.color}`);
-        } else {
-          groupEl.classList.add("has-custom-color");
-        }
-      }
-
-      if (isCollapsed) {
-        const cardW = Math.max(180, Math.min(gw, 260));
-        const cardH = 34;
-
-        const bgRect = document.createElementNS(svgNS, "rect");
-        bgRect.setAttribute("x", String(gx));
-        bgRect.setAttribute("y", String(gy));
-        bgRect.setAttribute("width", String(cardW));
-        bgRect.setAttribute("height", String(cardH));
-        bgRect.setAttribute("rx", "6");
-        bgRect.setAttribute("ry", "6");
-        bgRect.setAttribute("class", "umlcanvas-group-collapsed-card");
-        bgRect.setAttribute("data-group-id", group.id);
-        groupEl.appendChild(bgRect);
-
-        const toggle = document.createElementNS(svgNS, "text");
-        toggle.setAttribute("x", String(gx + 10));
-        toggle.setAttribute("y", String(gy + 22));
-        toggle.setAttribute("class", "umlcanvas-group-collapse-btn");
-        toggle.setAttribute("data-group-id", group.id);
-        toggle.textContent = "▶";
-        groupEl.appendChild(toggle);
-
-        const groupFont = getGroupFontStyle(group);
-        const badgeFontSize = groupFont.fontSize ? Math.max(8, Math.round(groupFont.fontSize * 0.85)) : undefined;
-
-        const title = document.createElementNS(svgNS, "text");
-        title.setAttribute("x", String(gx + 26));
-        title.setAttribute("y", String(gy + 22));
-        title.setAttribute("class", "umlcanvas-group-title");
-        title.setAttribute("data-group-id", group.id);
-        title.textContent = group.name;
-        applyFontToSvgElement(title, groupFont);
-        groupEl.appendChild(title);
-
-        const badge = document.createElementNS(svgNS, "text");
-        badge.setAttribute("x", String(gx + cardW - 28));
-        badge.setAttribute("y", String(gy + 22));
-        badge.setAttribute("text-anchor", "end");
-        badge.setAttribute("class", "umlcanvas-group-badge");
-        badge.textContent = `(${group.nodeIds.length})`;
-        applyFontToSvgElement(badge, { ...groupFont, fontSize: badgeFontSize, bold: false });
-        groupEl.appendChild(badge);
-
-        const colorDot = document.createElementNS(svgNS, "circle");
-        colorDot.setAttribute("cx", String(gx + cardW - 14));
-        colorDot.setAttribute("cy", String(gy + 17));
-        colorDot.setAttribute("r", "5");
-        colorDot.setAttribute("class", "umlcanvas-group-color-dot");
-        colorDot.setAttribute("data-group-id", group.id);
-        const resolvedCollapsedDotColor = group.color ? (resolveCanvasColor(group.color) ?? group.color) : "var(--interactive-accent)";
-        colorDot.setAttribute("fill", resolvedCollapsedDotColor);
-        groupEl.appendChild(colorDot);
-      } else {
-        const rectEl = document.createElementNS(svgNS, "rect");
-        rectEl.setAttribute("x", String(gx));
-        rectEl.setAttribute("y", String(gy));
-        rectEl.setAttribute("width", String(gw));
-        rectEl.setAttribute("height", String(gh));
-        rectEl.setAttribute("rx", "6");
-        rectEl.setAttribute("ry", "6");
-        rectEl.setAttribute("class", "umlcanvas-group-box");
-        rectEl.setAttribute("pointer-events", "stroke");
-        rectEl.setAttribute("data-group-id", group.id);
-        groupEl.appendChild(rectEl);
-
-        const headerH = 28;
-        const headerBg = document.createElementNS(svgNS, "rect");
-        headerBg.setAttribute("x", String(gx));
-        headerBg.setAttribute("y", String(gy));
-        headerBg.setAttribute("width", String(gw));
-        headerBg.setAttribute("height", String(headerH));
-        headerBg.setAttribute("rx", "6");
-        headerBg.setAttribute("ry", "6");
-        headerBg.setAttribute("class", "umlcanvas-group-header-bg");
-        headerBg.setAttribute("data-group-id", group.id);
-        groupEl.appendChild(headerBg);
-
-        const toggle = document.createElementNS(svgNS, "text");
-        toggle.setAttribute("x", String(gx + 10));
-        toggle.setAttribute("y", String(gy + 18));
-        toggle.setAttribute("class", "umlcanvas-group-collapse-btn");
-        toggle.setAttribute("data-group-id", group.id);
-        toggle.textContent = "▼";
-        groupEl.appendChild(toggle);
-
-        const groupFont = getGroupFontStyle(group);
-        const badgeFontSize = groupFont.fontSize ? Math.max(8, Math.round(groupFont.fontSize * 0.85)) : undefined;
-
-        const title = document.createElementNS(svgNS, "text");
-        title.setAttribute("x", String(gx + 26));
-        title.setAttribute("y", String(gy + 18));
-        title.setAttribute("class", "umlcanvas-group-title");
-        title.setAttribute("data-group-id", group.id);
-        title.textContent = group.name;
-        applyFontToSvgElement(title, groupFont);
-        groupEl.appendChild(title);
-
-        const badge = document.createElementNS(svgNS, "text");
-        badge.setAttribute("x", String(gx + gw - 32));
-        badge.setAttribute("y", String(gy + 18));
-        badge.setAttribute("text-anchor", "end");
-        badge.setAttribute("class", "umlcanvas-group-badge");
-        badge.textContent = `${group.nodeIds.length} items`;
-        applyFontToSvgElement(badge, { ...groupFont, fontSize: badgeFontSize, bold: false });
-        groupEl.appendChild(badge);
-
-        const colorDot = document.createElementNS(svgNS, "circle");
-        colorDot.setAttribute("cx", String(gx + gw - 16));
-        colorDot.setAttribute("cy", String(gy + 14));
-        colorDot.setAttribute("r", "5");
-        colorDot.setAttribute("class", "umlcanvas-group-color-dot");
-        colorDot.setAttribute("data-group-id", group.id);
-        const resolvedExpandedDotColor = group.color ? (resolveCanvasColor(group.color) ?? group.color) : "var(--interactive-accent)";
-        colorDot.setAttribute("fill", resolvedExpandedDotColor);
-        groupEl.appendChild(colorDot);
-
-        if (isLocked) {
-          const lockIcon = document.createElementNS(svgNS, "text");
-          lockIcon.setAttribute("x", String(gx + gw - 84));
-          lockIcon.setAttribute("y", String(gy + 18));
-          lockIcon.setAttribute("text-anchor", "end");
-          lockIcon.setAttribute("class", "umlcanvas-group-lock-icon");
-          lockIcon.textContent = "🔒";
-          groupEl.appendChild(lockIcon);
-        }
-
-        if (isSelected && !isLocked) {
-          this.renderGroupResizeHandles(groupEl, group, bounds);
-        }
-      }
-
-      this.groupsLayerEl.appendChild(groupEl);
+      const groupEl = this.renderGroupElement(group, bounds, svgNS);
+      this.replaceOrAppend(this.groupsLayerEl, groupEl, existingEl);
+      this.groupElements.set(group.id, groupEl);
+      this.groupSignatures.set(group.id, groupSignature);
     }
+  }
+
+  private renderGroupElement(group: Group, bounds: Rect, svgNS: string): SVGGElement {
+    const gx = bounds.position.x;
+    const gy = bounds.position.y;
+    const gw = bounds.size.width;
+    const gh = bounds.size.height;
+    const isSelected = this.editor.isGroupSelected(group.id);
+    const isCollapsed = group.collapsed;
+    const isLocked = group.locked ?? false;
+
+    const groupEl = document.createElementNS(svgNS, "g") as SVGGElement;
+    groupEl.setAttribute("class", "umlcanvas-group");
+    groupEl.setAttribute("data-group-id", group.id);
+
+    if (isSelected) {
+      groupEl.classList.add("is-selected");
+    }
+    if (isCollapsed) {
+      groupEl.classList.add("is-collapsed");
+    }
+    if (isLocked) {
+      groupEl.classList.add("is-locked");
+    }
+    if (this.editingGroupId === group.id) {
+      groupEl.classList.add("umlcanvas-group-editing");
+    }
+
+    if (group.color) {
+      groupEl.setAttribute("data-color", group.color);
+      const resolvedColor = resolveCanvasColor(group.color);
+      if (resolvedColor) {
+        const styledEl = groupEl as unknown as HTMLElement;
+        if (typeof (groupEl as { setCssProps?: (props: Record<string, string>) => void }).setCssProps === "function") {
+          (groupEl as { setCssProps: (props: Record<string, string>) => void }).setCssProps({ "--canvas-color": resolvedColor });
+        }
+        if (styledEl.style && typeof styledEl.style.setProperty === "function") {
+          styledEl.style.setProperty("--canvas-color", resolvedColor);
+        } else if (styledEl.style) {
+          styledEl.style["--canvas-color" as unknown as number] = resolvedColor;
+        }
+      }
+      if (isCanvasColorPreset(group.color)) {
+        groupEl.classList.add(`is-color-${group.color}`);
+      } else {
+        groupEl.classList.add("has-custom-color");
+      }
+    }
+
+    if (isCollapsed) {
+      const cardW = Math.max(180, Math.min(gw, 260));
+      const cardH = 34;
+
+      const bgRect = document.createElementNS(svgNS, "rect");
+      bgRect.setAttribute("x", String(gx));
+      bgRect.setAttribute("y", String(gy));
+      bgRect.setAttribute("width", String(cardW));
+      bgRect.setAttribute("height", String(cardH));
+      bgRect.setAttribute("rx", "6");
+      bgRect.setAttribute("ry", "6");
+      bgRect.setAttribute("class", "umlcanvas-group-collapsed-card");
+      bgRect.setAttribute("data-group-id", group.id);
+      groupEl.appendChild(bgRect);
+
+      const toggle = document.createElementNS(svgNS, "text");
+      toggle.setAttribute("x", String(gx + 10));
+      toggle.setAttribute("y", String(gy + 22));
+      toggle.setAttribute("class", "umlcanvas-group-collapse-btn");
+      toggle.setAttribute("data-group-id", group.id);
+      toggle.textContent = "▶";
+      groupEl.appendChild(toggle);
+
+      const groupFont = getGroupFontStyle(group);
+      const badgeFontSize = groupFont.fontSize ? Math.max(8, Math.round(groupFont.fontSize * 0.85)) : undefined;
+
+      const title = document.createElementNS(svgNS, "text");
+      title.setAttribute("x", String(gx + 26));
+      title.setAttribute("y", String(gy + 22));
+      title.setAttribute("class", "umlcanvas-group-title");
+      title.setAttribute("data-group-id", group.id);
+      title.textContent = group.name;
+      applyFontToSvgElement(title as SVGElement, groupFont);
+      groupEl.appendChild(title);
+
+      const badge = document.createElementNS(svgNS, "text");
+      badge.setAttribute("x", String(gx + cardW - 28));
+      badge.setAttribute("y", String(gy + 22));
+      badge.setAttribute("text-anchor", "end");
+      badge.setAttribute("class", "umlcanvas-group-badge");
+      badge.textContent = `(${group.nodeIds.length})`;
+      applyFontToSvgElement(badge as SVGElement, { ...groupFont, fontSize: badgeFontSize, bold: false });
+      groupEl.appendChild(badge);
+
+      const colorDot = document.createElementNS(svgNS, "circle");
+      colorDot.setAttribute("cx", String(gx + cardW - 14));
+      colorDot.setAttribute("cy", String(gy + 17));
+      colorDot.setAttribute("r", "5");
+      colorDot.setAttribute("class", "umlcanvas-group-color-dot");
+      colorDot.setAttribute("data-group-id", group.id);
+      const resolvedCollapsedDotColor = group.color ? (resolveCanvasColor(group.color) ?? group.color) : "var(--interactive-accent)";
+      colorDot.setAttribute("fill", resolvedCollapsedDotColor);
+      groupEl.appendChild(colorDot);
+    } else {
+      const rectEl = document.createElementNS(svgNS, "rect");
+      rectEl.setAttribute("x", String(gx));
+      rectEl.setAttribute("y", String(gy));
+      rectEl.setAttribute("width", String(gw));
+      rectEl.setAttribute("height", String(gh));
+      rectEl.setAttribute("rx", "6");
+      rectEl.setAttribute("ry", "6");
+      rectEl.setAttribute("class", "umlcanvas-group-box");
+      rectEl.setAttribute("pointer-events", "stroke");
+      rectEl.setAttribute("data-group-id", group.id);
+      groupEl.appendChild(rectEl);
+
+      const headerH = 28;
+      const headerBg = document.createElementNS(svgNS, "rect");
+      headerBg.setAttribute("x", String(gx));
+      headerBg.setAttribute("y", String(gy));
+      headerBg.setAttribute("width", String(gw));
+      headerBg.setAttribute("height", String(headerH));
+      headerBg.setAttribute("rx", "6");
+      headerBg.setAttribute("ry", "6");
+      headerBg.setAttribute("class", "umlcanvas-group-header-bg");
+      headerBg.setAttribute("data-group-id", group.id);
+      groupEl.appendChild(headerBg);
+
+      const toggle = document.createElementNS(svgNS, "text");
+      toggle.setAttribute("x", String(gx + 10));
+      toggle.setAttribute("y", String(gy + 18));
+      toggle.setAttribute("class", "umlcanvas-group-collapse-btn");
+      toggle.setAttribute("data-group-id", group.id);
+      toggle.textContent = "▼";
+      groupEl.appendChild(toggle);
+
+      const groupFont = getGroupFontStyle(group);
+      const badgeFontSize = groupFont.fontSize ? Math.max(8, Math.round(groupFont.fontSize * 0.85)) : undefined;
+
+      const title = document.createElementNS(svgNS, "text");
+      title.setAttribute("x", String(gx + 26));
+      title.setAttribute("y", String(gy + 18));
+      title.setAttribute("class", "umlcanvas-group-title");
+      title.setAttribute("data-group-id", group.id);
+      title.textContent = group.name;
+      applyFontToSvgElement(title as SVGElement, groupFont);
+      groupEl.appendChild(title);
+
+      const badge = document.createElementNS(svgNS, "text");
+      badge.setAttribute("x", String(gx + gw - 32));
+      badge.setAttribute("y", String(gy + 18));
+      badge.setAttribute("text-anchor", "end");
+      badge.setAttribute("class", "umlcanvas-group-badge");
+      badge.textContent = `${group.nodeIds.length} items`;
+      applyFontToSvgElement(badge as SVGElement, { ...groupFont, fontSize: badgeFontSize, bold: false });
+      groupEl.appendChild(badge);
+
+      const colorDot = document.createElementNS(svgNS, "circle");
+      colorDot.setAttribute("cx", String(gx + gw - 16));
+      colorDot.setAttribute("cy", String(gy + 14));
+      colorDot.setAttribute("r", "5");
+      colorDot.setAttribute("class", "umlcanvas-group-color-dot");
+      colorDot.setAttribute("data-group-id", group.id);
+      const resolvedExpandedDotColor = group.color ? (resolveCanvasColor(group.color) ?? group.color) : "var(--interactive-accent)";
+      colorDot.setAttribute("fill", resolvedExpandedDotColor);
+      groupEl.appendChild(colorDot);
+
+      if (isLocked) {
+        const lockIcon = document.createElementNS(svgNS, "text");
+        lockIcon.setAttribute("x", String(gx + gw - 84));
+        lockIcon.setAttribute("y", String(gy + 18));
+        lockIcon.setAttribute("text-anchor", "end");
+        lockIcon.setAttribute("class", "umlcanvas-group-lock-icon");
+        lockIcon.textContent = "🔒";
+        groupEl.appendChild(lockIcon);
+      }
+
+      if (isSelected && !isLocked) {
+        this.renderGroupResizeHandles(groupEl, group, bounds);
+      }
+    }
+
+    return groupEl;
   }
 
   private renderEdges(): void {
     const svgNS = "http://www.w3.org/2000/svg";
-    this.edgesLayerEl.textContent = "";
 
     const visibleNodes = this.editor.diagram.nodes.filter((n) =>
       this.editor.isNodeVisible(n.id)
@@ -1250,10 +1328,48 @@ export class SvgSceneRenderer {
       ? this.getVisibleCanvasRect()
       : null;
 
+    const diagramEdgeMap = new Map<string, DiagramEdge>(
+      this.editor.diagram.edges.map((e) => [e.id, e])
+    );
+
+    const existingChildren = Array.from(this.edgesLayerEl.children ?? []) as SVGGElement[];
+    const domEdgeMap = new Map<string, SVGGElement>();
+    for (const child of existingChildren) {
+      const edgeId = child.getAttribute("data-edge-id");
+      if (edgeId) {
+        domEdgeMap.set(edgeId, child);
+        if (!this.edgeElements.has(edgeId)) {
+          this.edgeElements.set(edgeId, child);
+        }
+      } else {
+        this.safeRemove(child);
+      }
+    }
+
+    // Clean up DOM: Remove edges that no longer exist in the diagram
+    for (const [edgeId, childEl] of domEdgeMap.entries()) {
+      const edge = diagramEdgeMap.get(edgeId);
+      if (!edge) {
+        this.safeRemove(childEl);
+        this.edgeElements.delete(edgeId);
+        this.edgeSignatures.delete(edgeId);
+        this.edgeRouteCache.delete(edgeId);
+      }
+    }
+
     for (const edge of this.editor.diagram.edges) {
       const fromNode = nodeMap.get(edge.fromNodeId);
       const toNode = edge.toNodeId ? nodeMap.get(edge.toNodeId) : undefined;
-      if (!fromNode || (!toNode && !edge.toPoint)) continue;
+      if (!fromNode || (!toNode && !edge.toPoint)) {
+        const existingEl = this.edgeElements.get(edge.id);
+        if (existingEl) {
+          this.safeRemove(existingEl);
+          this.edgeElements.delete(edge.id);
+          this.edgeSignatures.delete(edge.id);
+          this.edgeRouteCache.delete(edge.id);
+        }
+        continue;
+      }
 
       const targetX = toNode ? toNode.position.x : edge.toPoint!.x;
       const targetY = toNode ? toNode.position.y : edge.toPoint!.y;
@@ -1273,13 +1389,18 @@ export class SvgSceneRenderer {
         );
         const edgeBounds = rectFromBounds(minX, minY, maxX - minX, maxY - minY);
         if (!intersects(visibleRect, edgeBounds)) {
+          const existingEl = this.edgeElements.get(edge.id);
+          if (existingEl) {
+            this.safeRemove(existingEl);
+            this.edgeElements.delete(edge.id);
+            this.edgeSignatures.delete(edge.id);
+          }
           continue;
         }
       }
 
-      // Look up specific ports if defined
-      const fromPort = fromNode.ports.find((p) => p.id === edge.fromPortId);
-      const toPort = toNode?.ports.find((p) => p.id === edge.toPortId);
+      const fromPort = fromNode.ports?.find((p) => p.id === edge.fromPortId);
+      const toPort = toNode?.ports?.find((p) => p.id === edge.toPortId);
 
       const fromSide = fromPort?.side ?? edge.fromSide;
       const toSide = toPort?.side ?? edge.toSide;
@@ -1299,208 +1420,254 @@ export class SvgSceneRenderer {
             side: toSide,
           };
 
-      // Calculate edge route (supports straight & orthogonal with obstacle avoidance)
-      const routingResult = defaultRoutingService.route(
-        {
-          id: fromNode.id,
-          position: fromNode.position,
-          size: fromNode.size,
-          side: fromSide,
-          portOffset: fromPort?.offset,
-          kind: fromNode.kind,
-        },
-        targetBoundary,
-        {
-          routing: edge.routing,
-          obstacles: visibleNodes,
-          manualWaypoints: edge.waypoints,
-        }
-      );
+      const routeKey = `${fromNode.id}:${fromNode.position.x},${fromNode.position.y},${fromNode.size.width},${fromNode.size.height},${fromSide},${fromPort?.offset}|${toNode?.id ?? "pt"}:${targetX},${targetY},${targetW},${targetH},${toSide},${toPort?.offset}|${edge.routing}|${JSON.stringify(edge.waypoints)}`;
 
-      const edgeGroup = document.createElementNS(svgNS, "g");
-      edgeGroup.setAttribute("class", "umlcanvas-edge");
-      edgeGroup.setAttribute("data-edge-id", edge.id);
+      let routingResult: RoutingResult;
+      const cached = this.edgeRouteCache.get(edge.id);
+      if (cached && cached.key === routeKey) {
+        routingResult = cached.result;
+      } else {
+        routingResult = defaultRoutingService.route(
+          {
+            id: fromNode.id,
+            position: fromNode.position,
+            size: fromNode.size,
+            side: fromSide,
+            portOffset: fromPort?.offset,
+            kind: fromNode.kind,
+          },
+          targetBoundary,
+          {
+            routing: edge.routing,
+            obstacles: visibleNodes,
+            manualWaypoints: edge.waypoints,
+          }
+        );
+        this.edgeRouteCache.set(edge.id, { key: routeKey, result: routingResult });
+      }
 
       const isSelected = this.editor.isEdgeSelected(edge.id);
-      const styleDef = defaultEdgeStyleRegistry.get(edge.kind);
-
-      // Hitbox path
-      const hitPath = document.createElementNS(svgNS, "path");
-      hitPath.setAttribute("d", routingResult.svgPath);
-      hitPath.setAttribute("class", "umlcanvas-edge-hitbox");
-      edgeGroup.appendChild(hitPath);
-
-      if (isSelected) {
-        edgeGroup.classList.add("umlcanvas-edge-selected");
-      }
-
-      // Visible path
-      const path = document.createElementNS(svgNS, "path");
-      path.setAttribute("d", routingResult.svgPath);
-      path.setAttribute(
-        "class",
-        isSelected
-          ? "umlcanvas-edge-line umlcanvas-edge-selected"
-          : "umlcanvas-edge-line"
-      );
-
-      const customStroke = edge.style?.color ?? edge.style?.strokeColor;
-
-      let rawMarkerEndId: string | undefined;
-      if (edge.style?.markerEnd !== undefined) {
-        rawMarkerEndId = edge.style.markerEnd === "none" || !edge.style.markerEnd
-          ? undefined
-          : this.normalizeMarkerId(edge.style.markerEnd);
-      } else {
-        rawMarkerEndId = styleDef.markerEndId;
-      }
-
-      let rawMarkerStartId: string | undefined;
-      if (edge.style?.markerStart !== undefined) {
-        rawMarkerStartId = edge.style.markerStart === "none" || !edge.style.markerStart
-          ? undefined
-          : this.normalizeMarkerId(edge.style.markerStart);
-      } else {
-        rawMarkerStartId = styleDef.markerStartId;
-      }
-
-      let markerEndId = rawMarkerEndId;
-      let markerStartId = rawMarkerStartId;
-
-      if (isSelected) {
-        if (markerEndId) markerEndId = this.getOrCreateColoredMarker(markerEndId, "", true);
-        if (markerStartId) markerStartId = this.getOrCreateColoredMarker(markerStartId, "", true);
-      } else if (customStroke) {
-        if (markerEndId) markerEndId = this.getOrCreateColoredMarker(markerEndId, customStroke, false);
-        if (markerStartId) markerStartId = this.getOrCreateColoredMarker(markerStartId, customStroke, false);
-      }
-
-      if (markerEndId) {
-        path.setAttribute("marker-end", `url(#${markerEndId})`);
-      }
-      if (markerStartId) {
-        path.setAttribute("marker-start", `url(#${markerStartId})`);
-      }
-
-      const strokeDasharray = this.resolveStrokeDasharray(edge.style, styleDef);
-      if (strokeDasharray) {
-        path.setAttribute("stroke-dasharray", strokeDasharray);
-      }
-      if (edge.style?.color) {
-        edgeGroup.setAttribute("data-color", edge.style.color);
-        const resolvedColor = resolveCanvasColor(edge.style.color);
-        if (resolvedColor) {
-          edgeGroup.setCssProps({ "--canvas-color": resolvedColor, color: resolvedColor });
-          path.setAttribute("stroke", resolvedColor);
-        }
-        if (isCanvasColorPreset(edge.style.color)) {
-          edgeGroup.classList.add(`is-color-${edge.style.color}`);
-        } else {
-          edgeGroup.classList.add("has-custom-color");
-        }
-      } else if (edge.style?.strokeColor) {
-        path.setAttribute("stroke", edge.style.strokeColor);
-      }
-      if (edge.style?.strokeWidth || styleDef.strokeWidth) {
-        path.setAttribute(
-          "stroke-width",
-          String(edge.style?.strokeWidth ?? styleDef.strokeWidth)
-        );
-      }
-
-      edgeGroup.appendChild(path);
-
-      // Edge labels (F-031) or default stereotype (e.g. «include», «extend»)
       const displayLabel =
         edge.labels && edge.labels.length > 0
           ? edge.labels[0].text
-          : styleDef.defaultStereotype
-          ? `«${styleDef.defaultStereotype}»`
           : undefined;
+      const edgeSignature = `${routeKey}|${edge.kind}|${JSON.stringify(edge.style)}|${displayLabel}|${edge.multiplicitySource ?? ""}|${edge.multiplicityTarget ?? ""}|${isSelected}`;
 
-      const tooltipText = displayLabel
-        ? `Line (${edge.kind}): "${displayLabel}"\nDouble-click or press Enter to edit label`
-        : `Line (${edge.kind})\nDouble-click or press Enter to add label`;
-      edgeGroup.setAttribute("title", tooltipText);
+      const existingEl = this.edgeElements.get(edge.id);
+      const previousSignature = this.edgeSignatures.get(edge.id);
 
-      if (displayLabel && routingResult.points.length >= 2) {
-        const midIdx = Math.floor(routingResult.points.length / 2);
-        const p1 = routingResult.points[midIdx - 1] ?? routingResult.points[0];
-        const p2 = routingResult.points[midIdx] ?? routingResult.points[1];
-        const midX = (p1.x + p2.x) / 2;
-        const midY = (p1.y + p2.y) / 2;
-
-        const labelGroup = document.createElementNS(svgNS, "g");
-        labelGroup.setAttribute("class", "umlcanvas-edge-label-group");
-        labelGroup.setAttribute("data-edge-id", edge.id);
-
-        const edgeFont = getEdgeFontStyle(edge);
-        const fontSize = edgeFont.fontSize ?? 11;
-        const padX = 6;
-        const textLen = displayLabel.length;
-        const charWidth = fontSize * 0.6;
-        const bgWidth = Math.max(24, Math.round(textLen * charWidth + padX * 2));
-        const bgHeight = Math.max(18, Math.round(fontSize * 1.5));
-
-        const bgRect = document.createElementNS(svgNS, "rect");
-        bgRect.setAttribute("x", String(Math.round(midX - bgWidth / 2)));
-        bgRect.setAttribute("y", String(Math.round(midY - bgHeight / 2)));
-        bgRect.setAttribute("width", String(bgWidth));
-        bgRect.setAttribute("height", String(bgHeight));
-        bgRect.setAttribute("rx", "4");
-        bgRect.setAttribute("ry", "4");
-        bgRect.setAttribute("class", "umlcanvas-edge-label-bg");
-        labelGroup.appendChild(bgRect);
-
-        const text = document.createElementNS(svgNS, "text");
-        text.setAttribute("x", String(midX));
-        text.setAttribute("y", String(midY));
-        text.setAttribute("text-anchor", "middle");
-        text.setAttribute("dominant-baseline", "central");
-        text.setAttribute("class", "umlcanvas-edge-label");
-        text.textContent = displayLabel;
-        applyFontToSvgElement(text, edgeFont);
-        labelGroup.appendChild(text);
-
-        edgeGroup.appendChild(labelGroup);
+      if (existingEl && (existingEl.parentElement as unknown) === this.edgesLayerEl && edgeSignature === previousSignature) {
+        continue;
       }
 
-      // Multiplicity annotations (F-034)
-      if (routingResult.points.length >= 2) {
-        const startPt = routingResult.points[0];
-        const secondPt = routingResult.points[1];
-        const endPt = routingResult.points[routingResult.points.length - 1];
-        const beforeEndPt = routingResult.points[routingResult.points.length - 2];
-        const edgeFont = getEdgeFontStyle(edge);
-        const multFontSize = edgeFont.fontSize ? Math.max(8, Math.round(edgeFont.fontSize * 0.85)) : undefined;
-
-        if (edge.multiplicitySource) {
-          const sText = document.createElementNS(svgNS, "text");
-          const dirX = Math.sign(secondPt.x - startPt.x);
-          const dirY = Math.sign(secondPt.y - startPt.y);
-          sText.setAttribute("x", String(startPt.x + (dirX !== 0 ? dirX * 18 : 10)));
-          sText.setAttribute("y", String(startPt.y + (dirY !== 0 ? dirY * 18 : -8)));
-          sText.setAttribute("class", "umlcanvas-edge-multiplicity umlcanvas-multiplicity-source");
-          sText.textContent = edge.multiplicitySource;
-          applyFontToSvgElement(sText, { ...edgeFont, fontSize: multFontSize });
-          edgeGroup.appendChild(sText);
-        }
-
-        if (edge.multiplicityTarget) {
-          const tText = document.createElementNS(svgNS, "text");
-          const dirX = Math.sign(endPt.x - beforeEndPt.x);
-          const dirY = Math.sign(endPt.y - beforeEndPt.y);
-          tText.setAttribute("x", String(endPt.x - (dirX !== 0 ? dirX * 22 : 12)));
-          tText.setAttribute("y", String(endPt.y - (dirY !== 0 ? dirY * 22 : 8)));
-          tText.setAttribute("class", "umlcanvas-edge-multiplicity umlcanvas-multiplicity-target");
-          tText.textContent = edge.multiplicityTarget;
-          applyFontToSvgElement(tText, { ...edgeFont, fontSize: multFontSize });
-          edgeGroup.appendChild(tText);
-        }
-      }
-
-      this.edgesLayerEl.appendChild(edgeGroup);
+      const edgeGroup = this.renderEdgeGroup(edge, routingResult, svgNS);
+      this.replaceOrAppend(this.edgesLayerEl, edgeGroup, existingEl);
+      this.edgeElements.set(edge.id, edgeGroup);
+      this.edgeSignatures.set(edge.id, edgeSignature);
     }
+  }
+
+  private renderEdgeGroup(
+    edge: DiagramEdge,
+    routingResult: RoutingResult,
+    svgNS: string
+  ): SVGGElement {
+    const edgeGroup = document.createElementNS(svgNS, "g") as SVGGElement;
+    edgeGroup.setAttribute("class", "umlcanvas-edge");
+    edgeGroup.setAttribute("data-edge-id", edge.id);
+
+    const isSelected = this.editor.isEdgeSelected(edge.id);
+    const styleDef = defaultEdgeStyleRegistry.get(edge.kind);
+
+    // Hitbox path
+    const hitPath = document.createElementNS(svgNS, "path");
+    hitPath.setAttribute("d", routingResult.svgPath);
+    hitPath.setAttribute("class", "umlcanvas-edge-hitbox");
+    edgeGroup.appendChild(hitPath);
+
+    if (isSelected) {
+      edgeGroup.classList.add("umlcanvas-edge-selected");
+    }
+
+    // Visible path
+    const path = document.createElementNS(svgNS, "path");
+    path.setAttribute("d", routingResult.svgPath);
+    path.setAttribute(
+      "class",
+      isSelected
+        ? "umlcanvas-edge-line umlcanvas-edge-selected"
+        : "umlcanvas-edge-line"
+    );
+
+    const customStroke = edge.style?.color ?? edge.style?.strokeColor;
+
+    let rawMarkerEndId: string | undefined;
+    if (edge.style?.markerEnd !== undefined) {
+      rawMarkerEndId =
+        edge.style.markerEnd === "none" || !edge.style.markerEnd
+          ? undefined
+          : this.normalizeMarkerId(edge.style.markerEnd);
+    } else {
+      rawMarkerEndId = styleDef.markerEndId;
+    }
+
+    let rawMarkerStartId: string | undefined;
+    if (edge.style?.markerStart !== undefined) {
+      rawMarkerStartId =
+        edge.style.markerStart === "none" || !edge.style.markerStart
+          ? undefined
+          : this.normalizeMarkerId(edge.style.markerStart);
+    } else {
+      rawMarkerStartId = styleDef.markerStartId;
+    }
+
+    let markerEndId = rawMarkerEndId;
+    let markerStartId = rawMarkerStartId;
+
+    if (isSelected) {
+      if (markerEndId) markerEndId = this.getOrCreateColoredMarker(markerEndId, "", true);
+      if (markerStartId) markerStartId = this.getOrCreateColoredMarker(markerStartId, "", true);
+    } else if (customStroke) {
+      if (markerEndId) markerEndId = this.getOrCreateColoredMarker(markerEndId, customStroke, false);
+      if (markerStartId) markerStartId = this.getOrCreateColoredMarker(markerStartId, customStroke, false);
+    }
+
+    if (markerEndId) {
+      path.setAttribute("marker-end", `url(#${markerEndId})`);
+    }
+    if (markerStartId) {
+      path.setAttribute("marker-start", `url(#${markerStartId})`);
+    }
+
+    const strokeDasharray = this.resolveStrokeDasharray(edge.style, styleDef);
+    if (strokeDasharray) {
+      path.setAttribute("stroke-dasharray", strokeDasharray);
+    }
+    if (edge.style?.color) {
+      edgeGroup.setAttribute("data-color", edge.style.color);
+      const resolvedColor = resolveCanvasColor(edge.style.color);
+      if (resolvedColor) {
+        edgeGroup.setCssProps({ "--canvas-color": resolvedColor, color: resolvedColor });
+        path.setAttribute("stroke", resolvedColor);
+      }
+      if (isCanvasColorPreset(edge.style.color)) {
+        edgeGroup.classList.add(`is-color-${edge.style.color}`);
+      } else {
+        edgeGroup.classList.add("has-custom-color");
+      }
+    } else if (edge.style?.strokeColor) {
+      path.setAttribute("stroke", edge.style.strokeColor);
+    }
+    if (edge.style?.strokeWidth || styleDef.strokeWidth) {
+      path.setAttribute(
+        "stroke-width",
+        String(edge.style?.strokeWidth ?? styleDef.strokeWidth)
+      );
+    }
+
+    edgeGroup.appendChild(path);
+
+    // Edge labels (F-031) or default stereotype (e.g. «include», «extend»)
+    const displayLabel =
+      edge.labels && edge.labels.length > 0
+        ? edge.labels[0].text
+        : styleDef.defaultStereotype
+        ? `«${styleDef.defaultStereotype}»`
+        : undefined;
+
+    const tooltipText = displayLabel
+      ? `Line (${edge.kind}): "${displayLabel}"\nDouble-click or press Enter to edit label`
+      : `Line (${edge.kind})\nDouble-click or press Enter to add label`;
+    edgeGroup.setAttribute("title", tooltipText);
+
+    if (displayLabel && routingResult.points.length >= 2) {
+      const midIdx = Math.floor(routingResult.points.length / 2);
+      const p1 = routingResult.points[midIdx - 1] ?? routingResult.points[0];
+      const p2 = routingResult.points[midIdx] ?? routingResult.points[1];
+      const midX = (p1.x + p2.x) / 2;
+      const midY = (p1.y + p2.y) / 2;
+
+      const labelGroup = document.createElementNS(svgNS, "g");
+      labelGroup.setAttribute("class", "umlcanvas-edge-label-group");
+      labelGroup.setAttribute("data-edge-id", edge.id);
+
+      const edgeFont = getEdgeFontStyle(edge);
+      const fontSize = edgeFont.fontSize ?? 11;
+      const padX = 6;
+      const textLen = displayLabel.length;
+      const charWidth = fontSize * 0.6;
+      const bgWidth = Math.max(24, Math.round(textLen * charWidth + padX * 2));
+      const bgHeight = Math.max(18, Math.round(fontSize * 1.5));
+
+      const bgRect = document.createElementNS(svgNS, "rect");
+      bgRect.setAttribute("x", String(Math.round(midX - bgWidth / 2)));
+      bgRect.setAttribute("y", String(Math.round(midY - bgHeight / 2)));
+      bgRect.setAttribute("width", String(bgWidth));
+      bgRect.setAttribute("height", String(bgHeight));
+      bgRect.setAttribute("rx", "4");
+      bgRect.setAttribute("ry", "4");
+      bgRect.setAttribute("class", "umlcanvas-edge-label-bg");
+      labelGroup.appendChild(bgRect);
+
+      const text = document.createElementNS(svgNS, "text");
+      text.setAttribute("x", String(midX));
+      text.setAttribute("y", String(midY));
+      text.setAttribute("text-anchor", "middle");
+      text.setAttribute("dominant-baseline", "central");
+      text.setAttribute("class", "umlcanvas-edge-label");
+      text.textContent = displayLabel;
+      applyFontToSvgElement(text as SVGElement, edgeFont);
+      labelGroup.appendChild(text);
+
+      edgeGroup.appendChild(labelGroup);
+    }
+
+    // Multiplicity annotations (F-034)
+    if (routingResult.points.length >= 2) {
+      const startPt = routingResult.points[0];
+      const secondPt = routingResult.points[1];
+      const endPt = routingResult.points[routingResult.points.length - 1];
+      const beforeEndPt = routingResult.points[routingResult.points.length - 2];
+      const edgeFont = getEdgeFontStyle(edge);
+      const multFontSize = edgeFont.fontSize ? Math.max(8, Math.round(edgeFont.fontSize * 0.85)) : undefined;
+
+      if (edge.multiplicitySource) {
+        const sText = document.createElementNS(svgNS, "text");
+        const dirX = Math.sign(secondPt.x - startPt.x);
+        const dirY = Math.sign(secondPt.y - startPt.y);
+        sText.setAttribute("x", String(startPt.x + (dirX !== 0 ? dirX * 18 : 10)));
+        sText.setAttribute("y", String(startPt.y + (dirY !== 0 ? dirY * 18 : -8)));
+        sText.setAttribute("class", "umlcanvas-edge-multiplicity umlcanvas-multiplicity-source");
+        sText.textContent = edge.multiplicitySource;
+        applyFontToSvgElement(sText as SVGElement, { ...edgeFont, fontSize: multFontSize });
+        edgeGroup.appendChild(sText);
+      }
+
+      if (edge.multiplicityTarget) {
+        const tText = document.createElementNS(svgNS, "text");
+        const dirX = Math.sign(endPt.x - beforeEndPt.x);
+        const dirY = Math.sign(endPt.y - beforeEndPt.y);
+        tText.setAttribute("x", String(endPt.x - (dirX !== 0 ? dirX * 22 : 12)));
+        tText.setAttribute("y", String(endPt.y - (dirY !== 0 ? dirY * 22 : 8)));
+        tText.setAttribute("class", "umlcanvas-edge-multiplicity umlcanvas-multiplicity-target");
+        tText.textContent = edge.multiplicityTarget;
+        applyFontToSvgElement(tText as SVGElement, { ...edgeFont, fontSize: multFontSize });
+        edgeGroup.appendChild(tText);
+      }
+    }
+
+    return edgeGroup;
+  }
+
+  private replaceOrAppend(parent: Element, newEl: Element, oldEl?: Element | null): void {
+    if (oldEl && ((oldEl.parentElement as unknown) === parent || !oldEl.parentElement)) {
+      if (typeof (parent as any).replaceChild === "function") {
+        parent.replaceChild(newEl, oldEl);
+        return;
+      }
+      this.safeRemove(oldEl);
+    }
+    parent.appendChild(newEl);
   }
 
   private safeRemove(el: Element | null | undefined): void {
@@ -1523,12 +1690,15 @@ export class SvgSceneRenderer {
       this.editor.diagram.nodes.map((n) => [n.id, n])
     );
     const existingChildren = Array.from(this.nodesLayerEl.children ?? []) as SVGGElement[];
-    const existingNodeMap = new Map<string, SVGGElement>();
+    const domNodeMap = new Map<string, SVGGElement>();
 
     for (const child of existingChildren) {
       const nodeId = child.getAttribute("data-node-id");
       if (nodeId) {
-        existingNodeMap.set(nodeId, child);
+        domNodeMap.set(nodeId, child);
+        if (!this.nodeElements.has(nodeId)) {
+          this.nodeElements.set(nodeId, child);
+        }
       } else {
         this.safeRemove(child);
       }
@@ -1536,9 +1706,7 @@ export class SvgSceneRenderer {
 
     // Clean up DOM:
     // Remove nodes that are no longer in the diagram, or are hidden/virtualized out.
-    // Non-PDF nodes are removed so they can be freshly rendered.
-    // PDF nodes are kept attached in the DOM so their embedded iframe is NOT reloaded or refreshed.
-    for (const [nodeId, childEl] of existingNodeMap.entries()) {
+    for (const [nodeId, childEl] of domNodeMap.entries()) {
       const node = diagramNodeMap.get(nodeId);
       const isVisible =
         node &&
@@ -1547,10 +1715,8 @@ export class SvgSceneRenderer {
 
       if (!node || !isVisible) {
         this.safeRemove(childEl);
-        existingNodeMap.delete(nodeId);
-      } else if (node.kind !== "generic.pdf") {
-        this.safeRemove(childEl);
-        existingNodeMap.delete(nodeId);
+        this.nodeElements.delete(nodeId);
+        this.nodeSignatures.delete(nodeId);
       }
     }
 
@@ -1563,17 +1729,107 @@ export class SvgSceneRenderer {
         continue;
       }
 
+      const existingEl = this.nodeElements.get(node.id);
+
       if (node.kind === "generic.pdf") {
-        const existingPdfGroup = existingNodeMap.get(node.id);
-        if (existingPdfGroup) {
-          this.updateExistingPdfNode(existingPdfGroup, node, svgNS);
+        if (existingEl && (existingEl.parentElement as unknown) === this.nodesLayerEl) {
+          this.updateExistingPdfNode(existingEl, node, svgNS);
+          continue;
+        } else {
+          const nodeGroup = this.renderNodeGroup(node, svgNS);
+          this.nodesLayerEl.appendChild(nodeGroup);
+          this.nodeElements.set(node.id, nodeGroup);
+          this.nodeSignatures.set(node.id, this.getNodeSignature(node));
           continue;
         }
       }
 
+      const currentSignature = this.getNodeSignature(node);
+      const previousSignature = this.nodeSignatures.get(node.id);
+
+      if (existingEl && (existingEl.parentElement as unknown) === this.nodesLayerEl && currentSignature === previousSignature) {
+        const posStr = `translate(${node.position.x}, ${node.position.y})`;
+        if (existingEl.getAttribute("transform") !== posStr) {
+          existingEl.setAttribute("transform", posStr);
+        }
+        const isLocked = this.editor.isNodeLocked(node.id);
+        if (typeof existingEl.classList?.toggle === "function") {
+          existingEl.classList.toggle("umlcanvas-node-locked", isLocked);
+          existingEl.classList.toggle("umlcanvas-node-editing", this.editingNodeId === node.id);
+        } else if (existingEl.classList) {
+          if (isLocked) existingEl.classList.add("umlcanvas-node-locked");
+          else existingEl.classList.remove("umlcanvas-node-locked");
+          if (this.editingNodeId === node.id) existingEl.classList.add("umlcanvas-node-editing");
+          else existingEl.classList.remove("umlcanvas-node-editing");
+        }
+        continue;
+      }
+
       const nodeGroup = this.renderNodeGroup(node, svgNS);
-      this.nodesLayerEl.appendChild(nodeGroup);
+      this.replaceOrAppend(this.nodesLayerEl, nodeGroup, existingEl);
+      this.nodeElements.set(node.id, nodeGroup);
+      this.nodeSignatures.set(node.id, currentSignature);
     }
+  }
+
+  private getNodeSignature(node: DiagramNode): string {
+    const isSelected = this.editor.isNodeSelected(node.id);
+    const isLocked = this.editor.isNodeLocked(node.id);
+    const isEditing = this.editingNodeId === node.id;
+    const labelsStr = (node.labels ?? [])
+      .map(
+        (l) =>
+          `${l.text}|${l.style?.fontSize}|${l.style?.bold}|${l.style?.italic}|${l.style?.fontFamily}|${l.style?.color}`
+      )
+      .join("~");
+    const styleStr = node.style
+      ? `${node.style.color}|${node.style.fillColor}|${node.style.strokeColor}|${node.style.strokeWidth}|${node.style.cornerRadius}|${node.style.fontSize}|${node.style.fontFamily}`
+      : "";
+    const portsStr = (node.ports ?? [])
+      .map((p) => `${p.id}:${p.side}:${p.offset}:${p.name}`)
+      .join(";");
+    const compartmentsStr = (node.compartments ?? [])
+      .map((c) => `${c.title}:${c.items?.join(",")}`)
+      .join(";");
+
+    let customStr = "";
+    if (node.customData) {
+      if (node.kind === "generic.freehand") {
+        customStr =
+          String(node.customData.pathData ?? "") +
+          (node.customData.points ? (node.customData.points as any[]).length : 0);
+      } else {
+        try {
+          customStr = JSON.stringify(node.customData);
+        } catch {
+          customStr = "";
+        }
+      }
+    }
+
+    const metaStr = node.metadata
+      ? `${String(node.metadata.filePath ?? "")}|${String(node.metadata.subpath ?? "")}`
+      : "";
+
+    return `${node.kind}|${node.size.width}x${node.size.height}|${labelsStr}|${styleStr}|${portsStr}|${compartmentsStr}|${node.stereotype ?? ""}|${customStr}|${metaStr}|${isSelected}|${isLocked}|${isEditing}`;
+  }
+
+  public getNodeElement(id: string): SVGGElement | null {
+    const el = this.nodeElements.get(id);
+    if (el && (el.parentElement as unknown) === this.nodesLayerEl) return el;
+    return this.nodesLayerEl.querySelector(`[data-node-id="${id}"]`) as SVGGElement | null;
+  }
+
+  public getEdgeElement(id: string): SVGGElement | null {
+    const el = this.edgeElements.get(id);
+    if (el && (el.parentElement as unknown) === this.edgesLayerEl) return el;
+    return this.edgesLayerEl.querySelector(`[data-edge-id="${id}"]`) as SVGGElement | null;
+  }
+
+  public getGroupElement(id: string): SVGGElement | null {
+    const el = this.groupElements.get(id);
+    if (el && (el.parentElement as unknown) === this.groupsLayerEl) return el;
+    return this.groupsLayerEl.querySelector(`[data-group-id="${id}"]`) as SVGGElement | null;
   }
 
   private renderNodeGroup(node: DiagramNode, svgNS: string): SVGGElement {
@@ -2505,14 +2761,21 @@ export class SvgSceneRenderer {
   // --- Event Handling ---
 
   private getClientCoords(e: MouseEvent): Point {
-    const rect =
-      this.cachedContainerRect ||
-      (typeof this.container.getBoundingClientRect === "function"
-        ? this.container.getBoundingClientRect()
-        : { left: 0, top: 0, width: this.container.clientWidth || 800, height: this.container.clientHeight || 600 });
+    if (!this.cachedContainerRect) {
+      if (typeof this.container.getBoundingClientRect === "function") {
+        this.cachedContainerRect = this.container.getBoundingClientRect();
+      } else {
+        this.cachedContainerRect = {
+          left: 0,
+          top: 0,
+          width: this.container.clientWidth || 800,
+          height: this.container.clientHeight || 600,
+        };
+      }
+    }
     return {
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top,
+      x: e.clientX - this.cachedContainerRect.left,
+      y: e.clientY - this.cachedContainerRect.top,
     };
   }
 
@@ -3291,13 +3554,19 @@ export class SvgSceneRenderer {
             x: Math.round(initialPos.x + dx + snapOffsetX),
             y: Math.round(initialPos.y + dy + snapOffsetY),
           };
+          const nodeEl = this.nodeElements.get(id);
+          if (nodeEl) {
+            nodeEl.setAttribute(
+              "transform",
+              `translate(${node.position.x}, ${node.position.y})`
+            );
+          }
         }
       }
 
       moveState.activeGuides = activeGuides;
 
       this.renderEdges();
-      this.renderNodes();
       this.renderInteractions();
       return;
     }
@@ -3319,6 +3588,13 @@ export class SvgSceneRenderer {
               x: Math.round(initialPos.x + dx),
               y: Math.round(initialPos.y + dy),
             };
+            const nodeEl = this.nodeElements.get(id);
+            if (nodeEl) {
+              nodeEl.setAttribute(
+                "transform",
+                `translate(${node.position.x}, ${node.position.y})`
+              );
+            }
           }
         }
         if (moveState.initialGroupPositions) {
@@ -3340,7 +3616,9 @@ export class SvgSceneRenderer {
             };
           }
         }
-        this.render();
+        this.renderGroups();
+        this.renderEdges();
+        this.renderInteractions();
       }
       return;
     }
@@ -3466,7 +3744,8 @@ export class SvgSceneRenderer {
       group.position = { x: Math.round(newX), y: Math.round(newY) };
       group.size = { width: Math.round(newW), height: Math.round(newH) };
 
-      this.render();
+      this.renderGroups();
+      this.renderInteractions();
       return;
     }
 
@@ -3581,23 +3860,31 @@ export class SvgSceneRenderer {
       !this.isSpacePressed &&
       this.editor.selectedNodeIds.length <= 1
     ) {
-      let hoveredTableId: string | undefined;
-      for (const node of this.editor.diagram.nodes) {
-        if (node.kind === "generic.table" && this.editor.isNodeVisible(node.id) && !this.editor.isNodeLocked(node.id)) {
-          const pad = 24;
-          if (
-            canvasPoint.x >= node.position.x - pad &&
-            canvasPoint.x <= node.position.x + node.size.width + 40 &&
-            canvasPoint.y >= node.position.y - pad &&
-            canvasPoint.y <= node.position.y + node.size.height + 40
-          ) {
-            hoveredTableId = node.id;
-            break;
+      const hasTables = this.editor.diagram.nodes.some(
+        (n) => n.kind === "generic.table"
+      );
+      if (hasTables) {
+        let hoveredTableId: string | undefined;
+        for (const node of this.editor.diagram.nodes) {
+          if (node.kind === "generic.table" && this.editor.isNodeVisible(node.id) && !this.editor.isNodeLocked(node.id)) {
+            const pad = 24;
+            if (
+              canvasPoint.x >= node.position.x - pad &&
+              canvasPoint.x <= node.position.x + node.size.width + 40 &&
+              canvasPoint.y >= node.position.y - pad &&
+              canvasPoint.y <= node.position.y + node.size.height + 40
+            ) {
+              hoveredTableId = node.id;
+              break;
+            }
           }
         }
-      }
-      if (hoveredTableId !== this.hoveredTableNodeId) {
-        this.hoveredTableNodeId = hoveredTableId;
+        if (hoveredTableId !== this.hoveredTableNodeId) {
+          this.hoveredTableNodeId = hoveredTableId;
+          this.renderInteractions();
+        }
+      } else if (this.hoveredTableNodeId) {
+        this.hoveredTableNodeId = undefined;
         this.renderInteractions();
       }
     }
@@ -5865,11 +6152,24 @@ export class SvgSceneRenderer {
     this.svgEl.removeEventListener("dragover", this.onDragOverBound);
     this.svgEl.removeEventListener("drop", this.onDropBound);
     this.svgEl.removeEventListener("mouseleave", this.onMouseLeaveBound);
+    if (this.onWindowResizeBound) {
+      window.removeEventListener("resize", this.onWindowResizeBound);
+    }
 
     if (this.unsubscribeEditor) {
       this.unsubscribeEditor();
       this.unsubscribeEditor = null;
     }
+
+    this.nodeElements.clear();
+    this.nodeSignatures.clear();
+    this.edgeElements.clear();
+    this.edgeSignatures.clear();
+    this.edgeRouteCache.clear();
+    this.groupElements.clear();
+    this.groupSignatures.clear();
+    this.lastVirtualizationCenter = null;
+    this.cachedContainerRect = null;
 
     this.markerTemplates.clear();
     this.createdMarkerIds.clear();

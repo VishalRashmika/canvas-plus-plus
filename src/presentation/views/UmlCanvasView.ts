@@ -307,7 +307,7 @@ export class UmlCanvasView extends TextFileView {
           this.toolbar.updateZoomLabel(t);
         }
         if (this.minimap) {
-          this.minimap.update();
+          this.minimap.updateViewport();
         }
       },
       onStrokeComplete: (stroke, strokeOpts) => {

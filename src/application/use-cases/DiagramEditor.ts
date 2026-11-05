@@ -2315,7 +2315,6 @@ export class DiagramEditor {
   updateTableCell(nodeId: string, row: number, col: number, text: string): void {
     const cmd = new UpdateTableCellCommand(this.diagram, nodeId, row, col, text);
     this.commandStack.execute(cmd);
-    this.notify();
   }
 
   normalizeTableData(node: DiagramNode): { rows: number; cols: number; cells: string[][] } {
@@ -2355,7 +2354,6 @@ export class DiagramEditor {
     };
     const cmd = new UpdateTableStructureCommand(this.diagram, nodeId, nextCustomData, nextSize);
     this.commandStack.execute(cmd);
-    this.notify();
   }
 
   deleteTableRow(nodeId: string, rowIndex?: number): void {
@@ -2380,7 +2378,6 @@ export class DiagramEditor {
     };
     const cmd = new UpdateTableStructureCommand(this.diagram, nodeId, nextCustomData, nextSize);
     this.commandStack.execute(cmd);
-    this.notify();
   }
 
   addTableColumn(nodeId: string, atIndex?: number): void {
@@ -2404,7 +2401,6 @@ export class DiagramEditor {
     };
     const cmd = new UpdateTableStructureCommand(this.diagram, nodeId, nextCustomData, nextSize);
     this.commandStack.execute(cmd);
-    this.notify();
   }
 
   deleteTableColumn(nodeId: string, colIndex?: number): void {
@@ -2431,7 +2427,6 @@ export class DiagramEditor {
     };
     const cmd = new UpdateTableStructureCommand(this.diagram, nodeId, nextCustomData, nextSize);
     this.commandStack.execute(cmd);
-    this.notify();
   }
 
   addTableNode(params?: {
@@ -3486,7 +3481,6 @@ export class DiagramEditor {
 
     if (commands.length === 0) return false;
     this.commandStack.execute(new CompoundCommand(commands, "Match node sizes"));
-    this.notify();
     return true;
   }
 

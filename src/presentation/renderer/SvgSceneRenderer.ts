@@ -80,8 +80,22 @@ export interface SvgSceneRendererOptions {
     el: HTMLElement,
     sourcePath: string
   ) => Promise<void> | void;
-  onOpenVaultNote?: (callback: (noteFile: any) => void) => void;
-  onOpenVaultImage?: (callback: (imageFileOrUrl: any) => void) => void;
+  onOpenVaultNote?: (callback: (noteFile: VaultFileLike) => void) => void;
+  onOpenVaultImage?: (callback: (imageFileOrUrl: VaultImageLike | string) => void) => void;
+}
+
+export interface VaultFileLike {
+  path: string;
+  name?: string;
+  basename?: string;
+  extension?: string;
+}
+
+export interface VaultImageLike {
+  path?: string;
+  src?: string;
+  name?: string;
+  basename?: string;
 }
 
 type DragMode =
@@ -272,8 +286,8 @@ export class SvgSceneRenderer {
   ) => Promise<void> | void;
   private arrowAttachmentPopup: ArrowAttachmentPopup | null = null;
   private arrowAttachmentState: ArrowAttachmentContext | null = null;
-  private onOpenVaultNote?: (callback: (noteFile: any) => void) => void;
-  private onOpenVaultImage?: (callback: (imageFileOrUrl: any) => void) => void;
+  private onOpenVaultNote?: (callback: (noteFile: VaultFileLike) => void) => void;
+  private onOpenVaultImage?: (callback: (imageFileOrUrl: VaultImageLike | string) => void) => void;
 
   constructor(
     container: HTMLElement,
@@ -454,6 +468,31 @@ export class SvgSceneRenderer {
 
     this.updateViewportTransform();
     this.render();
+  }
+
+  private renderScheduled = false;
+  private animationFrameId: number | null = null;
+
+  /**
+   * Schedules a render on the next animation frame, coalescing rapid state mutations
+   * to ensure 60-120fps buttery smooth performance without redundant DOM diffing.
+   */
+  public scheduleRender(): void {
+    if (this.renderScheduled) return;
+    this.renderScheduled = true;
+
+    if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+      this.animationFrameId = window.requestAnimationFrame(() => {
+        this.renderScheduled = false;
+        this.animationFrameId = null;
+        this.render();
+      });
+    } else {
+      queueMicrotask(() => {
+        this.renderScheduled = false;
+        this.render();
+      });
+    }
   }
 
   get currentTransform(): ViewportTransform {
@@ -1005,6 +1044,16 @@ export class SvgSceneRenderer {
   // --- Rendering ---
 
   render(): void {
+    if (
+      this.animationFrameId !== null &&
+      typeof window !== "undefined" &&
+      typeof window.cancelAnimationFrame === "function"
+    ) {
+      window.cancelAnimationFrame(this.animationFrameId);
+      this.animationFrameId = null;
+    }
+    this.renderScheduled = false;
+
     this.renderGroups();
     this.renderEdges();
     this.renderNodes();
@@ -1661,8 +1710,9 @@ export class SvgSceneRenderer {
 
   private replaceOrAppend(parent: Element, newEl: Element, oldEl?: Element | null): void {
     if (oldEl && ((oldEl.parentElement as unknown) === parent || !oldEl.parentElement)) {
-      if (typeof (parent as any).replaceChild === "function") {
-        parent.replaceChild(newEl, oldEl);
+      const p = parent as unknown as Node;
+      if (typeof p.replaceChild === "function") {
+        p.replaceChild(newEl, oldEl);
         return;
       }
       this.safeRemove(oldEl);
@@ -1674,8 +1724,11 @@ export class SvgSceneRenderer {
     if (!el) return;
     if (typeof el.remove === "function") {
       el.remove();
-    } else if (el.parentElement && typeof (el.parentElement as any).removeChild === "function") {
-      el.parentElement.removeChild(el);
+    } else if (el.parentElement) {
+      const p = el.parentElement as unknown as Node;
+      if (typeof p.removeChild === "function") {
+        p.removeChild(el);
+      }
     }
   }
 
@@ -1789,27 +1842,46 @@ export class SvgSceneRenderer {
       .map((p) => `${p.id}:${p.side}:${p.offset}:${p.name}`)
       .join(";");
     const compartmentsStr = (node.compartments ?? [])
-      .map((c) => `${c.title}:${c.items?.join(",")}`)
+      .map((c) => {
+        const itemStrs = (c.items ?? []).map((it) => (typeof it === "string" ? it : JSON.stringify(it)));
+        return `${c.title}:${itemStrs.join(",")}`;
+      })
       .join(";");
 
     let customStr = "";
     if (node.customData) {
       if (node.kind === "generic.freehand") {
-        customStr =
-          String(node.customData.pathData ?? "") +
-          (node.customData.points ? (node.customData.points as any[]).length : 0);
+        const pathDataStr = typeof node.customData.pathData === "string" ? node.customData.pathData : "";
+        const pointsLen = Array.isArray(node.customData.points) ? node.customData.points.length : 0;
+        customStr = `${pathDataStr.slice(0, 40)}#${pathDataStr.length}:${pointsLen}`;
       } else {
-        try {
-          customStr = JSON.stringify(node.customData);
-        } catch {
-          customStr = "";
+        const keys = Object.keys(node.customData).sort();
+        const parts: string[] = [];
+        for (const k of keys) {
+          const val = node.customData[k];
+          if (typeof val === "string") {
+            if (val.length > 80) {
+              parts.push(`${k}:${val.slice(0, 32)}..${val.length}`);
+            } else {
+              parts.push(`${k}:${val}`);
+            }
+          } else if (typeof val === "number" || typeof val === "boolean") {
+            parts.push(`${k}:${val}`);
+          } else if (val && typeof val === "object") {
+            try {
+              parts.push(`${k}:${JSON.stringify(val).slice(0, 64)}`);
+            } catch {
+              parts.push(`${k}:obj`);
+            }
+          }
         }
+        customStr = parts.join(",");
       }
     }
 
-    const metaStr = node.metadata
-      ? `${String(node.metadata.filePath ?? "")}|${String(node.metadata.subpath ?? "")}`
-      : "";
+    const filePathStr = typeof node.metadata?.filePath === "string" ? node.metadata.filePath : "";
+    const subpathStr = typeof node.metadata?.subpath === "string" ? node.metadata.subpath : "";
+    const metaStr = `${filePathStr}|${subpathStr}`;
 
     return `${node.kind}|${node.size.width}x${node.size.height}|${labelsStr}|${styleStr}|${portsStr}|${compartmentsStr}|${node.stereotype ?? ""}|${customStr}|${metaStr}|${isSelected}|${isLocked}|${isEditing}`;
   }
@@ -1817,19 +1889,19 @@ export class SvgSceneRenderer {
   public getNodeElement(id: string): SVGGElement | null {
     const el = this.nodeElements.get(id);
     if (el && (el.parentElement as unknown) === this.nodesLayerEl) return el;
-    return this.nodesLayerEl.querySelector(`[data-node-id="${id}"]`) as SVGGElement | null;
+    return this.nodesLayerEl.querySelector(`[data-node-id="${id}"]`);
   }
 
   public getEdgeElement(id: string): SVGGElement | null {
     const el = this.edgeElements.get(id);
     if (el && (el.parentElement as unknown) === this.edgesLayerEl) return el;
-    return this.edgesLayerEl.querySelector(`[data-edge-id="${id}"]`) as SVGGElement | null;
+    return this.edgesLayerEl.querySelector(`[data-edge-id="${id}"]`);
   }
 
   public getGroupElement(id: string): SVGGElement | null {
     const el = this.groupElements.get(id);
     if (el && (el.parentElement as unknown) === this.groupsLayerEl) return el;
-    return this.groupsLayerEl.querySelector(`[data-group-id="${id}"]`) as SVGGElement | null;
+    return this.groupsLayerEl.querySelector(`[data-group-id="${id}"]`);
   }
 
   private renderNodeGroup(node: DiagramNode, svgNS: string): SVGGElement {
@@ -1854,7 +1926,12 @@ export class SvgSceneRenderer {
       nodeGroup.setAttribute("data-color", node.style.color);
       const resolvedColor = resolveCanvasColor(node.style.color);
       if (resolvedColor) {
-        (nodeGroup as any).setCssProps?.({ "--canvas-color": resolvedColor });
+        const obsEl = nodeGroup as unknown as { setCssProps?: (props: Record<string, string>) => void };
+        if (typeof obsEl.setCssProps === "function") {
+          obsEl.setCssProps({ "--canvas-color": resolvedColor });
+        } else if (nodeGroup.style && typeof nodeGroup.style.setProperty === "function") {
+          nodeGroup.style.setProperty("--canvas-color", resolvedColor);
+        }
       }
       if (isCanvasColorPreset(node.style.color)) {
         nodeGroup.classList.add(`is-color-${node.style.color}`);
@@ -1863,7 +1940,12 @@ export class SvgSceneRenderer {
       }
     } else if (node.style?.strokeColor) {
       nodeGroup.setAttribute("data-color", node.style.strokeColor);
-      (nodeGroup as any).setCssProps?.({ "--canvas-color": node.style.strokeColor });
+      const obsEl = nodeGroup as unknown as { setCssProps?: (props: Record<string, string>) => void };
+      if (typeof obsEl.setCssProps === "function") {
+        obsEl.setCssProps({ "--canvas-color": node.style.strokeColor });
+      } else if (nodeGroup.style && typeof nodeGroup.style.setProperty === "function") {
+        nodeGroup.style.setProperty("--canvas-color", node.style.strokeColor);
+      }
       nodeGroup.classList.add("has-custom-color");
     }
 
@@ -2004,7 +2086,12 @@ export class SvgSceneRenderer {
       nodeGroup.setAttribute("data-color", node.style.color);
       const resolvedColor = resolveCanvasColor(node.style.color);
       if (resolvedColor) {
-        (nodeGroup as any).setCssProps?.({ "--canvas-color": resolvedColor });
+        const obsEl = nodeGroup as unknown as { setCssProps?: (props: Record<string, string>) => void };
+        if (typeof obsEl.setCssProps === "function") {
+          obsEl.setCssProps({ "--canvas-color": resolvedColor });
+        } else if (nodeGroup.style && typeof nodeGroup.style.setProperty === "function") {
+          nodeGroup.style.setProperty("--canvas-color", resolvedColor);
+        }
       }
       if (isCanvasColorPreset(node.style.color)) {
         nodeGroup.classList.add(`is-color-${node.style.color}`);
@@ -2013,7 +2100,12 @@ export class SvgSceneRenderer {
       }
     } else if (node.style?.strokeColor) {
       nodeGroup.setAttribute("data-color", node.style.strokeColor);
-      (nodeGroup as any).setCssProps?.({ "--canvas-color": node.style.strokeColor });
+      const obsEl = nodeGroup as unknown as { setCssProps?: (props: Record<string, string>) => void };
+      if (typeof obsEl.setCssProps === "function") {
+        obsEl.setCssProps({ "--canvas-color": node.style.strokeColor });
+      } else if (nodeGroup.style && typeof nodeGroup.style.setProperty === "function") {
+        nodeGroup.style.setProperty("--canvas-color", node.style.strokeColor);
+      }
       nodeGroup.classList.add("has-custom-color");
     } else {
       nodeGroup.classList.remove("has-custom-color");
@@ -2080,7 +2172,7 @@ export class SvgSceneRenderer {
     }
 
     // 9. Subpath / Page badge
-    let pageBadge = nodeGroup.querySelector(".umlcanvas-pdf-page-badge") as SVGTextElement | null;
+    let pageBadge: SVGTextElement | null = nodeGroup.querySelector(".umlcanvas-pdf-page-badge");
     if (subpath && w >= 220) {
       const pageMatch = subpath.match(/page=(\d+)/i);
       const badgeText = pageMatch ? `p. ${pageMatch[1]}` : subpath.replace(/^#/, "");
@@ -3469,9 +3561,10 @@ export class SvgSceneRenderer {
       this.activeStroke &&
       this.freehandPathEl
     ) {
+      const pointerEvt = e as unknown as { getCoalescedEvents?: () => MouseEvent[] };
       const rawEvents: MouseEvent[] =
-        typeof (e as any).getCoalescedEvents === "function"
-          ? (e as any).getCoalescedEvents()
+        typeof pointerEvt.getCoalescedEvents === "function"
+          ? pointerEvt.getCoalescedEvents()
           : [e];
 
       let added = false;
@@ -5937,7 +6030,7 @@ export class SvgSceneRenderer {
       },
       onOpenVaultNote: this.onOpenVaultNote
         ? () => {
-            this.onOpenVaultNote?.((file) => {
+            this.onOpenVaultNote?.((file: VaultFileLike) => {
               const item = DEFAULT_ATTACHMENT_ITEMS.find((it) => it.id === "vault-note")!;
               const res = this.attachShapeToArrow(item);
               if (res && file) {
@@ -5952,11 +6045,11 @@ export class SvgSceneRenderer {
         : undefined,
       onOpenVaultImage: this.onOpenVaultImage
         ? () => {
-            this.onOpenVaultImage?.((img) => {
+            this.onOpenVaultImage?.((img: VaultImageLike | string) => {
               const item = DEFAULT_ATTACHMENT_ITEMS.find((it) => it.id === "image")!;
               const res = this.attachShapeToArrow(item);
               if (res && img) {
-                const src = typeof img === "string" ? img : img.path;
+                const src = typeof img === "string" ? img : (img.src || img.path || "");
                 this.editor.updateNode(res.node.id, {
                   metadata: { src },
                   customData: { src },
@@ -6064,7 +6157,14 @@ export class SvgSceneRenderer {
       }
     }
 
-    const nodeParams: any = {
+    const nodeParams: {
+      kind: string;
+      title: string;
+      position: Point;
+      size: Size;
+      style?: { color?: string };
+      customData?: Record<string, unknown>;
+    } = {
       kind: item.kind,
       title: item.title,
       position: { x: posX, y: posY },
@@ -6074,7 +6174,7 @@ export class SvgSceneRenderer {
       nodeParams.style = { color: item.color };
     }
     if (item.customData) {
-      nodeParams.customData = JSON.parse(JSON.stringify(item.customData));
+      nodeParams.customData = JSON.parse(JSON.stringify(item.customData)) as Record<string, unknown>;
     }
 
     const newNode = this.editor.addNode(nodeParams);
@@ -6088,7 +6188,7 @@ export class SvgSceneRenderer {
     });
 
     if (item.id === "vault-note" && this.onOpenVaultNote) {
-      this.onOpenVaultNote((file) => {
+      this.onOpenVaultNote((file: VaultFileLike) => {
         if (file) {
           this.editor.updateNode(newNode.id, {
             title: file.basename ?? file.name ?? "Note",
@@ -6100,9 +6200,9 @@ export class SvgSceneRenderer {
     }
 
     if (item.id === "image" && this.onOpenVaultImage) {
-      this.onOpenVaultImage((img) => {
+      this.onOpenVaultImage((img: VaultImageLike | string) => {
         if (img) {
-          const src = typeof img === "string" ? img : (img.src || img.path);
+          const src = typeof img === "string" ? img : (img.src || img.path || "");
           this.editor.updateNode(newNode.id, {
             metadata: { src },
             customData: { src },
@@ -6131,6 +6231,16 @@ export class SvgSceneRenderer {
   }
 
   destroy(): void {
+    if (
+      this.animationFrameId !== null &&
+      typeof window !== "undefined" &&
+      typeof window.cancelAnimationFrame === "function"
+    ) {
+      window.cancelAnimationFrame(this.animationFrameId);
+      this.animationFrameId = null;
+    }
+    this.renderScheduled = false;
+
     this.closeArrowAttachmentPopup();
     this.cleanupInlineEditor();
 

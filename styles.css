@@ -1888,7 +1888,12 @@ body .umlcanvas-moving * {
   background-color: var(--background-primary);
 }
 
-/* Disable pointer-events inside the iframe while panning, moving, resizing, or selecting to avoid event swallowing */
+/* Disable pointer-events inside the iframe while unselected so clicking selects and moves the card smoothly */
+.umlcanvas-node:not(.umlcanvas-node-selected) .umlcanvas-pdf-frame {
+  pointer-events: none;
+}
+
+/* Disable pointer-events inside the iframe and foreignObject while panning, moving, resizing, or selecting to avoid event swallowing */
 .umlcanvas-moving .umlcanvas-pdf-frame,
 .umlcanvas-panning .umlcanvas-pdf-frame,
 .umlcanvas-resizing .umlcanvas-pdf-frame,
@@ -1897,7 +1902,16 @@ body .umlcanvas-moving * {
 .umlcanvas-drawing .umlcanvas-pdf-frame,
 .umlcanvas-freehand-mode .umlcanvas-pdf-frame,
 .umlcanvas-grab-mode .umlcanvas-pdf-frame,
-.umlcanvas-space-pressed .umlcanvas-pdf-frame {
+.umlcanvas-space-pressed .umlcanvas-pdf-frame,
+.umlcanvas-moving .umlcanvas-pdf-foreign,
+.umlcanvas-panning .umlcanvas-pdf-foreign,
+.umlcanvas-resizing .umlcanvas-pdf-foreign,
+.umlcanvas-selecting .umlcanvas-pdf-foreign,
+.umlcanvas-connecting .umlcanvas-pdf-foreign,
+.umlcanvas-drawing .umlcanvas-pdf-foreign,
+.umlcanvas-freehand-mode .umlcanvas-pdf-foreign,
+.umlcanvas-grab-mode .umlcanvas-pdf-foreign,
+.umlcanvas-space-pressed .umlcanvas-pdf-foreign {
   pointer-events: none !important;
 }
 

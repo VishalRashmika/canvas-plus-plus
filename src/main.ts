@@ -12,6 +12,8 @@ import { FileDiagramRepository } from "./infrastructure/persistence/FileDiagramR
 import { ApplyExternalPatch } from "./application/use-cases/ApplyExternalPatch";
 import { FileWatcherBridge } from "./infrastructure/cli-bridge/FileWatcherBridge";
 import { ExportForRAG } from "./application/use-cases/ExportForRAG";
+import { defaultWorkerPool } from "./infrastructure/concurrency/WorkerPool";
+import { defaultConcurrencyManager } from "./infrastructure/concurrency/ConcurrencyManager";
 
 /**
  * Composition root — see docs/01-ARCHITECTURE.md.
@@ -691,6 +693,18 @@ export default class CanvasPlusPlusPlugin extends Plugin {
         console.warn("[Canvas++] Error stopping fileWatcherBridge:", err);
       }
       this.fileWatcherBridge = null;
+    }
+
+    try {
+      defaultWorkerPool.terminate();
+    } catch (err) {
+      console.warn("[Canvas++] Error terminating worker pool:", err);
+    }
+
+    try {
+      defaultConcurrencyManager.dispose();
+    } catch (err) {
+      console.warn("[Canvas++] Error disposing concurrency manager:", err);
     }
   }
 }

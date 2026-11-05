@@ -28,6 +28,7 @@ import { MinimapView } from "./MinimapView";
 import { NoteSuggestModal } from "./NoteSuggestModal";
 import { ImageSuggestModal, isImageFile } from "./ImageSuggestModal";
 import { PdfSuggestModal, isPdfFile } from "./PdfSuggestModal";
+import { PdfPageModal } from "./PdfPageModal";
 import { ChipDefinitionModal } from "./ChipDefinitionModal";
 import { ChipInterfaceDefinition } from "../../domain/entities/ChipInterfaceDefinition";
 import { defaultCustomChipRegistry } from "../../domain/services/CustomChipRegistry";
@@ -1824,34 +1825,70 @@ export class UmlCanvasView extends TextFileView {
     input.accept = "application/pdf,.pdf";
     input.addEventListener("change", () => {
       const file = input.files?.[0];
-      if (file && typeof FileReader !== "undefined") {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const dataUrl = reader.result as string;
-          if (targetNodeId && this.editor) {
-            const existing = this.editor.diagram.nodes.find((n) => n.id === targetNodeId);
-            this.editor.updateNode(targetNodeId, {
-              title: file.name.replace(/\.[^/.]+$/, ""),
-              metadata: {
-                ...existing?.metadata,
-                filePath: file.name,
-                src: dataUrl,
-              },
-              customData: {
-                ...existing?.customData,
-                filePath: file.name,
-                src: dataUrl,
-              },
+      if (file) {
+        void (async () => {
+          try {
+            const saved = await this.canvasAttachmentService.savePastedPdf(file, {
+              file: this.file,
+              diagramTitle: this.editor?.diagram?.title,
+              preferredName: file.name,
             });
-          } else {
-            void this.addPdfToCanvas({
-              src: dataUrl,
-              title: file.name.replace(/\.[^/.]+$/, ""),
-              canvasPoint,
-            });
+            if (targetNodeId && this.editor) {
+              const existing = this.editor.diagram.nodes.find((n) => n.id === targetNodeId);
+              this.editor.updateNode(targetNodeId, {
+                title: saved.title,
+                metadata: {
+                  ...existing?.metadata,
+                  filePath: saved.filePath,
+                  src: saved.src,
+                },
+                customData: {
+                  ...existing?.customData,
+                  filePath: saved.filePath,
+                  src: saved.src,
+                },
+              });
+            } else {
+              await this.addPdfToCanvas({
+                file: saved.file ?? undefined,
+                filePath: saved.filePath,
+                src: saved.src,
+                title: saved.title,
+                canvasPoint,
+              });
+            }
+          } catch {
+            if (typeof FileReader !== "undefined") {
+              const reader = new FileReader();
+              reader.onload = () => {
+                const dataUrl = reader.result as string;
+                if (targetNodeId && this.editor) {
+                  const existing = this.editor.diagram.nodes.find((n) => n.id === targetNodeId);
+                  this.editor.updateNode(targetNodeId, {
+                    title: file.name.replace(/\.[^/.]+$/, ""),
+                    metadata: {
+                      ...existing?.metadata,
+                      filePath: file.name,
+                      src: dataUrl,
+                    },
+                    customData: {
+                      ...existing?.customData,
+                      filePath: file.name,
+                      src: dataUrl,
+                    },
+                  });
+                } else {
+                  void this.addPdfToCanvas({
+                    src: dataUrl,
+                    title: file.name.replace(/\.[^/.]+$/, ""),
+                    canvasPoint,
+                  });
+                }
+              };
+              reader.readAsDataURL(file);
+            }
           }
-        };
-        reader.readAsDataURL(file);
+        })();
       }
       input.remove();
     });
@@ -1892,37 +1929,54 @@ export class UmlCanvasView extends TextFileView {
     });
   }
 
-  public promptChangePdfPage(node: DiagramNode): void {
+  public promptChangePdfPage(node: DiagramNode, directSubpath?: string): void {
     if (!this.editor) return;
     const currentSubpath =
       (node.metadata?.subpath as string) ||
       (node.customData?.subpath as string) ||
       "";
-    const currentMatch = currentSubpath.match(/page=(\d+)/i);
-    const currentPage = currentMatch ? currentMatch[1] : (currentSubpath ? currentSubpath.replace(/^#/, "") : "1");
 
-    const pageStr = typeof window !== "undefined" && typeof window.prompt === "function"
-      ? window.prompt("Enter target page number (e.g. 5) or subpath (e.g. #page=5):", currentPage)
-      : null;
-    if (pageStr === null) return;
-    const trimmed = pageStr.trim();
-    if (!trimmed) {
-      // Clear subpath
+    const applyPage = (subpath: string) => {
+      if (!this.editor) return;
+      const trimmed = subpath.trim();
+      let cleanSubpath = "";
+      if (trimmed) {
+        cleanSubpath = /^\d+$/.test(trimmed)
+          ? `#page=${trimmed}`
+          : (trimmed.startsWith("#") ? trimmed : `#${trimmed}`);
+      }
+      const src = (node.customData?.src as string) || (node.metadata?.src as string) || "";
+      const cleanSrc = src ? src.split("#")[0] : "";
+      const newSrc = cleanSrc ? (cleanSubpath ? `${cleanSrc}${cleanSubpath}` : cleanSrc) : src;
+
       this.editor.updateNode(node.id, {
-        metadata: { ...node.metadata, subpath: "" },
-        customData: { ...node.customData, subpath: "" },
+        metadata: { ...node.metadata, subpath: cleanSubpath, ...(newSrc ? { src: newSrc } : {}) },
+        customData: { ...node.customData, subpath: cleanSubpath, ...(newSrc ? { src: newSrc } : {}) },
       });
+    };
+
+    if (directSubpath !== undefined) {
+      applyPage(directSubpath);
       return;
     }
-    const newSubpath = /^\d+$/.test(trimmed) ? `#page=${trimmed}` : (trimmed.startsWith("#") ? trimmed : `#${trimmed}`);
-    const src = (node.customData?.src as string) || (node.metadata?.src as string) || "";
-    const cleanSrc = src ? src.split("#")[0] : "";
-    const newSrc = cleanSrc ? `${cleanSrc}${newSubpath}` : src;
 
-    this.editor.updateNode(node.id, {
-      metadata: { ...node.metadata, subpath: newSubpath, ...(newSrc ? { src: newSrc } : {}) },
-      customData: { ...node.customData, subpath: newSubpath, ...(newSrc ? { src: newSrc } : {}) },
-    });
+    const win = typeof window !== "undefined" ? (window as unknown as { prompt?: (msg?: string, def?: string) => string | null }) : null;
+    if (win && typeof win.prompt === "function") {
+      const match = currentSubpath.match(/page=(\d+)/i);
+      const currentPage = match ? match[1] : (currentSubpath ? currentSubpath.replace(/^#/, "") : "1");
+      const pageStr = win.prompt("Enter target page number (e.g. 5) or subpath (e.g. #page=5):", currentPage);
+      if (pageStr === null) return;
+      applyPage(pageStr.trim());
+      return;
+    }
+
+    try {
+      new PdfPageModal(this.app, currentSubpath, (newSubpath) => {
+        applyPage(newSubpath);
+      }).open();
+    } catch {
+      applyPage("");
+    }
   }
 
   public async addPdfToCanvas(options: {
@@ -2077,18 +2131,35 @@ export class UmlCanvasView extends TextFileView {
           void this.handlePastedImageBlob(osFile, canvasPoint);
           return true;
         } else if (osFile.type === "application/pdf" || isPdfFile(osFile.name)) {
-          if (typeof FileReader !== "undefined") {
-            const reader = new FileReader();
-            reader.onload = () => {
-              const dataUrl = reader.result as string;
-              void this.addPdfToCanvas({
-                src: dataUrl,
-                title: osFile.name.replace(/\.[^/.]+$/, ""),
+          void (async () => {
+            try {
+              const saved = await this.canvasAttachmentService.savePastedPdf(osFile, {
+                file: this.file,
+                diagramTitle: this.editor?.diagram?.title,
+                preferredName: osFile.name,
+              });
+              await this.addPdfToCanvas({
+                file: saved.file ?? undefined,
+                filePath: saved.filePath,
+                src: saved.src,
+                title: saved.title,
                 canvasPoint,
               });
-            };
-            reader.readAsDataURL(osFile);
-          }
+            } catch {
+              if (typeof FileReader !== "undefined") {
+                const reader = new FileReader();
+                reader.onload = () => {
+                  const dataUrl = reader.result as string;
+                  void this.addPdfToCanvas({
+                    src: dataUrl,
+                    title: osFile.name.replace(/\.[^/.]+$/, ""),
+                    canvasPoint,
+                  });
+                };
+                reader.readAsDataURL(osFile);
+              }
+            }
+          })();
           return true;
         }
       }
@@ -2250,18 +2321,35 @@ export class UmlCanvasView extends TextFileView {
           "name" in blob && typeof (blob as { name: unknown }).name === "string"
             ? (blob as { name: string }).name
             : undefined;
-        if (typeof FileReader !== "undefined") {
-          const reader = new FileReader();
-          reader.onload = () => {
-            const dataUrl = reader.result as string;
-            void this.addPdfToCanvas({
-              src: dataUrl,
-              title: rawPdfName?.replace(/\.[^/.]+$/, "") || "Document",
+        void (async () => {
+          try {
+            const saved = await this.canvasAttachmentService.savePastedPdf(blob, {
+              file: this.file,
+              diagramTitle: this.editor?.diagram?.title,
+              preferredName: rawPdfName,
+            });
+            await this.addPdfToCanvas({
+              file: saved.file ?? undefined,
+              filePath: saved.filePath,
+              src: saved.src,
+              title: saved.title,
               canvasPoint: pt,
             });
-          };
-          reader.readAsDataURL(blob);
-        }
+          } catch {
+            if (typeof FileReader !== "undefined") {
+              const reader = new FileReader();
+              reader.onload = () => {
+                const dataUrl = reader.result as string;
+                void this.addPdfToCanvas({
+                  src: dataUrl,
+                  title: rawPdfName?.replace(/\.[^/.]+$/, "") || "Document",
+                  canvasPoint: pt,
+                });
+              };
+              reader.readAsDataURL(blob);
+            }
+          }
+        })();
         offset += 40;
       }
       return;

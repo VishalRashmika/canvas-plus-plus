@@ -18,6 +18,13 @@ export interface SavedImageResult {
   size?: Size;
 }
 
+export interface SavedPdfResult {
+  file: TFile | null;
+  filePath: string;
+  src: string;
+  title: string;
+}
+
 /**
  * Service responsible for managing image attachments for canvas documents.
  * Automatically creates a dedicated subfolder named after the canvas document
@@ -237,6 +244,107 @@ export class CanvasAttachmentService {
       src,
       title: fileName.replace(/\.[^/.]+$/, ""),
       size,
+    };
+  }
+
+  /**
+   * Generates a collision-free filename and path for PDF documents inside the target folder.
+   */
+  public getUniquePdfFilePath(
+    folderPath: string,
+    originalName?: string
+  ): { fileName: string; fullFilePath: string } {
+    let baseName = "";
+
+    if (
+      originalName &&
+      !/^document\.pdf$/i.test(originalName) &&
+      originalName !== "blob" &&
+      originalName !== "clipboard.pdf"
+    ) {
+      baseName = originalName
+        .replace(/\.[^/.]+$/, "")
+        .replace(/[\\/:*?"<>|]/g, "_")
+        .trim();
+    }
+
+    if (!baseName) {
+      baseName = `Document ${this.formatTimestamp()}`;
+    }
+
+    let fileName = `${baseName}.pdf`;
+    let fullFilePath = normalizePath(`${folderPath}/${fileName}`);
+
+    let counter = 1;
+    while (this.app.vault.getAbstractFileByPath(fullFilePath)) {
+      fileName = `${baseName} ${counter}.pdf`;
+      fullFilePath = normalizePath(`${folderPath}/${fileName}`);
+      counter++;
+    }
+
+    return { fileName, fullFilePath };
+  }
+
+  /**
+   * Saves a pasted or imported PDF Blob/File into the canvas document's dedicated directory.
+   * Prevents large base64 data URLs from bloating the document and freezing the main thread.
+   */
+  public async savePastedPdf(
+    blob: Blob,
+    options: {
+      file: TFile | null;
+      diagramTitle?: string;
+      preferredName?: string;
+    }
+  ): Promise<SavedPdfResult> {
+    const folderInfo = this.getCanvasDocumentFolder(options.file, options.diagramTitle);
+    await this.ensureFolderExists(folderInfo.fullFolderPath);
+
+    const rawName =
+      "name" in blob && typeof (blob as { name: unknown }).name === "string"
+        ? (blob as { name: string }).name
+        : undefined;
+
+    const { fileName, fullFilePath } = this.getUniquePdfFilePath(
+      folderInfo.fullFolderPath,
+      options.preferredName || rawName
+    );
+
+    const arrayBuffer = await this.blobToArrayBuffer(blob);
+
+    let createdFile: TFile | null = null;
+    if (typeof this.app.vault.createBinary === "function") {
+      createdFile = await this.app.vault.createBinary(fullFilePath, arrayBuffer);
+    } else if (this.app.vault.adapter?.writeBinary) {
+      await this.app.vault.adapter.writeBinary(fullFilePath, arrayBuffer);
+      const fetched = this.app.vault.getAbstractFileByPath(fullFilePath);
+      if (fetched instanceof TFile) createdFile = fetched;
+    } else if (typeof this.app.vault.create === "function") {
+      const textDecoder = typeof TextDecoder !== "undefined" ? new TextDecoder() : null;
+      const strData = textDecoder ? textDecoder.decode(arrayBuffer) : "";
+      createdFile = await this.app.vault.create(fullFilePath, strData);
+    }
+
+    const file =
+      createdFile ?? (this.app.vault.getAbstractFileByPath(fullFilePath) as TFile | null);
+
+    let src = "";
+    if (file && typeof this.app.vault.getResourcePath === "function") {
+      try {
+        src = this.app.vault.getResourcePath(file);
+      } catch {
+        src = fullFilePath;
+      }
+    }
+    if (!src) {
+      src = fullFilePath;
+    }
+
+    return {
+      file,
+      filePath: fullFilePath,
+      src,
+      title: fileName.replace(/\.[^/.]+$/, ""),
     };
   }
 

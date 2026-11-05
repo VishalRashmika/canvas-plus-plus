@@ -156,13 +156,21 @@ export const DEFAULT_ATTACHMENT_ITEMS: ArrowAttachmentItem[] = [
   },
 ];
 
+interface CreateElParent {
+  createEl?<T extends HTMLElement>(
+    tag: string,
+    options?: { cls?: string; attr?: Record<string, string>; text?: string }
+  ): T;
+}
+
 function createElHelper<T extends HTMLElement>(
   parent: HTMLElement,
   tag: string,
   options?: { cls?: string; attr?: Record<string, string>; text?: string }
 ): T {
-  if (typeof (parent as any).createEl === "function") {
-    return (parent as any).createEl(tag, options);
+  const customParent = parent as unknown as CreateElParent;
+  if (typeof customParent.createEl === "function") {
+    return customParent.createEl(tag, options);
   }
   const el = document.createElement(tag) as T;
   if (options?.cls) {
@@ -432,7 +440,22 @@ export class ArrowAttachmentPopup {
         cls: "umlcanvas-attachment-item-icon",
       });
       if (item.iconSvg) {
-        iconEl.innerHTML = item.iconSvg;
+        if (typeof DOMParser !== "undefined") {
+          try {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(item.iconSvg, "image/svg+xml");
+            const svgNode = doc.documentElement;
+            if (svgNode && svgNode.nodeName.toLowerCase() === "svg") {
+              iconEl.appendChild(document.importNode(svgNode, true));
+            } else {
+              iconEl.textContent = "●";
+            }
+          } catch {
+            iconEl.textContent = "●";
+          }
+        } else {
+          iconEl.textContent = "●";
+        }
       }
 
       // Content (label & description)
@@ -475,8 +498,9 @@ export class ArrowAttachmentPopup {
     items.forEach((el, idx) => {
       if (idx === this.activeIndex) {
         el.classList.add("is-active");
-        if (typeof (el as any).scrollIntoView === "function") {
-          (el as any).scrollIntoView({ block: "nearest" });
+        const itemHtmlEl = el as HTMLElement;
+        if (typeof itemHtmlEl.scrollIntoView === "function") {
+          itemHtmlEl.scrollIntoView({ block: "nearest" });
         }
       } else {
         el.classList.remove("is-active");

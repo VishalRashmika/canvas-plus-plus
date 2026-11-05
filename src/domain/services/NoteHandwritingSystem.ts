@@ -169,7 +169,28 @@ export class NoteHandwritingSystem {
     // 3. Delegate to HandwrittenFontDetector for clustering, cursive segmentation, & character recognition
     const detection = this.detector.detect(validStrokes);
 
-    let rawText = detection.text || "";
+    // In single lowercase letter handwriting, a 1-stroke vertical line without a dot represents 'l'
+    // (whereas 'i' has 2 strokes with a dot above the stem).
+    let rawText = detection.lines
+      .map((line) =>
+        line.words
+          .map((word) =>
+            word.characters
+              .map((c) => {
+                if (
+                  c.char === "I" &&
+                  c.strokeIndices.length === 1 &&
+                  word.characters.length === 1
+                ) {
+                  return "l";
+                }
+                return c.char;
+              })
+              .join("")
+          )
+          .join(" ")
+      )
+      .join("\n") || detection.text || "";
 
     // 4. If hyphen strokes were drawn or rawText has hyphens/dashes between words,
     // replace any hyphen-like character with a space between words.

@@ -525,4 +525,426 @@ describe("Lecture Note Handwriting Tool & System", () => {
       spy.mockRestore();
     });
   });
+
+  describe("7. Robust Lowercase Individual Letter Detection & Hyphen Space Retention", () => {
+    function makeArcPts(cx: number, cy: number, rx: number, ry: number, startA: number, endA: number, steps = 20): StrokePoint[] {
+      const pts: StrokePoint[] = [];
+      for (let i = 0; i <= steps; i++) {
+        const a = startA + (i / steps) * (endA - startA);
+        pts.push({ x: Math.round((cx + rx * Math.cos(a)) * 10) / 10, y: Math.round((cy + ry * Math.sin(a)) * 10) / 10 });
+      }
+      return pts;
+    }
+
+    function makeLinePts(x1: number, y1: number, x2: number, y2: number, steps = 10): StrokePoint[] {
+      const pts: StrokePoint[] = [];
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        pts.push({ x: Math.round((x1 + t * (x2 - x1)) * 10) / 10, y: Math.round((y1 + t * (y2 - y1)) * 10) / 10 });
+      }
+      return pts;
+    }
+
+    function generateAllLowercaseLetters(offsetX = 0): Record<string, Stroke[]> {
+      const l: Record<string, Stroke[]> = {};
+
+      // a (1 stroke: CCW loop starting top-right, then downward stem along right edge)
+      {
+        const pts: StrokePoint[] = [];
+        for (let i = 0; i <= 20; i++) {
+          const th = (i / 20) * 2 * Math.PI;
+          pts.push({ x: offsetX + 20 - 9 * Math.sin(th), y: 20 - 9 * Math.cos(th) });
+        }
+        for (let i = 1; i <= 10; i++) {
+          pts.push({ x: offsetX + 29, y: 20 + (i / 10) * 9 });
+        }
+        l["a"] = [{ id: "letter-a", points: pts }];
+      }
+
+      // b (1 stroke: tall stem down, retrace up, loop on right)
+      {
+        const pts: StrokePoint[] = [
+          ...makeLinePts(offsetX + 10, 5, offsetX + 10, 35, 15),
+          ...makeLinePts(offsetX + 10, 35, offsetX + 10, 20, 8),
+          ...makeArcPts(offsetX + 18, 27.5, 8, 7.5, Math.PI, 3 * Math.PI, 20),
+        ];
+        l["b"] = [{ id: "letter-b", points: pts }];
+      }
+
+      // c (1 stroke: open C-arc)
+      {
+        const pts: StrokePoint[] = [];
+        for (let i = 0; i <= 20; i++) {
+          const a = -0.3 * Math.PI - (i / 20) * 1.4 * Math.PI;
+          pts.push({ x: offsetX + 20 + 9 * Math.cos(a), y: 20 + 10 * Math.sin(a) });
+        }
+        l["c"] = [{ id: "letter-c", points: pts }];
+      }
+
+      // d (2 strokes: loop on left + tall right stem)
+      {
+        l["d"] = [
+          { id: "d-loop", points: makeArcPts(offsetX + 18, 27.5, 8, 7.5, 0, 2 * Math.PI, 20) },
+          { id: "d-stem", points: makeLinePts(offsetX + 26, 5, offsetX + 26, 35, 15) },
+        ];
+      }
+
+      // e (1 stroke: mid crossbar right, loop over top, around bottom, open bottom-right)
+      {
+        const pts: StrokePoint[] = [
+          ...makeLinePts(offsetX + 14, 20, offsetX + 26, 20, 10),
+          ...makeArcPts(offsetX + 20, 20, 8, 9, 0, 1.5 * Math.PI, 25),
+        ];
+        l["e"] = [{ id: "letter-e", points: pts }];
+      }
+
+      // f (2 strokes: hooked stem + crossbar)
+      {
+        l["f"] = [
+          {
+            id: "f-stem",
+            points: [
+              ...makeArcPts(offsetX + 22, 10, 5, 5, 0, -Math.PI, 10),
+              ...makeLinePts(offsetX + 17, 10, offsetX + 17, 35, 15),
+            ],
+          },
+          { id: "f-bar", points: makeLinePts(offsetX + 12, 18, offsetX + 24, 18, 8) },
+        ];
+      }
+
+      // g (1 stroke: upper loop + descender left hook)
+      {
+        l["g"] = [
+          {
+            id: "letter-g",
+            points: [
+              ...makeArcPts(offsetX + 20, 15, 8, 8, 0, 2 * Math.PI, 20),
+              ...makeLinePts(offsetX + 28, 15, offsetX + 28, 35, 12),
+              ...makeArcPts(offsetX + 23, 35, 5, 5, 0, Math.PI / 2, 8),
+            ],
+          },
+        ];
+      }
+
+      // h (2 strokes: tall stem + arch)
+      {
+        l["h"] = [
+          { id: "h-stem", points: makeLinePts(offsetX + 10, 5, offsetX + 10, 35, 15) },
+          {
+            id: "h-arch",
+            points: [
+              ...makeArcPts(offsetX + 18, 23, 8, 6, Math.PI, 0, 12),
+              ...makeLinePts(offsetX + 26, 23, offsetX + 26, 35, 8),
+            ],
+          },
+        ];
+      }
+
+      // i (2 strokes: short stem + dot)
+      {
+        l["i"] = [
+          { id: "i-stem", points: makeLinePts(offsetX + 15, 16, offsetX + 15, 32, 10) },
+          { id: "i-dot", points: makeLinePts(offsetX + 15, 8, offsetX + 15, 9, 2) },
+        ];
+      }
+
+      // j (2 strokes: descender hook + dot)
+      {
+        l["j"] = [
+          {
+            id: "j-stem",
+            points: [
+              ...makeLinePts(offsetX + 18, 16, offsetX + 18, 38, 12),
+              ...makeArcPts(offsetX + 13, 38, 5, 5, 0, Math.PI / 2, 8),
+            ],
+          },
+          { id: "j-dot", points: makeLinePts(offsetX + 18, 8, offsetX + 18, 9, 2) },
+        ];
+      }
+
+      // k (2 strokes: tall stem + chevron)
+      {
+        l["k"] = [
+          { id: "k-stem", points: makeLinePts(offsetX + 10, 5, offsetX + 10, 35, 15) },
+          {
+            id: "k-arm",
+            points: [
+              ...makeLinePts(offsetX + 22, 16, offsetX + 11, 24, 8),
+              ...makeLinePts(offsetX + 11, 24, offsetX + 23, 35, 8),
+            ],
+          },
+        ];
+      }
+
+      // l (1 stroke: tall straight line)
+      {
+        l["l"] = [{ id: "letter-l", points: makeLinePts(offsetX + 15, 5, offsetX + 15, 35, 15) }];
+      }
+
+      // m (1 stroke: 2 arches)
+      {
+        l["m"] = [
+          {
+            id: "letter-m",
+            points: [
+              ...makeLinePts(offsetX + 10, 16, offsetX + 10, 32, 8),
+              ...makeArcPts(offsetX + 16, 20, 6, 4, Math.PI, 0, 10),
+              ...makeLinePts(offsetX + 22, 20, offsetX + 22, 32, 6),
+              ...makeArcPts(offsetX + 28, 20, 6, 4, Math.PI, 0, 10),
+              ...makeLinePts(offsetX + 34, 20, offsetX + 34, 32, 6),
+            ],
+          },
+        ];
+      }
+
+      // n (1 stroke: 1 arch)
+      {
+        l["n"] = [
+          {
+            id: "letter-n",
+            points: [
+              ...makeLinePts(offsetX + 10, 16, offsetX + 10, 32, 8),
+              ...makeArcPts(offsetX + 18, 20, 8, 4, Math.PI, 0, 12),
+              ...makeLinePts(offsetX + 26, 20, offsetX + 26, 32, 8),
+            ],
+          },
+        ];
+      }
+
+      // o (1 stroke: closed circle)
+      {
+        l["o"] = [{ id: "letter-o", points: makeArcPts(offsetX + 20, 20, 9, 9, -Math.PI / 2, 1.5 * Math.PI, 24) }];
+      }
+
+      // p (2 strokes: descender stem + loop)
+      {
+        l["p"] = [
+          { id: "p-stem", points: makeLinePts(offsetX + 10, 15, offsetX + 10, 42, 15) },
+          { id: "p-loop", points: makeArcPts(offsetX + 18, 23, 8, 8, -Math.PI / 2, 1.5 * Math.PI, 20) },
+        ];
+      }
+
+      // q (2 strokes: loop + right descender stem)
+      {
+        l["q"] = [
+          { id: "q-loop", points: makeArcPts(offsetX + 16, 23, 8, 8, -Math.PI / 2, 1.5 * Math.PI, 20) },
+          { id: "q-stem", points: makeLinePts(offsetX + 24, 15, offsetX + 24, 42, 15) },
+        ];
+      }
+
+      // r (1 stroke: short stem + top branch)
+      {
+        l["r"] = [
+          {
+            id: "letter-r",
+            points: [
+              ...makeLinePts(offsetX + 10, 16, offsetX + 10, 32, 10),
+              ...makeLinePts(offsetX + 10, 32, offsetX + 10, 20, 6),
+              ...makeArcPts(offsetX + 16, 20, 6, 4, Math.PI, 0.2 * Math.PI, 10),
+            ],
+          },
+        ];
+      }
+
+      // s (1 stroke: S-curve)
+      {
+        l["s"] = [
+          {
+            id: "letter-s",
+            points: [
+              { x: offsetX + 23, y: 16 },
+              { x: offsetX + 18, y: 12 },
+              { x: offsetX + 13, y: 15 },
+              { x: offsetX + 18, y: 22 },
+              { x: offsetX + 23, y: 25 },
+              { x: offsetX + 18, y: 30 },
+              { x: offsetX + 13, y: 28 },
+            ],
+          },
+        ];
+      }
+
+      // t (2 strokes: stem + crossbar)
+      {
+        l["t"] = [
+          {
+            id: "t-stem",
+            points: [
+              ...makeLinePts(offsetX + 18, 8, offsetX + 18, 30, 12),
+              ...makeArcPts(offsetX + 22, 30, 4, 3, Math.PI, Math.PI / 2, 6),
+            ],
+          },
+          { id: "t-bar", points: makeLinePts(offsetX + 12, 16, offsetX + 24, 16, 8) },
+        ];
+      }
+
+      // u (1 stroke: cup)
+      {
+        l["u"] = [
+          {
+            id: "letter-u",
+            points: [
+              ...makeLinePts(offsetX + 12, 16, offsetX + 12, 26, 8),
+              ...makeArcPts(offsetX + 18, 26, 6, 6, Math.PI, 0, 12),
+              ...makeLinePts(offsetX + 24, 26, offsetX + 24, 16, 8),
+            ],
+          },
+        ];
+      }
+
+      // v (1 stroke: V)
+      {
+        l["v"] = [
+          {
+            id: "letter-v",
+            points: [
+              ...makeLinePts(offsetX + 12, 16, offsetX + 19, 32, 10),
+              ...makeLinePts(offsetX + 19, 32, offsetX + 26, 16, 10),
+            ],
+          },
+        ];
+      }
+
+      // w (1 stroke: W)
+      {
+        l["w"] = [
+          {
+            id: "letter-w",
+            points: [
+              ...makeLinePts(offsetX + 10, 16, offsetX + 15, 32, 8),
+              ...makeLinePts(offsetX + 15, 32, offsetX + 20, 18, 8),
+              ...makeLinePts(offsetX + 20, 18, offsetX + 25, 32, 8),
+              ...makeLinePts(offsetX + 25, 32, offsetX + 30, 16, 8),
+            ],
+          },
+        ];
+      }
+
+      // x (2 strokes: crossing diagonals)
+      {
+        l["x"] = [
+          { id: "x-1", points: makeLinePts(offsetX + 12, 16, offsetX + 26, 32, 10) },
+          { id: "x-2", points: makeLinePts(offsetX + 26, 16, offsetX + 12, 32, 10) },
+        ];
+      }
+
+      // y (2 strokes: cup + descender)
+      {
+        l["y"] = [
+          {
+            id: "y-cup",
+            points: [
+              ...makeLinePts(offsetX + 12, 16, offsetX + 12, 26, 6),
+              ...makeArcPts(offsetX + 18, 26, 6, 5, Math.PI, 0, 10),
+              ...makeLinePts(offsetX + 24, 26, offsetX + 24, 16, 6),
+            ],
+          },
+          { id: "y-stem", points: makeLinePts(offsetX + 24, 16, offsetX + 16, 42, 12) },
+        ];
+      }
+
+      // z (1 stroke: zigzag)
+      {
+        l["z"] = [
+          {
+            id: "letter-z",
+            points: [
+              ...makeLinePts(offsetX + 12, 16, offsetX + 26, 16, 8),
+              ...makeLinePts(offsetX + 26, 16, offsetX + 12, 32, 10),
+              ...makeLinePts(offsetX + 12, 32, offsetX + 26, 32, 8),
+            ],
+          },
+        ];
+      }
+
+      // hyphen '-'
+      l["-"] = [
+        { id: "hyphen", points: makeLinePts(offsetX + 15, 20, offsetX + 35, 20, 10) },
+      ];
+
+      return l;
+    }
+
+    it("should accurately differentiate letter 'a' and letter 'e'", () => {
+      const letters = generateAllLowercaseLetters(0);
+
+      const resA = system.recognize(letters["a"]);
+      expect(resA.text).toBe("a");
+      expect(resA.text).not.toBe("e");
+      expect(resA.text).not.toBe("c");
+
+      const resE = system.recognize(letters["e"]);
+      expect(resE.text).toBe("e");
+      expect(resE.text).not.toBe("a");
+      expect(resE.text).not.toBe("c");
+    });
+
+    it("should correctly recognize all 26 individual lowercase letters (a-z)", () => {
+      const letters = generateAllLowercaseLetters(0);
+
+      for (let code = 97; code <= 122; code++) {
+        const char = String.fromCharCode(code);
+        const result = system.recognize(letters[char]);
+        expect(result.text).toBe(char);
+      }
+    });
+
+    it("should detect hyphens to keep spaces between letters (e.g. 'a - b' -> 'a b')", () => {
+      const lettersA = generateAllLowercaseLetters(0);
+      const hyphenStrokes = [{ id: "dash", points: makeLinePts(40, 20, 60, 20, 10) }];
+      const lettersB = generateAllLowercaseLetters(70);
+
+      const strokesAB = [...lettersA["a"], ...hyphenStrokes, ...lettersB["b"]];
+      const resultAB = system.recognize(strokesAB);
+
+      expect(resultAB.text).toBe("a b");
+      expect(resultAB.words).toEqual(["a", "b"]);
+    });
+
+    it("should detect hyphens to keep spaces between 'a' and 'e' (e.g. 'a - e' -> 'a e')", () => {
+      const lettersA = generateAllLowercaseLetters(0);
+      const hyphenStrokes = [{ id: "dash", points: makeLinePts(40, 20, 60, 20, 10) }];
+      const lettersE = generateAllLowercaseLetters(70);
+
+      const strokesAE = [...lettersA["a"], ...hyphenStrokes, ...lettersE["e"]];
+      const resultAE = system.recognize(strokesAE);
+
+      expect(resultAE.text).toBe("a e");
+      expect(resultAE.words).toEqual(["a", "e"]);
+    });
+
+    it("should keep spaces between multiple letters separated by hyphens (e.g. 'x - y - z')", () => {
+      const lettersX = generateAllLowercaseLetters(0);
+      const dash1 = [{ id: "dash-1", points: makeLinePts(35, 20, 50, 20, 8) }];
+      const lettersY = generateAllLowercaseLetters(60);
+      const dash2 = [{ id: "dash-2", points: makeLinePts(95, 20, 110, 20, 8) }];
+      const lettersZ = generateAllLowercaseLetters(120);
+
+      const strokes = [
+        ...lettersX["x"],
+        ...dash1,
+        ...lettersY["y"],
+        ...dash2,
+        ...lettersZ["z"],
+      ];
+
+      const result = system.recognize(strokes);
+      expect(result.text).toBe("x y z");
+      expect(result.words).toEqual(["x", "y", "z"]);
+    });
+
+    it("handwriteTextFromStrokes in DiagramEditor creates text node with space between letters", () => {
+      const lettersA = generateAllLowercaseLetters(100);
+      const hyphenStrokes = [{ id: "dash", points: makeLinePts(140, 20, 160, 20, 10) }];
+      const lettersE = generateAllLowercaseLetters(170);
+
+      // In real editor integration:
+      const node = editor.handwriteTextFromStrokes([...lettersA["a"], ...hyphenStrokes, ...lettersE["e"]]);
+
+      expect(node).not.toBeNull();
+      expect(node?.kind).toBe("generic.text");
+      expect(node?.title).toBe("a e");
+      expect(node?.style?.fontFamily).toBe("handwritten");
+    });
+  });
 });

@@ -36,6 +36,7 @@ export interface HandwrittenFontDetectionResult {
 
 export interface StrokeFeatures {
   index: number;
+  id?: string;
   minX: number;
   minY: number;
   maxX: number;
@@ -157,38 +158,9 @@ export class HandwrittenFontDetector {
       this.extractStrokeFeatures(s, idx)
     );
 
-    // 3. Handle continuous cursive strokes with multiple letter lobes
-    const hasPotentialCursive = strokes.some((s, idx) => {
-      const f = strokeFeatures[idx];
-      return (
-        f.width / Math.max(1, f.height) > 1.25 ||
-        f.totalLength > 1.8 * Math.hypot(f.width, f.height)
-      );
-    });
-
-    if (hasPotentialCursive) {
-      const expandedStrokes: Stroke[] = [];
-      let didSegment = false;
-      for (let i = 0; i < strokes.length; i++) {
-        const s = strokes[i];
-        const f = strokeFeatures[i];
-        if (
-          f.width / Math.max(1, f.height) > 1.25 ||
-          f.totalLength > 1.8 * Math.hypot(f.width, f.height)
-        ) {
-          const sub = this.segmentCursiveStroke(s);
-          if (sub.length > 1) {
-            expandedStrokes.push(...sub);
-            didSegment = true;
-            continue;
-          }
-        }
-        expandedStrokes.push(s);
-      }
-      if (didSegment && expandedStrokes.length > strokes.length) {
-        return this.detect(expandedStrokes);
-      }
-    }
+    // 3. Continuous cursive stroke segmentation is bypassed during character recognition
+    // to prevent fragmenting single handwritten letters (such as 'a', 'e', 'm', 'w').
+    // The segmentCursiveStroke method remains available for explicit callers and tests.
 
     // 4. Cluster strokes into character candidates using agglomerative hierarchical clustering
     const charStrokeClusters = this.clusterStrokesIntoCharacters(strokeFeatures);
@@ -337,6 +309,7 @@ export class HandwrittenFontDetector {
 
     return {
       index,
+      id: stroke.id,
       minX,
       minY,
       maxX,
@@ -465,6 +438,40 @@ export class HandwrittenFontDetector {
       const gapY = Math.max(0, Math.max(c1.minY, c2.minY) - Math.min(c1.maxY, c2.maxY));
       if (overlapX > 0.30 * Math.min(c1.width, c2.width) && gapY <= Math.max(30, 1.2 * combW)) {
         return { mergeable: true, affinityDist: gapY };
+      }
+    }
+
+    // Hyphen protection: standalone horizontal hyphen strokes must NOT merge with adjacent characters
+    const isHyphen = (c: Cluster) =>
+      c.strokes.length === 1 &&
+      c.width >= 8 &&
+      c.height <= 28 &&
+      c.width / Math.max(1, c.height) >= 1.8 &&
+      c.strokes[0].straightness >= 0.65;
+
+    if ((isHyphen(c1) || isHyphen(c2)) && !areBothHorizontalBars) {
+      const hyphen = isHyphen(c1) ? c1 : c2;
+      const nonHyphen = isHyphen(c1) ? c2 : c1;
+
+      // If the hyphen is side-by-side to the left or right of nonHyphen:
+      const isSideBySide =
+        hyphen.minX >= nonHyphen.maxX - 2 || hyphen.maxX <= nonHyphen.minX + 2;
+
+      if (isSideBySide) {
+        // Only merge if touching a vertical stem (e.g. horizontal bar of 'E', 'L', 'F')
+        const nonHyphenIsVertStem =
+          nonHyphen.strokes.length === 1 &&
+          (nonHyphen.strokes[0].isVertical || nonHyphen.height > 1.8 * nonHyphen.width);
+        let minDist = Infinity;
+        for (const s1 of c1.strokes) {
+          for (const s2 of c2.strokes) {
+            const d = this.strokeToStrokeMinDist(s1, s2);
+            if (d < minDist) minDist = d;
+          }
+        }
+        if (!nonHyphenIsVertStem || minDist > 2) {
+          return { mergeable: false, affinityDist: Infinity };
+        }
       }
     }
 
@@ -638,7 +645,7 @@ export class HandwrittenFontDetector {
     // Word boundary threshold for letter-to-letter transitions
     const wordGapThreshold = Math.max(16, Math.max(medianGap * 1.6, 0.48 * avgH));
 
-    const isOperator = (ch: string) => ch === "+" || ch === "=" || ch === "#";
+    const isOperator = (ch: string) => ch === "+" || ch === "=" || ch === "#" || ch === "-";
 
     const words: DetectedWord[] = [];
     let currentWordChars: DetectedCharacter[] = [characters[0]];
@@ -650,7 +657,7 @@ export class HandwrittenFontDetector {
         currChar.bounds.position.x - (prevChar.bounds.position.x + prevChar.bounds.size.width);
 
       const isOpBoundary =
-        (isOperator(prevChar.char) || isOperator(currChar.char)) && gap >= 6;
+        isOperator(prevChar.char) || isOperator(currChar.char);
 
       if (gap >= wordGapThreshold || isOpBoundary) {
         words.push(this.buildWord(currentWordChars));
@@ -1141,10 +1148,15 @@ export class HandwrittenFontDetector {
       return { char: "=", confidence: 0.98 };
     }
 
-    // 4. '+': 1 horizontal + 1 vertical intersecting near center
+    // 4. '+': 1 horizontal + 1 vertical intersecting near center (both straight lines)
     const horizStroke = s1.isHorizontal ? s1 : s2.isHorizontal ? s2 : null;
     const vertStroke = s1.isVertical ? s1 : s2.isVertical ? s2 : null;
-    if (horizStroke && vertStroke) {
+    if (
+      horizStroke &&
+      vertStroke &&
+      vertStroke.straightness > 0.85 &&
+      horizStroke.straightness > 0.85
+    ) {
       const isCenteredH = Math.abs(vertStroke.cx - (minX + w / 2)) < 0.30 * w;
       const isCenteredV = Math.abs(horizStroke.cy - (minY + h / 2)) < 0.28 * h;
       if (isCenteredH && isCenteredV) {
@@ -1176,10 +1188,12 @@ export class HandwrittenFontDetector {
         : null;
     const tStemCandidate = crossbarCandidate === s1 ? s2 : s1;
     if (crossbarCandidate && (tStemCandidate.isVertical || tStemCandidate.height > 0.55 * h)) {
-      if (
-        crossbarCandidate.cy < minY + 0.42 * h &&
-        (tStemCandidate.start.x < tStemCandidate.end.x || tStemCandidate.cx < minX + 0.48 * w)
-      ) {
+      const stemStart = tStemCandidate.points[0];
+      const hasTopHook =
+        stemStart.y < crossbarCandidate.cy - 0.10 * h &&
+        (stemStart.x > tStemCandidate.minX + 0.25 * tStemCandidate.width ||
+          tStemCandidate.minX < crossbarCandidate.cx - 2);
+      if (hasTopHook || tStemCandidate.start.x < tStemCandidate.end.x - 4) {
         return { char: "f", confidence: 0.96 };
       }
       return { char: "t", confidence: 0.97 };
@@ -1197,7 +1211,7 @@ export class HandwrittenFontDetector {
       return { char: "e", confidence: 0.96 };
     }
 
-    // 6c. 'G': C-arc + bottom-right bar
+    // 6c. 'G': C-arc + bottom-right horizontal bar
     const cArc =
       s1.straightness < 0.82 && s1.width > 0.38 * w
         ? s1
@@ -1205,7 +1219,13 @@ export class HandwrittenFontDetector {
         ? s2
         : null;
     const gBar = cArc === s1 ? s2 : s1;
-    if (cArc && gBar && gBar.cx > minX + 0.45 * w && gBar.cy > minY + 0.45 * h) {
+    if (
+      cArc &&
+      gBar &&
+      (gBar.isHorizontal || gBar.width > 1.4 * gBar.height) &&
+      gBar.cx > minX + 0.45 * w &&
+      gBar.cy > minY + 0.45 * h
+    ) {
       return { char: "G", confidence: 0.96 };
     }
 
@@ -1223,9 +1243,11 @@ export class HandwrittenFontDetector {
 
     // 8. 'X': 2 diagonal crossing strokes
     if (
-      (s1.isDiagonalSlash && s2.isDiagonalBackslash) ||
-      (s1.isDiagonalBackslash && s2.isDiagonalSlash) ||
-      (Math.abs(s1.dx) > 0.25 * w && Math.abs(s2.dx) > 0.25 * w && s1.dx * s2.dx < 0)
+      s1.height > 0.60 * h &&
+      s2.height > 0.60 * h &&
+      ((s1.isDiagonalSlash && s2.isDiagonalBackslash) ||
+        (s1.isDiagonalBackslash && s2.isDiagonalSlash) ||
+        (Math.abs(s1.dx) > 0.25 * w && Math.abs(s2.dx) > 0.25 * w && s1.dx * s2.dx < 0))
     ) {
       return { char: "X", confidence: 0.98 };
     }
@@ -1258,45 +1280,65 @@ export class HandwrittenFontDetector {
 
     // 11. Left stem + rightward stroke: 'P', 'D', 'B', 'R', 'K', 'b', 'h', 'n', 'r', 'p'
     const leftStem =
-      (s1.isVertical || s1.height > 0.52 * h) && s1.cx < minX + 0.48 * w
+      (s1.isVertical || s1.height > 0.50 * h) && s1.cx < minX + 0.48 * w
         ? s1
-        : (s2.isVertical || s2.height > 0.52 * h) && s2.cx < minX + 0.48 * w
+        : (s2.isVertical || s2.height > 0.50 * h) && s2.cx < minX + 0.48 * w
         ? s2
         : null;
     const rightStroke = leftStem === s1 ? s2 : s1;
     if (leftStem && rightStroke && rightStroke.cx > minX + 0.35 * w) {
-      // 'K': chevron arm branching right
-      if (rightStroke.points.length >= 3 && !rightStroke.isClosed && rightStroke.straightness > 0.80) {
-        const midPt = rightStroke.points[Math.floor(rightStroke.points.length / 2)];
-        if (midPt.x < rightStroke.start.x && midPt.x < rightStroke.end.x) {
-          return { char: "K", confidence: 0.96 };
+      // 'K' / 'k': chevron arm branching right (<)
+      if (rightStroke.points.length >= 3 && !rightStroke.isClosed) {
+        let midPointX = Infinity;
+        for (let i = 1; i < rightStroke.points.length - 1; i++) {
+          midPointX = Math.min(midPointX, rightStroke.points[i].x);
+        }
+        if (
+          midPointX < rightStroke.start.x - 0.15 * rightStroke.width &&
+          midPointX < rightStroke.end.x - 0.15 * rightStroke.width &&
+          rightStroke.start.x > minX + 0.35 * w
+        ) {
+          return { char: "k", confidence: 0.96 };
         }
       }
       // 'D': full height arc spanning from top to bottom
-      if (rightStroke.height > 0.68 * h) {
+      if (rightStroke.height > 0.68 * h && Math.abs(leftStem.minY - rightStroke.minY) < 0.20 * h) {
         return { char: "D", confidence: 0.97 };
       }
-      // Lowercase 'b': tall stem + loop in bottom half only
+      const rightDistSE = Math.hypot(
+        rightStroke.end.x - rightStroke.start.x,
+        rightStroke.end.y - rightStroke.start.y
+      );
+      const isRightLoop =
+        rightStroke.isClosed ||
+        rightDistSE < 0.35 * Math.max(rightStroke.width, rightStroke.height) ||
+        rightStroke.end.x < minX + 0.45 * w;
+
+      // Lowercase 'b': tall stem + loop in bottom half only (ascender stem)
       if (
-        leftStem.height > 0.65 * h &&
-        rightStroke.cy > minY + 0.48 * h &&
-        rightStroke.height <= 0.65 * h &&
-        (rightStroke.isClosed || rightStroke.straightness < 0.85)
+        leftStem.minY < rightStroke.minY - 0.18 * h &&
+        rightStroke.cy > minY + 0.45 * h &&
+        isRightLoop
       ) {
         return { char: "b", confidence: 0.97 };
       }
       // Lowercase 'h': tall stem + arch in bottom half
-      if (leftStem.height > 0.65 * h && rightStroke.cy > minY + 0.45 * h && rightStroke.straightness < 0.85) {
+      if (
+        leftStem.minY < rightStroke.minY - 0.18 * h &&
+        rightStroke.cy > minY + 0.40 * h &&
+        rightStroke.end.x > minX + 0.50 * w &&
+        !isRightLoop
+      ) {
         return { char: "h", confidence: 0.96 };
       }
       // Uppercase 'P': stem with loop in upper half
       if (rightStroke.height <= 0.68 * h && rightStroke.cy < minY + 0.58 * h) {
         return { char: "P", confidence: 0.97 };
       }
-      // Lowercase 'p': stem does not rise above loop top and extends into descender below
+      // Lowercase 'p': left stem extends below right loop into descender
       if (
-        leftStem.minY > rightStroke.minY + 0.15 * h &&
-        leftStem.maxY > rightStroke.maxY + 0.25 * h
+        leftStem.maxY > rightStroke.maxY + 0.15 * h &&
+        leftStem.height > 1.3 * leftStem.width
       ) {
         return { char: "p", confidence: 0.96 };
       }
@@ -1307,26 +1349,46 @@ export class HandwrittenFontDetector {
       return { char: "P", confidence: 0.90 };
     }
 
-    // 11b. Right stem + leftward stroke: 'd', 'q', 'a', 'u'
-    const rightStem =
-      (s1.isVertical || s1.height > 0.52 * h) && s1.cx > minX + 0.52 * w
-        ? s1
-        : (s2.isVertical || s2.height > 0.52 * h) && s2.cx > minX + 0.52 * w
-        ? s2
-        : null;
-    const leftStroke = rightStem === s1 ? s2 : s1;
-    if (rightStem && leftStroke && leftStroke.cx < minX + 0.65 * w) {
-      if (rightStem.height > 0.68 * h && leftStroke.cy > minY + 0.35 * h) {
+    // 11b. Right stem + leftward stroke: 'd', 'q', 'a', 'y'
+    const leftB = s1.cx <= s2.cx ? s1 : s2;
+    const rightB = s1.cx <= s2.cx ? s2 : s1;
+    const leftBStroke = leftB === s1 ? s1 : s2;
+    const rightBStroke = leftB === s1 ? s2 : s1;
+
+    if (rightB.height > 0.50 * h) {
+      const leftDistSE = Math.hypot(
+        leftBStroke.end.x - leftBStroke.start.x,
+        leftBStroke.end.y - leftBStroke.start.y
+      );
+      const isLeftLoop =
+        leftBStroke.isClosed ||
+        leftDistSE < 0.35 * Math.max(leftBStroke.width, leftBStroke.height);
+
+      // 'd': right tall stem (ascender: minY extends significantly above left loop)
+      if (rightB.minY < leftB.minY - 0.18 * h && rightB.height > 1.3 * rightB.width) {
         return { char: "d", confidence: 0.97 };
       }
-      if (rightStem.maxY > minY + 0.80 * h && leftStroke.cy < minY + 0.65 * h) {
-        return { char: "q", confidence: 0.96 };
+      // 'q': left closed loop + right descender stem (maxY extends significantly below left loop)
+      if (isLeftLoop && rightB.maxY > leftB.maxY + 0.15 * h) {
+        return { char: "q", confidence: 0.97 };
       }
-      return { char: "a", confidence: 0.95 };
+      // 'y': left open cup/V + right descender stem
+      if (!isLeftLoop && rightB.maxY > leftB.maxY + 0.15 * h) {
+        return { char: "y", confidence: 0.96 };
+      }
+      // 'a': left loop + right vertical stem of roughly matching height
+      if (Math.abs(leftB.minY - rightB.minY) < 0.28 * h && rightB.cx > minX + 0.40 * w) {
+        return { char: "a", confidence: 0.97 };
+      }
     }
 
-    // 12. 'V': 2 diagonal strokes meeting at bottom
-    if (Math.abs(s1.end.x - s2.start.x) < 0.35 * w || Math.abs(s1.end.y - s2.end.y) < 0.35 * h) {
+    // 12. 'V': 2 diagonal strokes meeting at bottom vertex
+    if (
+      s1.straightness > 0.80 &&
+      s2.straightness > 0.80 &&
+      (Math.abs(s1.end.x - s2.start.x) < 0.35 * w || Math.abs(s1.start.x - s2.end.x) < 0.35 * w) &&
+      Math.abs(s1.end.y - s2.end.y) < 0.25 * h
+    ) {
       return { char: "V", confidence: 0.95 };
     }
 
@@ -1371,33 +1433,226 @@ export class HandwrittenFontDetector {
       return { char: ",", confidence: 0.96 };
     }
 
-    // 3. Pure straight horizontal stroke: '-'
-    if (s.isHorizontal && s.straightness > 0.85) {
-      return { char: "-", confidence: 0.97 };
+    // 3. Hyphen: '-' (wide, flat horizontal stroke)
+    if (
+      (aspectRatio >= 1.8 && h <= 28 && s.straightness >= 0.65) ||
+      (s.isHorizontal && s.straightness > 0.85)
+    ) {
+      return { char: "-", confidence: 0.98 };
     }
 
-    // 4. Pure straight vertical stroke: 'I'
-    if (s.isVertical && s.straightness > 0.85) {
+    // 4. Straight vertical stroke: 'I'
+    if ((s.isVertical || aspectRatio < 0.28) && s.straightness > 0.80) {
       return { char: "I", confidence: 0.98 };
     }
 
-    // 5. Pure diagonal slash: '/'
+    // 5. Diagonal slash: '/'
     if (s.isDiagonalSlash && s.straightness > 0.85) {
       return { char: "/", confidence: 0.96 };
     }
 
-    // 6. Closed loops: 'O' or '0'
-    if (s.isClosed) {
+    const start = pts[0];
+    const end = pts[n - 1];
+    const distStartEnd = Math.hypot(end.x - start.x, end.y - start.y);
+
+    // 6. Closed loop: 'O' or '0'
+    if (distStartEnd < 0.22 * Math.max(w, h) || s.isClosed) {
       if (aspectRatio < 0.65) {
         return { char: "0", confidence: 0.96 };
       }
       return { char: "O", confidence: 0.98 };
     }
 
-    const start = pts[0];
-    const end = pts[n - 1];
+    const relStartX = (start.x - minX) / w;
+    const relStartY = (start.y - minY) / h;
+    const relEndX = (end.x - minX) / w;
+    const relEndY = (end.y - minY) / h;
 
-    // 7. 'C' vs 'G': Starts in right half, curves left to reach minX, ends in right half
+    const idx20 = Math.max(1, Math.floor(n * 0.20));
+    const dxInit = pts[idx20].x - start.x;
+
+    // 7. 'w' (2 bottom valleys separated by a mid peak, starts & ends in upper half)
+    let bottomValleys = 0;
+    let inBottom = false;
+    let hadMidPeak = false;
+    for (let i = 0; i < n; i++) {
+      const ry = (pts[i].y - minY) / h;
+      if (ry > 0.75) {
+        if (!inBottom) {
+          if (hadMidPeak) bottomValleys = 2;
+          else bottomValleys = 1;
+          inBottom = true;
+        }
+      } else if (ry < 0.55 && inBottom) {
+        hadMidPeak = true;
+        inBottom = false;
+      }
+    }
+    if (bottomValleys >= 2 && aspectRatio >= 0.75 && relStartY < 0.45 && relEndY < 0.45) {
+      return { char: "w", confidence: 0.96 };
+    }
+
+    // 8. Left downward stem letters: 'b', 'h', 'r', 'm', 'n'
+    const startsLeftDown =
+      relStartX < 0.38 && pts[idx20].x < minX + 0.38 * w && pts[idx20].y > start.y;
+    let ascendsOnLeft = false;
+    let reachedBottom = false;
+    let firstBottomIdx = -1;
+    for (let i = 0; i < n; i++) {
+      if (pts[i].y > minY + 0.75 * h && !reachedBottom) {
+        reachedBottom = true;
+        firstBottomIdx = i;
+      }
+      if (
+        reachedBottom &&
+        pts[i].y < minY + 0.55 * h &&
+        pts[i].x < minX + 0.45 * w &&
+        i < n * 0.6
+      ) {
+        ascendsOnLeft = true;
+      }
+    }
+
+    if (startsLeftDown && ascendsOnLeft) {
+      // 'b': tall stem down, ascends, loops clockwise around bottom-right back to stem
+      if (relStartY < 0.25 && end.x < minX + 0.55 * w && end.y > minY + 0.5 * h) {
+        return { char: "b", confidence: 0.96 };
+      }
+      // 'h': tall stem down (ascender), arch to bottom-right
+      let archMinY = Infinity;
+      for (let i = Math.floor(n * 0.3); i < Math.floor(n * 0.8); i++) {
+        archMinY = Math.min(archMinY, pts[i].y);
+      }
+      if (archMinY > minY + 0.28 * h && relStartY < 0.25 && relEndX > 0.55) {
+        return { char: "h", confidence: 0.96 };
+      }
+      // 'r': short stem down, short branch right (ends near top/mid, not baseline)
+      if (relEndY < 0.60 && relEndX > 0.45) {
+        return { char: "r", confidence: 0.96 };
+      }
+      // Count arch peaks for 'm' vs 'n'
+      const peakXList: number[] = [];
+      for (let i = firstBottomIdx + 2; i < n - 2; i++) {
+        const ry = (pts[i].y - minY) / h;
+        const isTurningPoint = pts[i].y <= pts[i - 2].y && pts[i].y < pts[i + 2].y;
+        if (ry < 0.35 && isTurningPoint) {
+          if (
+            peakXList.length === 0 ||
+            Math.abs(pts[i].x - peakXList[peakXList.length - 1]) > 0.25 * w
+          ) {
+            peakXList.push(pts[i].x);
+          }
+        }
+      }
+      if (peakXList.length >= 3 || (aspectRatio >= 1.25 && peakXList.length >= 2)) {
+        return { char: "m", confidence: 0.96 };
+      }
+      return { char: "n", confidence: 0.95 };
+    }
+
+    // 9. Zigzag 'z' / 'Z'
+    if (relStartX < 0.45 && relStartY < 0.35 && relEndX > 0.55 && relEndY > 0.65) {
+      let wentRightTop = false;
+      let wentLeftDiag = false;
+      for (let i = 0; i < n; i++) {
+        if (pts[i].x > minX + 0.65 * w && pts[i].y < minY + 0.4 * h) wentRightTop = true;
+        if (wentRightTop && pts[i].x < minX + 0.4 * w && pts[i].y > minY + 0.55 * h)
+          wentLeftDiag = true;
+      }
+      if (wentRightTop && wentLeftDiag) {
+        return { char: "z", confidence: 0.97 };
+      }
+    }
+
+    // Count valleys visiting bottom for 'a' vs 'e'
+    let yValleys = 0;
+    let inLower = false;
+    let visitedUpperAfterLower = false;
+    for (let i = 0; i < n; i++) {
+      const ry = (pts[i].y - minY) / h;
+      if (ry > 0.75) {
+        if (!inLower) {
+          if (visitedUpperAfterLower) yValleys = 2;
+          else yValleys = 1;
+          inLower = true;
+        }
+      } else if (ry < 0.45 && inLower) {
+        visitedUpperAfterLower = true;
+        inLower = false;
+      }
+    }
+
+    // 10. Lowercase 'e': starts at mid-height (y in [0.22, 0.78]), initial movement moves rightwards
+    // across the mid crossbar (dxInit > 0.12 * w), top loop, single bottom curve (yValleys < 2), open bottom-right
+    if (relStartY >= 0.22 && relStartY <= 0.78 && dxInit > 0.12 * w && yValleys < 2) {
+      return { char: "e", confidence: 0.98 };
+    }
+
+    // 11. Lowercase 'g': upper loop + descender hook curving left at bottom
+    let gUpperLoop = false;
+    for (let i = Math.floor(n * 0.2); i < Math.floor(n * 0.7); i++) {
+      if (Math.hypot(pts[i].x - start.x, pts[i].y - start.y) < 0.25 * Math.max(w, h)) {
+        gUpperLoop = true;
+        break;
+      }
+    }
+    if (gUpperLoop && relEndY > 0.75 && relEndX < 0.85 && relStartY < 0.45) {
+      return { char: "g", confidence: 0.96 };
+    }
+
+    // 12. Lowercase 'a': starts upper-right, initial movement left/down (dxInit <= 0.08 * w),
+    // loops around counter-clockwise and has downward stem on right visiting bottom twice (yValleys >= 2)
+    // or ends at bottom-right after looping
+    if (
+      (yValleys >= 2 ||
+        (relStartY < 0.50 &&
+          relEndX > 0.45 &&
+          relEndY > 0.60 &&
+          s.totalLength > 1.8 * Math.hypot(w, h))) &&
+      dxInit <= 0.08 * w
+    ) {
+      return { char: "a", confidence: 0.98 };
+    }
+
+    // 13. S-curve 'S' / 's'
+    let sCenterCross = false;
+    for (let i = Math.floor(n * 0.2); i < Math.floor(n * 0.8); i++) {
+      if (
+        pts[i].x > minX + 0.40 * w &&
+        pts[i].y > minY + 0.35 * h &&
+        pts[i].y < minY + 0.65 * h
+      ) {
+        sCenterCross = true;
+        break;
+      }
+    }
+    if (
+      relStartX > 0.35 &&
+      relStartY < 0.40 &&
+      sCenterCross &&
+      distStartEnd > 0.3 * Math.max(w, h)
+    ) {
+      return { char: "s", confidence: 0.96 };
+    }
+
+    // 14. 'u' vs 'v': open cup at top (starts top-left, curves down, ends top-right)
+    if (relStartX < 0.45 && relStartY < 0.55 && relEndX > 0.55 && relEndY < 0.65) {
+      let minBottomX = Infinity;
+      let maxBottomX = -Infinity;
+      for (const p of pts) {
+        if (p.y > minY + 0.80 * h) {
+          minBottomX = Math.min(minBottomX, p.x);
+          maxBottomX = Math.max(maxBottomX, p.x);
+        }
+      }
+      const bottomWidth = maxBottomX - minBottomX;
+      if (bottomWidth > 0.30 * w) {
+        return { char: "u", confidence: 0.96 };
+      }
+      return { char: "v", confidence: 0.96 };
+    }
+
+    // 15. 'C' vs 'G': Starts in right half, curves left to reach minX, ends in right half
     const startsRight = start.x > minX + 0.35 * w && start.y < minY + 0.50 * h;
     const endsRight = end.x > minX + 0.35 * w && end.y > minY + 0.50 * h;
     let reachesFarLeft = false;
@@ -1416,137 +1671,7 @@ export class HandwrittenFontDetector {
       }
     }
 
-    // 7b. Lowercase 'e': starts in middle, moves right, loops over top to left, curves down to bottom right
-    if (
-      start.y > minY + 0.25 * h &&
-      start.y < minY + 0.75 * h &&
-      start.x < minX + 0.70 * w &&
-      end.x > minX + 0.30 * w &&
-      end.y > minY + 0.45 * h &&
-      s.totalLength > 1.65 * Math.hypot(w, h)
-    ) {
-      return { char: "e", confidence: 0.96 };
-    }
-
-    // 7c. Lowercase 'a': loop in lower portion with down-stroke ending bottom-right
-    if (
-      start.x > minX + 0.40 * w &&
-      start.y < minY + 0.50 * h &&
-      end.x > minX + 0.50 * w &&
-      end.y > minY + 0.60 * h &&
-      s.totalLength > 1.85 * Math.hypot(w, h)
-    ) {
-      return { char: "a", confidence: 0.95 };
-    }
-
-    // 7d. Lowercase 'g': loop in top half, descender hook at bottom-left
-    if (
-      end.y > minY + 0.78 * h &&
-      end.x < minX + 0.55 * w &&
-      s.totalLength > 1.95 * Math.hypot(w, h)
-    ) {
-      return { char: "g", confidence: 0.95 };
-    }
-
-    // 7e. Lowercase 'b': starts top-left, goes down, loops around bottom-right
-    if (
-      start.x < minX + 0.45 * w &&
-      start.y < minY + 0.35 * h &&
-      end.x < minX + 0.55 * w &&
-      end.y > minY + 0.45 * h &&
-      s.totalLength > 1.8 * Math.hypot(w, h)
-    ) {
-      return { char: "b", confidence: 0.94 };
-    }
-
-    // 7f. Lowercase 'd': loop at bottom-left, tall stem reaching top-right
-    if (
-      start.y > minY + 0.30 * h &&
-      end.y > minY + 0.65 * h &&
-      end.x > minX + 0.50 * w &&
-      s.totalLength > 1.9 * Math.hypot(w, h)
-    ) {
-      return { char: "d", confidence: 0.94 };
-    }
-
-    // 7g. Lowercase 'h': starts top-left, down to bottom, up to mid, arches over to bottom right
-    if (
-      start.x < minX + 0.45 * w &&
-      start.y < minY + 0.25 * h &&
-      end.x > minX + 0.50 * w &&
-      end.y > minY + 0.65 * h &&
-      s.totalLength > 1.7 * Math.hypot(w, h)
-    ) {
-      return { char: "h", confidence: 0.94 };
-    }
-
-    // 8. 'U': Starts top-left, curves down and around, ends top-right, open at top
-    const startsTopLeft = start.x < minX + 0.45 * w && start.y < minY + 0.45 * h;
-    const endsTopRight = end.x > minX + 0.55 * w && end.y < minY + 0.45 * h;
-    let reachesFarBottom = false;
-    for (const p of pts) {
-      if (p.y > minY + 0.70 * h) {
-        reachesFarBottom = true;
-        break;
-      }
-    }
-    if (startsTopLeft && endsTopRight && reachesFarBottom) {
-      return { char: "U", confidence: 0.97 };
-    }
-
-    // 9. 'S': Top curves left, crosses center right, bottom curves left
-    if (
-      start.y < minY + 0.35 * h &&
-      end.y > minY + 0.65 * h &&
-      start.x > minX + 0.30 * w &&
-      s.totalLength > 1.6 * Math.hypot(w, h)
-    ) {
-      return { char: "S", confidence: 0.96 };
-    }
-
-    // 10. 'V': Starts top-left, reaches bottom apex, goes top-right
-    if (startsTopLeft && endsTopRight) {
-      return { char: "V", confidence: 0.95 };
-    }
-
-    // 11. 'Z': Starts top-left, goes top-right, diagonal down-left, ends bottom-right
-    if (
-      startsTopLeft &&
-      end.x > minX + 0.55 * w &&
-      end.y > minY + 0.70 * h &&
-      s.totalLength > 1.8 * Math.hypot(w, h)
-    ) {
-      return { char: "Z", confidence: 0.95 };
-    }
-
-    // 12. 'L': Starts top-left, goes down, sharp turn right
-    if (startsTopLeft && end.x > minX + 0.50 * w && end.y > minY + 0.70 * h && aspectRatio > 0.45) {
-      return { char: "L", confidence: 0.96 };
-    }
-
-    // 13. 'J': Starts top, goes down, curves left at bottom
-    if (start.y < minY + 0.35 * h && end.x < minX + 0.45 * w && end.y > minY + 0.65 * h) {
-      return { char: "J", confidence: 0.96 };
-    }
-
-    // 14. 'M' / 'W' (Zigzag waves)
-    let directionChanges = 0;
-    for (let i = 2; i < n; i++) {
-      const dy1 = pts[i - 1].y - pts[i - 2].y;
-      const dy2 = pts[i].y - pts[i - 1].y;
-      if (dy1 * dy2 < -4) {
-        directionChanges++;
-      }
-    }
-
-    if (directionChanges >= 3) {
-      if (start.y > end.y || pts[Math.floor(n / 2)].y > minY + 0.5 * h) {
-        return { char: "M", confidence: 0.95 };
-      }
-      return { char: "W", confidence: 0.95 };
-    }
-
-    // 15. Digits:
+    // 16. Digits:
     // '7': Top horizontal right, diagonal down-left
     if (
       start.x < minX + 0.35 * w &&
@@ -1580,7 +1705,7 @@ export class HandwrittenFontDetector {
 
     // Fallbacks
     if (s.totalLength > 2.5 * Math.hypot(w, h)) {
-      return { char: "S", confidence: 0.82 };
+      return { char: "s", confidence: 0.82 };
     }
     if (h > 1.8 * w) {
       return { char: "I", confidence: 0.88 };

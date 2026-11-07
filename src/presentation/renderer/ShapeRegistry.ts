@@ -20,6 +20,7 @@ export interface AppendMultilineTextOptions {
   className?: string;
   textAnchor?: "middle" | "start" | "end";
   dominantBaseline?: string;
+  maxWidth?: number;
 }
 
 export function appendMultilineText(
@@ -39,13 +40,24 @@ export function appendMultilineText(
   text.setAttribute("class", options?.className ?? "umlcanvas-node-title");
   applyFontToSvgElement(text, nodeFont);
 
-  const lines = (title ?? "").split(/\r?\n/);
+  const baseFontSize = nodeFont.fontSize ?? 13;
+  const boldMultiplier = nodeFont.bold ? 1.1 : 1.0;
+  const charWidth = Math.max(4.5, baseFontSize * 0.58 * boldMultiplier);
+
+  let maxWidth = options?.maxWidth;
+  if (maxWidth === undefined && anchor === "middle" && cx > 20) {
+    maxWidth = Math.max(20, cx * 2 - 16);
+  }
+
+  const lines = maxWidth
+    ? wrapTextToLines(title ?? "", maxWidth, charWidth)
+    : (title ?? "").split(/\r?\n/);
+
   if (lines.length <= 1) {
     text.setAttribute("dominant-baseline", options?.dominantBaseline ?? "central");
-    text.textContent = title ?? "";
+    text.textContent = lines[0] ?? "";
   } else {
     text.setAttribute("dominant-baseline", options?.dominantBaseline ?? "central");
-    const baseFontSize = nodeFont.fontSize ?? 13;
     const lineHeight = Math.round(baseFontSize * 1.35);
     const startY = cy - ((lines.length - 1) * lineHeight) / 2;
     lines.forEach((lineText, idx) => {
@@ -294,7 +306,8 @@ export class ShapeRegistry {
             node.size.width / 2,
             node.size.height / 2,
             getNodeFontStyle(node),
-            svgNS
+            svgNS,
+            { maxWidth: Math.max(20, node.size.width - 16) }
           );
         }
 
@@ -406,7 +419,10 @@ export class ShapeRegistry {
         const title = node.labels?.[0]?.text ?? node.title ?? "";
         const baseFontSize = nodeFont.fontSize ?? 13;
         const lineHeight = Math.round(baseFontSize * 1.35);
-        const lines = title.split(/\r?\n/);
+        const availableW = Math.max(20, node.size.width - 16);
+        const boldMultiplier = nodeFont.bold ? 1.1 : 1.0;
+        const charWidth = Math.max(4.5, baseFontSize * 0.58 * boldMultiplier);
+        const lines = wrapTextToLines(title, availableW, charWidth);
         const titleBlockHeight = Math.max(1, lines.length) * lineHeight;
         let actualHeaderHeight = hasStereo || hasTagged ? 46 : 32;
         if (lines.length > 1 || baseFontSize > 14) {
@@ -427,6 +443,7 @@ export class ShapeRegistry {
                 node.stereotype === "interface" || node.stereotype === "abstract"
                   ? "umlcanvas-node-title umlcanvas-class-title umlcanvas-italic"
                   : "umlcanvas-node-title umlcanvas-class-title",
+              maxWidth: availableW,
             }
           );
         }
@@ -541,7 +558,10 @@ export class ShapeRegistry {
         const nodeFont = getNodeFontStyle(node);
         const baseFontSize = nodeFont.fontSize ?? 13;
         const lineHeight = Math.round(baseFontSize * 1.35);
-        const lines = titleText.split(/\r?\n/);
+        const availableW = Math.max(20, node.size.width - 16);
+        const boldMultiplier = nodeFont.bold ? 1.1 : 1.0;
+        const charWidth = Math.max(4.5, baseFontSize * 0.58 * boldMultiplier);
+        const lines = wrapTextToLines(titleText, availableW, charWidth);
         const titleBlockHeight = Math.max(1, lines.length) * lineHeight;
         const actualHeaderHeight = lines.length > 1 || baseFontSize > 14
           ? Math.max(32, headerY + titleBlockHeight + 6)
@@ -557,6 +577,7 @@ export class ShapeRegistry {
           svgNS,
           {
             className: "umlcanvas-node-title umlcanvas-object-title",
+            maxWidth: availableW,
           }
         );
 
@@ -757,6 +778,7 @@ export class ShapeRegistry {
           svgNS,
           {
             className: "umlcanvas-node-title umlcanvas-usecase-title",
+            maxWidth: Math.max(20, Math.round(node.size.width * 0.8 - 8)),
           }
         );
 
@@ -1944,7 +1966,8 @@ export class ShapeRegistry {
             w / 2,
             h / 2,
             getNodeFontStyle(node),
-            svgNS
+            svgNS,
+            { maxWidth: Math.max(20, Math.round(w * 0.7 - 8)) }
           );
         }
 
@@ -2148,7 +2171,10 @@ export class ShapeRegistry {
         const nodeFont = getNodeFontStyle(node);
         const baseFontSize = nodeFont.fontSize ?? 13;
         const lineHeight = Math.round(baseFontSize * 1.35);
-        const lines = title.split(/\r?\n/);
+        const availableW = Math.max(20, node.size.width - 16);
+        const boldMultiplier = nodeFont.bold ? 1.1 : 1.0;
+        const charWidth = Math.max(4.5, baseFontSize * 0.58 * boldMultiplier);
+        const lines = wrapTextToLines(title, availableW, charWidth);
         const titleBlockHeight = Math.max(1, lines.length) * lineHeight;
         const actualHeaderHeight = lines.length > 1 || baseFontSize > 14
           ? Math.max(32, 20 + titleBlockHeight + 6)
@@ -2164,6 +2190,7 @@ export class ShapeRegistry {
           svgNS,
           {
             className: "umlcanvas-node-title",
+            maxWidth: availableW,
           }
         );
 
@@ -3917,7 +3944,8 @@ export class ShapeRegistry {
             cx,
             cy,
             getNodeFontStyle(node),
-            svgNS
+            svgNS,
+            { maxWidth: Math.max(20, Math.round(node.size.width * 0.8 - 8)) }
           );
         }
 
@@ -3981,7 +4009,8 @@ export class ShapeRegistry {
             rx,
             ry,
             getNodeFontStyle(node),
-            svgNS
+            svgNS,
+            { maxWidth: Math.max(20, Math.round(node.size.width * 0.8 - 8)) }
           );
         }
 
@@ -4043,7 +4072,8 @@ export class ShapeRegistry {
             w / 2,
             (h * 2) / 3,
             getNodeFontStyle(node),
-            svgNS
+            svgNS,
+            { maxWidth: Math.max(20, Math.round(w * 0.7 - 8)) }
           );
         }
 

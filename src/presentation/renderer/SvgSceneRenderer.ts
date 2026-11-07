@@ -4652,12 +4652,51 @@ export class SvgSceneRenderer {
         ? this.inlineEditorEl.value
         : node.labels[0]?.text ?? "";
 
-    const lines = textToMeasure.split(/\r?\n/);
-    const lineCount = Math.max(1, lines.length);
-
     const nodeFont = getNodeFontStyle(node);
     const baseFontSize = nodeFont.fontSize ?? 13;
     const lineHeight = Math.round(baseFontSize * 1.35);
+    const boldMultiplier = nodeFont.bold ? 1.1 : 1.0;
+    const charWidth = Math.max(4.5, baseFontSize * 0.58 * boldMultiplier);
+
+    let estInPlaceW = node.size.width - 16;
+    if (node.kind === "generic.table") {
+      const cols = Math.max(1, (node.customData?.cols as number) || 3);
+      estInPlaceW = node.size.width / cols - 8;
+    } else if (node.kind === "generic.note") {
+      estInPlaceW = node.size.width - 24;
+    } else if (node.kind === "generic.stickyNote") {
+      estInPlaceW = node.size.width - 20;
+    } else if (
+      node.kind === "generic.diamond" ||
+      node.kind === "generic.triangle" ||
+      node.kind === "activity.decision" ||
+      node.kind === "state.choice"
+    ) {
+      estInPlaceW = node.size.width * 0.7 - 8;
+    } else if (
+      node.kind === "generic.circle" ||
+      node.kind === "generic.ellipse" ||
+      node.kind === "uml.usecase"
+    ) {
+      estInPlaceW = node.size.width * 0.8 - 8;
+    }
+    const availableW = Math.max(20, estInPlaceW);
+    const rawLines = textToMeasure.split(/\r?\n/);
+    let effectiveAvailableW = availableW;
+    if (nodeFont.fontSize !== undefined && nodeFont.fontSize > 13) {
+      if (node.kind !== "generic.stickyNote" && node.kind !== "generic.table") {
+        const maxRawChars = rawLines.reduce((max, l) => Math.max(max, l.length), 0);
+        if (maxRawChars <= 25) {
+          const estimatedW = Math.ceil(maxRawChars * baseFontSize * 0.65 + 24);
+          if (estimatedW > effectiveAvailableW) {
+            effectiveAvailableW = estimatedW;
+          }
+        }
+      }
+    }
+    const wrappedLines = wrapTextToLines(textToMeasure, effectiveAvailableW, charWidth);
+    const lineCount = Math.max(1, wrappedLines.length);
+
     // Ensure content height accommodates font size and lines with vertical padding
     const contentH = Math.max(24, lineCount * lineHeight + 8);
 
@@ -4730,8 +4769,8 @@ export class SvgSceneRenderer {
       textAlign = "left";
     } else {
       // General shapes: vertically and horizontally centered in node
-      inPlaceX = node.position.x + 8;
-      inPlaceW = Math.max(40, node.size.width - 16);
+      inPlaceW = Math.max(30, Math.round(estInPlaceW));
+      inPlaceX = node.position.x + (node.size.width - inPlaceW) / 2;
       if (contentH <= node.size.height - 12) {
         inPlaceY = node.position.y + Math.max(6, (node.size.height - contentH) / 2);
         inPlaceH = Math.max(24, contentH);
@@ -4739,19 +4778,24 @@ export class SvgSceneRenderer {
         inPlaceY = node.position.y + (node.size.height - contentH) / 2;
         inPlaceH = contentH;
       }
+      if (node.kind === "generic.triangle") {
+        inPlaceY = node.position.y + (node.size.height * 2) / 3 - inPlaceH / 2;
+      }
       textAlign = "center";
     }
 
     if (nodeFont.fontSize !== undefined && nodeFont.fontSize > 13) {
       if (node.kind !== "generic.stickyNote" && node.kind !== "generic.table") {
-        const maxLineChars = lines.reduce((max, l) => Math.max(max, l.length), 0);
-        const estimatedW = Math.ceil(maxLineChars * baseFontSize * 0.65 + 24);
-        if (estimatedW > inPlaceW) {
-          const extraW = estimatedW - inPlaceW;
-          if (textAlign === "center") {
-            inPlaceX -= extraW / 2;
+        const maxLineChars = wrappedLines.reduce((max, l) => Math.max(max, l.length), 0);
+        if (maxLineChars <= 25) {
+          const estimatedW = Math.ceil(maxLineChars * baseFontSize * 0.65 + 24);
+          if (estimatedW > inPlaceW) {
+            const extraW = estimatedW - inPlaceW;
+            if (textAlign === "center") {
+              inPlaceX -= extraW / 2;
+            }
+            inPlaceW = estimatedW;
           }
-          inPlaceW = estimatedW;
         }
       }
     }
@@ -4813,6 +4857,7 @@ export class SvgSceneRenderer {
           styles.fontFamily = "";
         }
         this.inlineEditorEl.setCssStyles(styles);
+        this.inlineEditorEl.scrollTop = 0;
       }
       return;
     }
@@ -4927,9 +4972,44 @@ export class SvgSceneRenderer {
         this.renderNodes();
         this.renderInteractions();
       }
+    } else if (node.kind !== "generic.text" && node.kind !== "generic.pdf" && node.kind !== "generic.image") {
+      const newText = this.inlineEditorEl.value;
+      const nodeFont = getNodeFontStyle(node);
+      const baseFontSize = nodeFont.fontSize ?? 13;
+      const boldMultiplier = nodeFont.bold ? 1.1 : 1.0;
+      const charWidth = Math.max(4.5, baseFontSize * 0.58 * boldMultiplier);
+      const lineH = Math.round(baseFontSize * 1.35);
+      let availableW = Math.max(20, node.size.width - 16);
+      if (
+        node.kind === "generic.diamond" ||
+        node.kind === "generic.triangle" ||
+        node.kind === "activity.decision" ||
+        node.kind === "state.choice"
+      ) {
+        availableW = Math.max(20, node.size.width * 0.7 - 8);
+      } else if (
+        node.kind === "generic.circle" ||
+        node.kind === "generic.ellipse" ||
+        node.kind === "uml.usecase"
+      ) {
+        availableW = Math.max(20, node.size.width * 0.8 - 8);
+      }
+      const wrapped = wrapTextToLines(newText, availableW, charWidth);
+      const neededH = Math.max(1, wrapped.length) * lineH + 28;
+      if (neededH > node.size.height) {
+        node.size = {
+          width: node.size.width,
+          height: Math.round(neededH),
+        };
+        this.renderNodes();
+        this.renderInteractions();
+      }
     }
 
     this.updateInlineEditorPosition();
+    if (this.inlineEditorEl) {
+      this.inlineEditorEl.scrollTop = 0;
+    }
   }
 
   public startInlineEditor(
@@ -5120,6 +5200,18 @@ export class SvgSceneRenderer {
       if (e.key === "Enter") {
         if (e.shiftKey) {
           // Shift+Enter inserts a newline for multiline in-place editing
+          if (typeof e.preventDefault === "function") {
+            e.preventDefault();
+          }
+          const start = textarea.selectionStart ?? textarea.value.length;
+          const end = textarea.selectionEnd ?? textarea.value.length;
+          const val = textarea.value;
+          textarea.value = val.substring(0, start) + "\n" + val.substring(end);
+          if (textarea.selectionStart !== undefined) {
+            textarea.selectionStart = textarea.selectionEnd = start + 1;
+          }
+          this.adjustInlineEditorHeight();
+          textarea.scrollTop = 0;
           return;
         }
         // Enter, Ctrl+Enter, or Cmd+Enter commits the edit
@@ -5138,6 +5230,15 @@ export class SvgSceneRenderer {
 
     textarea.addEventListener("input", () => {
       this.adjustInlineEditorHeight();
+      textarea.scrollTop = 0;
+    });
+
+    textarea.addEventListener("scroll", () => {
+      textarea.scrollTop = 0;
+    });
+
+    textarea.addEventListener("keyup", () => {
+      textarea.scrollTop = 0;
     });
 
     textarea.addEventListener("mousedown", (e: MouseEvent) => {
@@ -5531,13 +5632,31 @@ export class SvgSceneRenderer {
               height: Math.round(neededH),
             };
           }
-        } else if (lines.length > 1 || fontSize > 14) {
-          const neededH = Math.max(node.size.height, lines.length * lineSpacing + 28);
-          if (neededH > node.size.height) {
-            node.size = {
-              width: node.size.width,
-              height: Math.round(neededH),
-            };
+        } else if (node.kind !== "generic.pdf" && node.kind !== "generic.image") {
+          let availableW = Math.max(20, node.size.width - 16);
+          if (
+            node.kind === "generic.diamond" ||
+            node.kind === "generic.triangle" ||
+            node.kind === "activity.decision" ||
+            node.kind === "state.choice"
+          ) {
+            availableW = Math.max(20, node.size.width * 0.7 - 8);
+          } else if (
+            node.kind === "generic.circle" ||
+            node.kind === "generic.ellipse" ||
+            node.kind === "uml.usecase"
+          ) {
+            availableW = Math.max(20, node.size.width * 0.8 - 8);
+          }
+          const wrapped = wrapTextToLines(newText, availableW, charWidth);
+          if (wrapped.length > 1 || fontSize > 14) {
+            const neededH = Math.max(node.size.height, wrapped.length * lineSpacing + 28);
+            if (neededH > node.size.height) {
+              node.size = {
+                width: node.size.width,
+                height: Math.round(neededH),
+              };
+            }
           }
         }
       }

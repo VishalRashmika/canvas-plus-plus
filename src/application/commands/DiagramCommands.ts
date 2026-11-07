@@ -485,6 +485,42 @@ export class UpdateNodeLabelCommand implements Command {
           height: Math.round(neededH),
         };
       }
+    } else if (
+      node.kind !== "generic.text" &&
+      node.kind !== "generic.table" &&
+      node.kind !== "generic.pdf" &&
+      node.kind !== "generic.image"
+    ) {
+      const nodeFont = getNodeFontStyle(node);
+      const fontSize = nodeFont.fontSize ?? 13;
+      const boldMultiplier = nodeFont.bold ? 1.1 : 1.0;
+      const charWidth = Math.max(4.5, fontSize * 0.58 * boldMultiplier);
+      let availableW = Math.max(20, node.size.width - 16);
+      if (
+        node.kind === "generic.diamond" ||
+        node.kind === "generic.triangle" ||
+        node.kind === "activity.decision" ||
+        node.kind === "state.choice"
+      ) {
+        availableW = Math.max(20, node.size.width * 0.7 - 8);
+      } else if (
+        node.kind === "generic.circle" ||
+        node.kind === "generic.ellipse" ||
+        node.kind === "uml.usecase"
+      ) {
+        availableW = Math.max(20, node.size.width * 0.8 - 8);
+      }
+      const wrapped = wrapTextToLines(this.newText, availableW, charWidth);
+      const lineSpacing = Math.round(fontSize * 1.35);
+      if (wrapped.length > 1 || fontSize > 14) {
+        const neededH = Math.max(node.size.height, wrapped.length * lineSpacing + 28);
+        if (neededH > node.size.height) {
+          node.size = {
+            width: node.size.width,
+            height: Math.round(neededH),
+          };
+        }
+      }
     }
   }
 

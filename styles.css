@@ -851,6 +851,7 @@ body .umlcanvas-moving * {
   outline: none !important;
   resize: none;
   overflow: hidden;
+  overflow-y: hidden;
   font-family: var(--font-text, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
   font-weight: 600;
   line-height: 1.35;

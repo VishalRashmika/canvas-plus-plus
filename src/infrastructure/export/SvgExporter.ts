@@ -530,11 +530,21 @@ export class SvgExporter {
     fontAttrs: string,
     textAnchor = "middle",
     className = "node-title",
-    fontSize = 13
+    fontSize = 13,
+    maxWidth?: number
   ): string {
-    const lines = (title ?? "").split(/\r?\n/);
+    const bold = fontAttrs.includes("font-weight: bold") || fontAttrs.includes("font-weight: 700");
+    const charWidth = Math.max(4.5, fontSize * 0.58 * (bold ? 1.1 : 1.0));
+    let effectiveMaxWidth = maxWidth;
+    if (effectiveMaxWidth === undefined && textAnchor === "middle" && cx > 20) {
+      effectiveMaxWidth = Math.max(20, cx * 2 - 16);
+    }
+    const lines = effectiveMaxWidth
+      ? wrapTextToLines(title ?? "", effectiveMaxWidth, charWidth)
+      : (title ?? "").split(/\r?\n/);
+
     if (lines.length <= 1) {
-      return `    <text x="${cx}" y="${cy}" text-anchor="${textAnchor}" class="${className}"${fontAttrs}>${escapeXml(title)}</text>\n`;
+      return `    <text x="${cx}" y="${cy}" text-anchor="${textAnchor}" class="${className}"${fontAttrs}>${escapeXml(lines[0] ?? "")}</text>\n`;
     }
     const lineHeight = Math.round(fontSize * 1.35);
     const startY = cy - ((lines.length - 1) * lineHeight) / 2;

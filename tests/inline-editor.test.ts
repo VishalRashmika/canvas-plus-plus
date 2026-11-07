@@ -35,6 +35,7 @@ class MockElement {
   title: string = "";
   disabled: boolean = false;
   value: string = "";
+  scrollTop: number = 0;
   clientWidth: number = 1000;
   clientHeight: number = 800;
 
@@ -879,6 +880,145 @@ describe("Native Obsidian Canvas Inline Node Name Editing", () => {
       expect(svg).toContain("<tspan");
       expect(svg).toContain("Export Line 1");
       expect(svg).toContain("Export Line 2");
+    });
+  });
+
+  describe("Shape Text Word-Wrapping and Shift+Enter Multiline In-Place Editing", () => {
+    it("should wrap a long sentence inside a shape into multiple <tspan> elements without overflowing", () => {
+      const longSentence = "This is a very long sentence that easily exceeds the shape width and must wrap into multiple lines";
+      renderer.startInlineEditor(rectNode);
+      const activeEditor = renderer.activeInlineEditor as unknown as MockElement;
+      activeEditor.value = longSentence;
+
+      // Press Enter to commit
+      activeEditor.dispatch("keydown", { key: "Enter", shiftKey: false });
+
+      expect(rectNode.labels[0].text).toBe(longSentence);
+
+      // Render shape
+      renderer.render();
+      const nodeEl = container.querySelector(`[data-node-id="${rectNode.id}"]`);
+      const titleEl = nodeEl?.querySelector(".umlcanvas-node-title");
+      expect(titleEl).not.toBeNull();
+
+      const tspans = titleEl?.querySelectorAll("tspan") ?? [];
+      expect(tspans.length).toBeGreaterThan(1);
+
+      // Each tspan line must be strictly shorter than the full sentence
+      for (const tspan of tspans) {
+        expect(tspan.textContent.length).toBeLessThan(longSentence.length);
+      }
+
+      // Shape height should have auto-expanded to fit all wrapped lines
+      expect(rectNode.size.height).toBeGreaterThanOrEqual(tspans.length * 17 + 28);
+    });
+
+    it("should wrap long sentences inside diamonds, circles, and use cases", () => {
+      const circleNode = editor.addNode({
+        kind: "generic.circle",
+        position: { x: 300, y: 100 },
+        size: { width: 100, height: 100 },
+        labels: [{ text: "A circle with a rather long title sentence that wraps" }],
+      });
+      const diamondNode = editor.addNode({
+        kind: "generic.diamond",
+        position: { x: 450, y: 100 },
+        size: { width: 120, height: 80 },
+        labels: [{ text: "Decision process sentence that needs multiple lines to fit inside" }],
+      });
+
+      renderer.render();
+
+      const circleEl = container.querySelector(`[data-node-id="${circleNode.id}"]`);
+      const circleTitle = circleEl?.querySelector(".umlcanvas-node-title");
+      const circleTspans = circleTitle?.querySelectorAll("tspan") ?? [];
+      expect(circleTspans.length).toBeGreaterThan(1);
+
+      const diamondEl = container.querySelector(`[data-node-id="${diamondNode.id}"]`);
+      const diamondTitle = diamondEl?.querySelector(".umlcanvas-node-title");
+      const diamondTspans = diamondTitle?.querySelectorAll("tspan") ?? [];
+      expect(diamondTspans.length).toBeGreaterThan(1);
+    });
+
+    it("should handle manual line breaks via Shift+Enter without losing upper text or clipping new lines", () => {
+      rectNode.size = { width: 160, height: 60 };
+      renderer.startInlineEditor(rectNode);
+      const activeEditor = renderer.activeInlineEditor as unknown as MockElement;
+      activeEditor.value = "First Line";
+
+      // 1. Press Shift+Enter
+      activeEditor.dispatch("keydown", { key: "Enter", shiftKey: true });
+
+      // Editor should not commit
+      expect(renderer.activeInlineEditor).not.toBeNull();
+      // Newline should have been inserted
+      expect(activeEditor.value).toBe("First Line\n");
+      // scrollTop must be 0 so upper text does not scroll away
+      expect(activeEditor.scrollTop).toBe(0);
+
+      // 2. Type second line
+      activeEditor.value = "First Line\nSecond Line";
+      activeEditor.dispatch("input");
+
+      // scrollTop must stay 0
+      expect(activeEditor.scrollTop).toBe(0);
+      // Editor height must accommodate both lines plus padding
+      const h2 = parseInt(activeEditor.style.height || "0", 10);
+      expect(h2).toBeGreaterThanOrEqual(2 * 17 + 8);
+
+      // 3. Press Shift+Enter again and type third line
+      activeEditor.dispatch("keydown", { key: "Enter", shiftKey: true });
+      expect(activeEditor.value).toBe("First Line\nSecond Line\n");
+      expect(activeEditor.scrollTop).toBe(0);
+
+      activeEditor.value = "First Line\nSecond Line\nThird Line";
+      activeEditor.dispatch("input");
+
+      expect(activeEditor.scrollTop).toBe(0);
+      const h3 = parseInt(activeEditor.style.height || "0", 10);
+      expect(h3).toBeGreaterThan(h2);
+      expect(h3).toBeGreaterThanOrEqual(3 * 17 + 8);
+
+      // 4. Commit with Enter
+      activeEditor.dispatch("keydown", { key: "Enter", shiftKey: false });
+      expect(renderer.activeInlineEditor).toBeNull();
+      expect(rectNode.labels[0].text).toBe("First Line\nSecond Line\nThird Line");
+
+      // 5. Render SVG and verify 3 distinct tspans
+      renderer.render();
+      const nodeEl = container.querySelector(`[data-node-id="${rectNode.id}"]`);
+      const titleEl = nodeEl?.querySelector(".umlcanvas-node-title");
+      const tspans = titleEl?.querySelectorAll("tspan") ?? [];
+      expect(tspans.length).toBe(3);
+      expect(tspans[0].textContent).toBe("First Line");
+      expect(tspans[1].textContent).toBe("Second Line");
+      expect(tspans[2].textContent).toBe("Third Line");
+
+      // Shape height expanded to fit all 3 lines
+      expect(rectNode.size.height).toBeGreaterThanOrEqual(3 * 17 + 28);
+    });
+
+    it("should dynamically scale editor height during input for long sentences with scrollTop 0", () => {
+      renderer.startInlineEditor(rectNode);
+      const activeEditor = renderer.activeInlineEditor as unknown as MockElement;
+
+      // Type a long sentence that wraps into 3 lines
+      activeEditor.value = "This sentence is deliberately crafted to be quite long so that it wraps onto multiple lines inside the node";
+      activeEditor.dispatch("input");
+
+      expect(activeEditor.scrollTop).toBe(0);
+      const h = parseInt(activeEditor.style.height || "0", 10);
+      expect(h).toBeGreaterThanOrEqual(3 * 17 + 8);
+
+      // Commit
+      activeEditor.dispatch("keydown", { key: "Enter", shiftKey: false });
+      expect(rectNode.labels[0].text).toBe("This sentence is deliberately crafted to be quite long so that it wraps onto multiple lines inside the node");
+
+      renderer.render();
+      const nodeEl = container.querySelector(`[data-node-id="${rectNode.id}"]`);
+      const titleEl = nodeEl?.querySelector(".umlcanvas-node-title");
+      const tspans = titleEl?.querySelectorAll("tspan") ?? [];
+      expect(tspans.length).toBeGreaterThanOrEqual(3);
     });
   });
 });

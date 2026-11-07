@@ -819,4 +819,193 @@ describe("Group Containment and Component Moving (v2.0.7)", () => {
     expect(parentGroup.position).toEqual({ x: 105, y: 100 });
     expect(childGroup.position).toEqual({ x: 155, y: 150 });
   });
+
+  describe("Group Deletion via Selection and Delete Key", () => {
+    test("selecting a single group and pressing Delete key deletes the group", () => {
+      const group = editor.addGroup({
+        name: "Group to Delete",
+        position: { x: 100, y: 100 },
+        size: { width: 300, height: 200 },
+      });
+      const container = new MockElement("div") as any;
+      const renderer = new SvgSceneRenderer(container, editor);
+      renderer.render();
+
+      editor.selectGroup(group.id, false);
+      expect(editor.selectedGroupIds).toEqual([group.id]);
+
+      (window as any).dispatch("keydown", {
+        key: "Delete",
+        preventDefault: jest.fn(),
+      });
+
+      expect(editor.diagram.groups.find((g) => g.id === group.id)).toBeUndefined();
+      expect(editor.selectedGroupIds).toEqual([]);
+    });
+
+    test("selecting a single group and pressing Backspace key deletes the group", () => {
+      const group = editor.addGroup({
+        name: "Group to Backspace",
+        position: { x: 100, y: 100 },
+        size: { width: 300, height: 200 },
+      });
+      const container = new MockElement("div") as any;
+      const renderer = new SvgSceneRenderer(container, editor);
+      renderer.render();
+
+      editor.selectGroup(group.id, false);
+      expect(editor.selectedGroupIds).toEqual([group.id]);
+
+      (window as any).dispatch("keydown", {
+        key: "Backspace",
+        preventDefault: jest.fn(),
+      });
+
+      expect(editor.diagram.groups.find((g) => g.id === group.id)).toBeUndefined();
+    });
+
+    test("selecting multiple groups and pressing Delete key deletes all selected groups", () => {
+      const g1 = editor.addGroup({
+        name: "Group 1",
+        position: { x: 50, y: 50 },
+        size: { width: 200, height: 150 },
+      });
+      const g2 = editor.addGroup({
+        name: "Group 2",
+        position: { x: 300, y: 50 },
+        size: { width: 200, height: 150 },
+      });
+      const g3 = editor.addGroup({
+        name: "Group 3",
+        position: { x: 550, y: 50 },
+        size: { width: 200, height: 150 },
+      });
+
+      const container = new MockElement("div") as any;
+      const renderer = new SvgSceneRenderer(container, editor);
+      renderer.render();
+
+      // Select g1 and g2
+      editor.selectGroup(g1.id, false);
+      editor.toggleGroupSelection(g2.id);
+      expect(editor.selectedGroupIds).toEqual(expect.arrayContaining([g1.id, g2.id]));
+      expect(editor.selectedGroupIds.length).toBe(2);
+
+      (window as any).dispatch("keydown", {
+        key: "Delete",
+        preventDefault: jest.fn(),
+      });
+
+      expect(editor.diagram.groups.find((g) => g.id === g1.id)).toBeUndefined();
+      expect(editor.diagram.groups.find((g) => g.id === g2.id)).toBeUndefined();
+      // g3 remains
+      expect(editor.diagram.groups.find((g) => g.id === g3.id)).toBeDefined();
+    });
+
+    test("marquee selecting groups and pressing Delete key deletes them", () => {
+      const g1 = editor.addGroup({
+        name: "Marquee Group 1",
+        position: { x: 100, y: 100 },
+        size: { width: 200, height: 150 },
+      });
+      const g2 = editor.addGroup({
+        name: "Marquee Group 2",
+        position: { x: 350, y: 100 },
+        size: { width: 200, height: 150 },
+      });
+
+      // Drag marquee box covering headers of both groups
+      editor.selectArea({
+        position: { x: 50, y: 90 },
+        size: { width: 550, height: 50 },
+      });
+
+      expect(editor.selectedGroupIds).toContain(g1.id);
+      expect(editor.selectedGroupIds).toContain(g2.id);
+
+      editor.deleteSelection();
+
+      expect(editor.diagram.groups.find((g) => g.id === g1.id)).toBeUndefined();
+      expect(editor.diagram.groups.find((g) => g.id === g2.id)).toBeUndefined();
+    });
+
+    test("marquee selecting only nodes inside a group does NOT select the group", () => {
+      const g = editor.addGroup({
+        name: "Outer Group",
+        position: { x: 100, y: 100 },
+        size: { width: 500, height: 400 },
+      });
+
+      const n1 = editor.addNode({
+        title: "Node 1",
+        position: { x: 150, y: 200 },
+        size: { width: 80, height: 50 },
+      });
+      const n2 = editor.addNode({
+        title: "Node 2",
+        position: { x: 280, y: 200 },
+        size: { width: 80, height: 50 },
+      });
+
+      // Marquee box inside group around the 2 nodes only (without touching header)
+      editor.selectArea({
+        position: { x: 140, y: 190 },
+        size: { width: 250, height: 80 },
+      });
+
+      expect(editor.selectedNodeIds).toContain(n1.id);
+      expect(editor.selectedNodeIds).toContain(n2.id);
+      expect(editor.selectedGroupIds).not.toContain(g.id);
+    });
+
+    test("deleting a group with member nodes preserves the nodes on the canvas", () => {
+      const group = editor.addGroup({
+        name: "Container",
+        position: { x: 100, y: 100 },
+        size: { width: 400, height: 300 },
+      });
+
+      const node = editor.addNode({
+        title: "Member Node",
+        position: { x: 150, y: 150 },
+        size: { width: 100, height: 60 },
+      });
+
+      expect(group.nodeIds).toContain(node.id);
+
+      editor.selectGroup(group.id, false);
+      editor.deleteSelection();
+
+      expect(editor.diagram.groups.find((g) => g.id === group.id)).toBeUndefined();
+      // Node is still present in diagram.nodes
+      expect(editor.diagram.nodes.find((n) => n.id === node.id)).toBeDefined();
+    });
+
+    test("deleting both group and contained node deletes both in one undoable step", () => {
+      const group = editor.addGroup({
+        name: "Container",
+        position: { x: 100, y: 100 },
+        size: { width: 400, height: 300 },
+      });
+
+      const node = editor.addNode({
+        title: "Member Node",
+        position: { x: 150, y: 150 },
+        size: { width: 100, height: 60 },
+      });
+
+      editor.selectGroup(group.id, false);
+      editor.selectNode(node.id, true);
+
+      editor.deleteSelection();
+
+      expect(editor.diagram.groups.find((g) => g.id === group.id)).toBeUndefined();
+      expect(editor.diagram.nodes.find((n) => n.id === node.id)).toBeUndefined();
+
+      // Single undo restores both
+      editor.undo();
+      expect(editor.diagram.groups.find((g) => g.id === group.id)).toBeDefined();
+      expect(editor.diagram.nodes.find((n) => n.id === node.id)).toBeDefined();
+    });
+  });
 });

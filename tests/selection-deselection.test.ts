@@ -517,6 +517,29 @@ describe("Component Selection and Deselection (Issue #9)", () => {
       toolbar.destroy();
     });
 
+    it("should delete selected group when clicking toolbar Delete button", () => {
+      const parentView = new MockElement("div", { cls: "umlcanvas-view-container" });
+      parentView.appendChild(container);
+
+      const toolbar = new Toolbar(
+        parentView as any,
+        editor,
+        renderer as any
+      );
+
+      editor.selectGroup(group.id, false);
+      expect(editor.selectedGroupIds).toEqual([group.id]);
+
+      const deleteBtn = parentView.querySelector(".umlcanvas-delete-btn");
+      expect(deleteBtn).not.toBeNull();
+      deleteBtn?.dispatch("click");
+
+      expect(editor.diagram.groups.find((g) => g.id === group.id)).toBeUndefined();
+      expect(editor.selectedGroupIds).toEqual([]);
+
+      toolbar.destroy();
+    });
+
     it("should remove selection outline and resize handles from interaction layer after deselect", () => {
       editor.selectNode(node1.id, false);
       let outlines = container.querySelectorAll(".umlcanvas-selection-outline");

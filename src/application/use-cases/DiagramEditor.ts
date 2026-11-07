@@ -7,7 +7,8 @@ import {
   createDiagramEdge,
 } from "../../domain/entities/DiagramEdge";
 import { Point } from "../../domain/value-objects/Point";
-import { Rect, Size, rect, intersects, contains, center } from "../../domain/value-objects/Rect";
+import { Rect, Size, rect, intersects, contains, center, right, bottom } from "../../domain/value-objects/Rect";
+import { Command } from "../commands/Command";
 import { CommandStack } from "../commands/CommandStack";
 import { Layer, createLayer } from "../../domain/entities/Layer";
 import { Group } from "../../domain/entities/Group";
@@ -366,6 +367,25 @@ export class DiagramEditor {
         }
       }
     }
+
+    for (const group of this.diagram.groups) {
+      if (!group.locked) {
+        const groupBounds = this.getGroupBounds(group);
+        const headerH = group.collapsed ? 34 : 28;
+        const headerRect = rect(groupBounds.position, {
+          width: groupBounds.size.width,
+          height: headerH,
+        });
+        const isFullyContained =
+          area.position.x <= groupBounds.position.x &&
+          right(area) >= right(groupBounds) &&
+          area.position.y <= groupBounds.position.y &&
+          bottom(area) >= bottom(groupBounds);
+        if (isFullyContained || intersects(area, headerRect)) {
+          this.selectedGroupIdSet.add(group.id);
+        }
+      }
+    }
     this.notify();
   }
 
@@ -663,19 +683,26 @@ export class DiagramEditor {
     const edgeIds = Array.from(this.selectedEdgeIdSet);
     const groupIds = Array.from(this.selectedGroupIdSet);
 
-    if (nodeIds.length > 0 || edgeIds.length > 0) {
-      const cmd = new DeleteNodesAndEdgesCommand(this.diagram, nodeIds, edgeIds);
-      this.commandStack.execute(cmd);
-    }
-
-    if (groupIds.length > 0) {
-      const cmd = new UngroupSelectionCommand(this.diagram, groupIds);
-      this.commandStack.execute(cmd);
-    }
-
     this.selectedNodeIdSet.clear();
     this.selectedEdgeIdSet.clear();
     this.selectedGroupIdSet.clear();
+
+    const commands: Command[] = [];
+    if (nodeIds.length > 0 || edgeIds.length > 0) {
+      commands.push(new DeleteNodesAndEdgesCommand(this.diagram, nodeIds, edgeIds));
+    }
+
+    if (groupIds.length > 0) {
+      commands.push(new UngroupSelectionCommand(this.diagram, groupIds));
+    }
+
+    if (commands.length === 1) {
+      this.commandStack.execute(commands[0]);
+    } else if (commands.length > 1) {
+      this.commandStack.execute(new CompoundCommand(commands, "Delete selection"));
+    }
+
+    this.notify();
   }
 
   // --- Edge CRUD ---
@@ -1018,9 +1045,10 @@ export class DiagramEditor {
   }
 
   deleteGroup(groupId: string): void {
+    this.selectedGroupIdSet.delete(groupId);
     const cmd = new UngroupSelectionCommand(this.diagram, [groupId]);
     this.commandStack.execute(cmd);
-    this.selectedGroupIdSet.delete(groupId);
+    this.notify();
   }
 
   createLayer(name: string): Layer {

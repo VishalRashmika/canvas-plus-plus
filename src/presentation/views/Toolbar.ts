@@ -1006,7 +1006,7 @@ export class Toolbar {
       "",
       () => this.editor.deleteSelection(),
       "trash",
-      "umlcanvas-toolbar-btn-danger"
+      "umlcanvas-toolbar-btn-danger umlcanvas-delete-btn"
     );
     this.contextGroup.appendChild(this.deleteBtn);
 

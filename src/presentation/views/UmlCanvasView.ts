@@ -285,7 +285,9 @@ export class UmlCanvasView extends TextFileView {
     this.autosaveCoordinator = new AutosaveCoordinator(
       this.editor,
       async () => {
-        this.requestSave();
+        if (typeof this.requestSave === "function") {
+          this.requestSave();
+        }
       },
       settings?.autosaveDelayMs ?? 1000
     );
@@ -505,6 +507,12 @@ export class UmlCanvasView extends TextFileView {
           this.palette.close();
           return;
         }
+      }
+
+      if ((e.key === "Delete" || e.key === "Backspace") && !isInput) {
+        e.preventDefault();
+        this.editor?.deleteSelection();
+        return;
       }
 
       if (mod && e.key.toLowerCase() === "c" && !isInput) {
@@ -1542,11 +1550,16 @@ export class UmlCanvasView extends TextFileView {
       });
 
       menu.addItem((item) => {
+        const selectedCount = this.editor?.selectedGroupIds.length ?? 1;
         item
-          .setTitle("Delete group")
+          .setTitle(selectedCount > 1 ? `Delete ${selectedCount} groups` : "Delete group")
           .setIcon("trash")
           .onClick(() => {
-            this.editor?.deleteGroup(group.id);
+            if (this.editor && this.editor.selectedGroupIds.includes(group.id) && this.editor.selectedGroupIds.length > 1) {
+              this.editor.deleteSelection();
+            } else {
+              this.editor?.deleteGroup(group.id);
+            }
           });
       });
     } else {

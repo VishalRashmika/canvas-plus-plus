@@ -3526,7 +3526,7 @@ export class SvgSceneRenderer {
               initialMemberPositions,
               moved: false,
               wasAlreadySingleSelected,
-              isTitleClick,
+              isTitleClick: isTitleClick && !isMulti,
             };
             this.container.classList.add("umlcanvas-moving");
           }

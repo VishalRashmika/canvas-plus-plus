@@ -1,4 +1,4 @@
-import { TextFileView, WorkspaceLeaf, Menu, TFile, MarkdownRenderer, Platform, App } from "obsidian";
+import { TextFileView, WorkspaceLeaf, Menu, TFile, MarkdownRenderer, Platform, App, Scope } from "obsidian";
 
 declare module "obsidian" {
   interface MenuItem {
@@ -271,8 +271,10 @@ export class UmlCanvasView extends TextFileView {
     this.contentEl.empty();
 
     this.rootEl = this.contentEl.createDiv({ cls: "umlcanvas-view-container" });
+    this.rootEl.setAttribute("tabindex", "-1");
     this.applyTheme();
     const svgContainer = this.rootEl.createDiv({ cls: "umlcanvas-svg-container" });
+    svgContainer.setAttribute("tabindex", "-1");
 
     this.editor = new DiagramEditor(diagram);
 
@@ -477,6 +479,9 @@ export class UmlCanvasView extends TextFileView {
 
     // Deselect currently selected component(s) when clicking empty canvas space (#9)
     this.rootEl.addEventListener("mousedown", (e: MouseEvent) => {
+      if (typeof this.rootEl?.focus === "function") {
+        this.rootEl.focus();
+      }
       if ((e as HandledEvent)._umlHandled) return;
       const target = e.target as HTMLElement | null;
       if (!target) return;
@@ -492,6 +497,39 @@ export class UmlCanvasView extends TextFileView {
         this.editor?.clearSelection();
       }
     });
+
+    // Register hotkeys on view's scope so Obsidian keymap delegates Delete / Backspace directly to canvas
+    if (!this.scope && typeof Scope !== "undefined") {
+      this.scope = new Scope((this.app as any)?.scope);
+    }
+    if (this.scope) {
+      this.scope.register([], "Delete", (evt: KeyboardEvent) => {
+        const target = evt?.target as HTMLElement | null;
+        const isInput =
+          target &&
+          (target.tagName === "INPUT" ||
+            target.tagName === "TEXTAREA" ||
+            target.isContentEditable ||
+            Boolean(target.closest(".umlcanvas-inline-editor")));
+        if (!isInput && this.editor?.hasSelection) {
+          this.editor.deleteSelection();
+          return false;
+        }
+      });
+      this.scope.register([], "Backspace", (evt: KeyboardEvent) => {
+        const target = evt?.target as HTMLElement | null;
+        const isInput =
+          target &&
+          (target.tagName === "INPUT" ||
+            target.tagName === "TEXTAREA" ||
+            target.isContentEditable ||
+            Boolean(target.closest(".umlcanvas-inline-editor")));
+        if (!isInput && this.editor?.hasSelection) {
+          this.editor.deleteSelection();
+          return false;
+        }
+      });
+    }
 
     // Setup Copy / Paste (F-012) and Minimap (F-011) shortcuts
     this.rootEl.addEventListener("keydown", (e: KeyboardEvent) => {

@@ -637,6 +637,7 @@ export class GroupSelectionCommand implements Command {
 export class UngroupSelectionCommand implements Command {
   readonly description = "Ungroup";
   private removedGroups: Group[] = [];
+  private parentGroupUpdates: { parent: Group; removedId: string }[] = [];
 
   constructor(
     private readonly diagram: Diagram,
@@ -647,12 +648,29 @@ export class UngroupSelectionCommand implements Command {
     const set = new Set(this.groupIds);
     this.removedGroups = this.diagram.groups.filter((g) => set.has(g.id));
     this.diagram.groups = this.diagram.groups.filter((g) => !set.has(g.id));
+    this.parentGroupUpdates = [];
+    for (const parent of this.diagram.groups) {
+      if (parent.groupIds) {
+        for (const gid of set) {
+          if (parent.groupIds.includes(gid)) {
+            parent.groupIds = parent.groupIds.filter((id) => id !== gid);
+            this.parentGroupUpdates.push({ parent, removedId: gid });
+          }
+        }
+      }
+    }
   }
 
   undo(): void {
     for (const g of this.removedGroups) {
       if (!this.diagram.groups.some((existing) => existing.id === g.id)) {
         this.diagram.groups.push(g);
+      }
+    }
+    for (const { parent, removedId } of this.parentGroupUpdates) {
+      if (!parent.groupIds) parent.groupIds = [];
+      if (!parent.groupIds.includes(removedId)) {
+        parent.groupIds.push(removedId);
       }
     }
   }

@@ -1007,5 +1007,30 @@ describe("Group Containment and Component Moving (v2.0.7)", () => {
       expect(editor.diagram.groups.find((g) => g.id === group.id)).toBeDefined();
       expect(editor.diagram.nodes.find((n) => n.id === node.id)).toBeDefined();
     });
+
+    test("deleting a child group removes it from parent group groupIds and undo restores it", () => {
+      const parent = editor.addGroup({
+        name: "Parent",
+        position: { x: 50, y: 50 },
+        size: { width: 500, height: 400 },
+      });
+      const child = editor.addGroup({
+        name: "Child",
+        position: { x: 100, y: 100 },
+        size: { width: 200, height: 150 },
+      });
+
+      parent.groupIds = [child.id];
+
+      editor.selectGroup(child.id, false);
+      editor.deleteSelection();
+
+      expect(editor.diagram.groups.find((g) => g.id === child.id)).toBeUndefined();
+      expect(parent.groupIds).not.toContain(child.id);
+
+      editor.undo();
+      expect(editor.diagram.groups.find((g) => g.id === child.id)).toBeDefined();
+      expect(parent.groupIds).toContain(child.id);
+    });
   });
 });

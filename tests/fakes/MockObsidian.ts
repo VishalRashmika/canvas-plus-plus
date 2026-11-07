@@ -147,9 +147,26 @@ export function createMockElement(tagName = "div"): any {
   return el;
 }
 
+export class Scope {
+  parent?: Scope;
+  keys: Array<{ modifiers: any[]; key: string | null; func: any }> = [];
+  constructor(parent?: Scope) {
+    this.parent = parent;
+  }
+  register(modifiers: any[], key: string | null, func: any): any {
+    const handler = { modifiers, key, func, scope: this };
+    this.keys.push(handler);
+    return handler;
+  }
+  unregister(handler: any): void {
+    this.keys = this.keys.filter((h) => h !== handler);
+  }
+}
+
 export class TextFileView {
   app: any;
   leaf: any;
+  scope: Scope = new Scope();
   file: TFile | null = null;
   data: string = "";
   contentEl: HTMLElement = typeof document !== "undefined" ? document.createElement("div") : createMockElement("div");

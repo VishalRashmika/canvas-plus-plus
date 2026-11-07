@@ -371,6 +371,9 @@ export class SvgSceneRenderer {
     this.viewportEl.appendChild(this.interactionLayerEl);
 
     this.container.appendChild(this.svgEl);
+    if (typeof this.container.setAttribute === "function") {
+      this.container.setAttribute("tabindex", "-1");
+    }
 
     // Bind event handlers
     this.onWheelBound = this.handleWheel.bind(this);
@@ -2914,6 +2917,9 @@ export class SvgSceneRenderer {
     }
 
     (e as HandledMouseEvent)._umlHandled = true;
+    if (typeof this.container.focus === "function") {
+      this.container.focus();
+    }
 
     // Table Action Buttons (+ / − for Rows and Columns) - handled first for smooth, immediate responsiveness
     const tableAddCol = target?.closest(".umlcanvas-table-add-col-btn");
@@ -5637,9 +5643,18 @@ export class SvgSceneRenderer {
 
     // Delete / Backspace
     if (e.key === "Delete" || e.key === "Backspace") {
-      e.preventDefault();
-      this.editor.deleteSelection();
-      return;
+      const target = e.target as HTMLElement | null;
+      const isInput =
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable ||
+          Boolean(target.closest(".umlcanvas-inline-editor")));
+      if (!isInput && this.editor.hasSelection) {
+        e.preventDefault();
+        this.editor.deleteSelection();
+        return;
+      }
     }
 
     // Color shortcuts: Alt+1 to Alt+6 (or 1 to 6 when selection exists), Alt+0 to clear

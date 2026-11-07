@@ -606,5 +606,54 @@ describe("Canvas++ Document Opening and Creation Tests (#8)", () => {
       expect(editor.diagram.groups.find((g) => g.id === "grp-to-delete")).toBeUndefined();
       expect(editor.selectedGroupIds).toEqual([]);
     });
+
+    it("should delete selected group when Delete key is handled via view scope", () => {
+      (view as any).file = new TFile("test.canvas++", "test", "canvas++");
+      const validJson = JSON.stringify({
+        schemaVersion: 1,
+        id: "diag-del-scope-test",
+        title: "Delete Group Scope Test",
+        diagramType: "general",
+        nodes: [],
+        edges: [],
+        groups: [
+          {
+            id: "grp-scope-1",
+            name: "Scope Group 1",
+            nodeIds: [],
+            position: { x: 50, y: 50 },
+            size: { width: 200, height: 150 },
+          },
+          {
+            id: "grp-scope-2",
+            name: "Scope Group 2",
+            nodeIds: [],
+            position: { x: 300, y: 50 },
+            size: { width: 200, height: 150 },
+          },
+        ],
+      });
+
+      view.setViewData(validJson, false);
+
+      const editor = view.diagramEditor!;
+      expect(editor.diagram.groups.length).toBe(2);
+
+      // Select both groups
+      editor.selectGroup("grp-scope-1", false);
+      editor.toggleGroupSelection("grp-scope-2");
+      expect(editor.selectedGroupIds.length).toBe(2);
+
+      const scope = (view as any).scope;
+      expect(scope).toBeDefined();
+
+      const deleteHandler = scope.keys.find((k: any) => k.key === "Delete");
+      expect(deleteHandler).toBeDefined();
+      deleteHandler.func({ target: (view as any).rootEl });
+
+      expect(editor.diagram.groups.find((g) => g.id === "grp-scope-1")).toBeUndefined();
+      expect(editor.diagram.groups.find((g) => g.id === "grp-scope-2")).toBeUndefined();
+      expect(editor.selectedGroupIds).toEqual([]);
+    });
   });
 });

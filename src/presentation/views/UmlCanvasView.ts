@@ -62,6 +62,7 @@ export class UmlCanvasView extends TextFileView {
   private _canvasAttachmentService: CanvasAttachmentService | null = null;
   private _attachmentServiceApp: App | null = null;
   private lastMouseCanvasPos: Point | null = null;
+  private cachedRootElRect: DOMRect | null = null;
 
   public get canvasAttachmentService(): CanvasAttachmentService {
     if (
@@ -485,15 +486,29 @@ export class UmlCanvasView extends TextFileView {
 
     // Track cursor canvas position for accurate pasting (#5)
     this.rootEl.addEventListener("mousemove", (e: MouseEvent) => {
-      if (this.renderer && this.rootEl) {
-        const rect = this.rootEl.getBoundingClientRect();
-        const clientX = e.clientX - rect.left;
-        const clientY = e.clientY - rect.top;
-        const transform = this.renderer.currentTransform;
-        this.lastMouseCanvasPos = {
-          x: Math.round((clientX - transform.panX) / transform.zoom),
-          y: Math.round((clientY - transform.panY) / transform.zoom),
-        };
+      if (this.renderer) {
+        const pos = this.renderer.lastMouseCanvasPosition;
+        if (pos) {
+          this.lastMouseCanvasPos = pos;
+          return;
+        }
+      }
+      if (this.rootEl) {
+        if (!this.cachedRootElRect) {
+          this.cachedRootElRect = typeof this.rootEl.getBoundingClientRect === "function"
+            ? this.rootEl.getBoundingClientRect()
+            : null;
+        }
+        const rect = this.cachedRootElRect;
+        if (rect) {
+          const clientX = e.clientX - rect.left;
+          const clientY = e.clientY - rect.top;
+          const transform = this.renderer?.currentTransform ?? { panX: 0, panY: 0, zoom: 1 };
+          this.lastMouseCanvasPos = {
+            x: Math.round((clientX - transform.panX) / transform.zoom),
+            y: Math.round((clientY - transform.panY) / transform.zoom),
+          };
+        }
       }
     });
 

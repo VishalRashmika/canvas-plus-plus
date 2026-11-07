@@ -529,5 +529,88 @@ describe("FreehandSmoother & Smooth Drawing Tool", () => {
       const pts = node.customData?.points as any[];
       expect(pts.length).toBeGreaterThanOrEqual(4);
     });
+
+    it("smooths the live preview in real-time eliminating mouse sensor jitter before mouse up", () => {
+      const svgEl = container.querySelector(".umlcanvas-svg");
+      const bgRect = container.querySelector(".umlcanvas-bg");
+
+      svgEl?.dispatch("mousedown", { button: 0, target: bgRect, clientX: 0, clientY: 0 });
+
+      // Add points with deliberate high-frequency jitter (alternating spikes)
+      (global as any).window.dispatch("mousemove", { clientX: 20, clientY: 50 });
+      (global as any).window.dispatch("mousemove", { clientX: 40, clientY: 10 });
+      (global as any).window.dispatch("mousemove", { clientX: 60, clientY: 60 });
+      (global as any).window.dispatch("mousemove", { clientX: 80, clientY: 20 });
+      (global as any).window.dispatch("mousemove", { clientX: 100, clientY: 50 });
+
+      const previewEl = container.querySelector(".umlcanvas-freehand-stroke");
+      expect(previewEl).not.toBeNull();
+      const previewD = previewEl?.getAttribute("d")!;
+      expect(previewD).toContain("Q");
+
+      // Verify that the live preview path was smoothed rather than strictly using the raw spike coordinates (Y=60 smoothed to 37.5)
+      expect(previewD).toContain("37.5");
+      expect(previewD).not.toContain(",60"); // Y-spike at 60 was smoothed down to 37.5
+
+      (global as any).window.dispatch("mouseup", { clientX: 100, clientY: 50 });
+      expect(editor.diagram.nodes.length).toBe(1);
+    });
+
+    it("renders long continuous brush strokes smoothly without lagging or CPU starvation", () => {
+      const svgEl = container.querySelector(".umlcanvas-svg");
+      const bgRect = container.querySelector(".umlcanvas-bg");
+
+      svgEl?.dispatch("mousedown", { button: 0, target: bgRect, clientX: 10, clientY: 10 });
+
+      const start = Date.now();
+      // Dispatch 300 rapid mouse movements in sequence simulating a complex freehand sketch
+      for (let i = 1; i <= 300; i++) {
+        (global as any).window.dispatch("mousemove", {
+          clientX: 10 + i * 2,
+          clientY: 10 + Math.sin(i / 10) * 30,
+        });
+      }
+      const duration = Date.now() - start;
+
+      // 300 rapid moves with live smoothing and path generation must finish in under 100ms
+      expect(duration).toBeLessThan(150);
+
+      const previewEl = container.querySelector(".umlcanvas-freehand-stroke");
+      expect(previewEl).not.toBeNull();
+      expect(previewEl?.getAttribute("d")).toContain("Q");
+
+      (global as any).window.dispatch("mouseup", { clientX: 610, clientY: 10 });
+      expect(editor.diagram.nodes.length).toBe(1);
+    });
+
+    it("preserves cachedContainerRect during dragging even if mouseleave occurs", () => {
+      const svgEl = container.querySelector(".umlcanvas-svg");
+      const bgRect = container.querySelector(".umlcanvas-bg");
+
+      let getBoundingClientRectCallCount = 0;
+      const originalGetBoundingClientRect = container.getBoundingClientRect;
+      container.getBoundingClientRect = () => {
+        getBoundingClientRectCallCount++;
+        return { left: 0, top: 0, right: 800, bottom: 600, width: 800, height: 600 } as any;
+      };
+
+      // Start drag
+      svgEl?.dispatch("mousedown", { button: 0, target: bgRect, clientX: 50, clientY: 50 });
+      const initialCalls = getBoundingClientRectCallCount;
+
+      // Mouse leaves container during drawing (cursor moves over toolbar or window border)
+      svgEl?.dispatch("mouseleave", {});
+
+      // Additional mouse moves outside / across canvas
+      for (let i = 1; i <= 20; i++) {
+        (global as any).window.dispatch("mousemove", { clientX: 50 + i * 5, clientY: 50 + i * 3 });
+      }
+
+      // Rect remained cached because freehand drag was in progress - no new getBoundingClientRect layout reflow calls
+      expect(getBoundingClientRectCallCount).toBe(initialCalls);
+
+      (global as any).window.dispatch("mouseup", { clientX: 150, clientY: 110 });
+      container.getBoundingClientRect = originalGetBoundingClientRect;
+    });
   });
 });

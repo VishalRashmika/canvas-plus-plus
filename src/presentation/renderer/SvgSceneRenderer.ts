@@ -3626,8 +3626,8 @@ export class SvgSceneRenderer {
 
       let added = false;
       for (const evt of rawEvents) {
-        const clientPt = this.getClientCoords(evt);
-        const pt = screenToCanvas(clientPt, this.transform);
+        const clientPt = evt === e ? clientPoint : this.getClientCoords(evt);
+        const pt = evt === e ? canvasPoint : screenToCanvas(clientPt, this.transform);
         const pts = this.activeStroke.points;
         const lastPt = pts[pts.length - 1];
 
@@ -3646,7 +3646,9 @@ export class SvgSceneRenderer {
       }
 
       if (added || this.activeStroke.points.length <= 2) {
-        const d = pointsToSmoothSvgPath(this.activeStroke.points);
+        const pts = this.activeStroke.points;
+        const smoothed = pts.length <= 3 ? pts : smoothPoints(pts);
+        const d = pointsToSmoothSvgPath(smoothed);
         this.freehandPathEl.setAttribute("d", d);
       }
       return;
@@ -4041,7 +4043,9 @@ export class SvgSceneRenderer {
   }
 
   private handleMouseLeave(): void {
-    this.cachedContainerRect = null;
+    if (this.dragMode.type === "none") {
+      this.cachedContainerRect = null;
+    }
     if (this.hoveredTableNodeId) {
       this.hoveredTableNodeId = undefined;
       this.renderInteractions();

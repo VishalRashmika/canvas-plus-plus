@@ -2766,6 +2766,7 @@ body .umlcanvas-moving * {
   stroke-linecap: round;
   stroke-linejoin: round;
   pointer-events: none;
+  will-change: d;
 }
 
 /* Freehand Rendered Stroke & Escape Hatch (F-073) */

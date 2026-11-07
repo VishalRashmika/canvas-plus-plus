@@ -5,6 +5,9 @@ import { Point } from "../value-objects/Point";
  * for compact and efficient SVG path strings.
  */
 export function roundCoord(n: number, decimals = 1): number {
+  if (decimals === 1) return Math.round(n * 10) / 10;
+  if (decimals === 2) return Math.round(n * 100) / 100;
+  if (decimals === 0) return Math.round(n);
   const factor = Math.pow(10, decimals);
   return Math.round(n * factor) / factor;
 }
@@ -37,27 +40,31 @@ export function filterClosePoints<T extends Point>(points: T[], minDistance = 1.
  * Smooths stroke points by applying a moving average filter (Gaussian-weighted 0.25 / 0.5 / 0.25)
  * to eliminate high-frequency hand tremor and mouse sensor jitter while preserving overall shape and endpoints.
  */
-export function smoothPoints<T extends Point>(points: T[]): T[] {
+export function smoothPoints<T extends Point>(points: T[], iterations = 1): T[] {
   if (points.length <= 3) return points;
 
-  const result: T[] = [{ ...points[0] }];
-  for (let i = 1; i < points.length - 1; i++) {
-    const prev = points[i - 1];
-    const curr = points[i];
-    const next = points[i + 1];
+  let current = points;
+  for (let iter = 0; iter < iterations; iter++) {
+    const result: T[] = [{ ...current[0] }];
+    for (let i = 1; i < current.length - 1; i++) {
+      const prev = current[i - 1];
+      const curr = current[i];
+      const next = current[i + 1];
 
-    const smoothedX = roundCoord(0.25 * prev.x + 0.5 * curr.x + 0.25 * next.x, 2);
-    const smoothedY = roundCoord(0.25 * prev.y + 0.5 * curr.y + 0.25 * next.y, 2);
+      const smoothedX = roundCoord(0.25 * prev.x + 0.5 * curr.x + 0.25 * next.x, 2);
+      const smoothedY = roundCoord(0.25 * prev.y + 0.5 * curr.y + 0.25 * next.y, 2);
 
-    result.push({
-      ...curr,
-      x: smoothedX,
-      y: smoothedY,
-    });
+      result.push({
+        ...curr,
+        x: smoothedX,
+        y: smoothedY,
+      });
+    }
+
+    result.push({ ...current[current.length - 1] });
+    current = result;
   }
-
-  result.push({ ...points[points.length - 1] });
-  return result;
+  return current;
 }
 
 /**
@@ -98,17 +105,28 @@ export function pointsToSmoothSvgPath(points: Point[]): string {
   const m0x = roundCoord((p0.x + p1.x) * 0.5);
   const m0y = roundCoord((p0.y + p1.y) * 0.5);
 
-  let d = `M ${roundCoord(p0.x)},${roundCoord(p0.y)} L ${m0x},${m0y}`;
+  const parts: string[] = [`M ${roundCoord(p0.x)},${roundCoord(p0.y)} L ${m0x},${m0y}`];
 
   for (let i = 1; i < len - 1; i++) {
     const pi = points[i];
     const pNext = points[i + 1];
     const mx = roundCoord((pi.x + pNext.x) * 0.5);
     const my = roundCoord((pi.y + pNext.y) * 0.5);
-    d += ` Q ${roundCoord(pi.x)},${roundCoord(pi.y)} ${mx},${my}`;
+    parts.push(` Q ${roundCoord(pi.x)},${roundCoord(pi.y)} ${mx},${my}`);
   }
 
   const pLast = points[len - 1];
-  d += ` L ${roundCoord(pLast.x)},${roundCoord(pLast.y)}`;
-  return d;
+  parts.push(` L ${roundCoord(pLast.x)},${roundCoord(pLast.y)}`);
+  return parts.join("");
+}
+
+/**
+ * Smooths stroke points and converts them into a smooth SVG path.
+ * Ideal for both live drawing previews and final stroke rendering.
+ */
+export function createSmoothStrokePath(points: Point[], iterations = 1): string {
+  if (points.length <= 3) {
+    return pointsToSmoothSvgPath(points);
+  }
+  return pointsToSmoothSvgPath(smoothPoints(points, iterations));
 }

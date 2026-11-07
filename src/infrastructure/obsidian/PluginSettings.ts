@@ -9,6 +9,8 @@ export interface UmlCanvasSettings {
   enableFreehand: boolean;
   autoShapeDetection: boolean;
   theme?: "system" | "light" | "dark";
+  freehandBrushWidth?: number;
+  freehandBrushStrength?: number;
 }
 
 export const DEFAULT_SETTINGS: UmlCanvasSettings = {
@@ -22,4 +24,6 @@ export const DEFAULT_SETTINGS: UmlCanvasSettings = {
   enableFreehand: true,
   autoShapeDetection: true,
   theme: "system",
+  freehandBrushWidth: 2,
+  freehandBrushStrength: 1.0,
 };

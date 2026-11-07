@@ -141,6 +141,15 @@ export class Toolbar {
   private contextItalicBtn!: HTMLButtonElement;
   private contextFontFamilyBtn!: HTMLButtonElement;
 
+  // Brush Settings Popover & Controls
+  private brushBtn!: HTMLButtonElement;
+  private contextBrushBtn!: HTMLButtonElement;
+  private brushPopoverEl: HTMLElement | null = null;
+  private brushWinClickBound: ((e: MouseEvent) => void) | null = null;
+  private currentBrushWidth = 2;
+  private currentBrushStrength = 1.0;
+  private updateBrushPopoverElements: (() => void) | null = null;
+
   private freehandEnabled = true;
   private unsubscribe: (() => void) | null = null;
 
@@ -159,9 +168,12 @@ export class Toolbar {
     private readonly onToggleTheme?: () => void,
     private readonly onAddImageRequested?: () => void,
     private readonly onAddPdfRequested?: () => void,
-    private readonly onPasteRequested?: () => void
+    private readonly onPasteRequested?: () => void,
+    private readonly onBrushSettingsChange?: (width: number, strength: number) => void
   ) {
     this.freehandEnabled = this.renderer.isFreehandEnabled;
+    this.currentBrushWidth = this.renderer.brushWidth ?? 2;
+    this.currentBrushStrength = this.renderer.brushStrength ?? 1.0;
 
     this.breadcrumbsEl = createDiv({ cls: "umlcanvas-breadcrumbs" });
     this.container.prepend(this.breadcrumbsEl);
@@ -793,6 +805,16 @@ export class Toolbar {
     });
     this.contextGroup.appendChild(this.colorBtn);
 
+    // Context Brush Settings (visible when freehand strokes are selected)
+    this.contextBrushBtn = this.createButton(
+      "Brush Width & Strength for Selected Stroke(s)",
+      "",
+      () => this.toggleBrushMenu(this.contextBrushBtn),
+      "sliders-horizontal",
+      "umlcanvas-context-brush-btn is-hidden"
+    );
+    this.contextGroup.appendChild(this.contextBrushBtn);
+
     // Context Typography Controls: [ − ] [ 13px ] [ + ] [ B ] [ I ] [ Sans ]
     const contextFontStepper = this.contextGroup.createDiv({
       cls: "umlcanvas-font-stepper-combo umlcanvas-context-font-stepper",
@@ -1199,7 +1221,24 @@ export class Toolbar {
       },
       "pencil"
     );
+    this.drawBtn.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.toggleBrushMenu(this.brushBtn || this.drawBtn);
+    });
     modeGroup.appendChild(this.drawBtn);
+
+    // Brush Settings Tool (Width & Strength)
+    this.brushBtn = this.createButton(
+      "Brush Settings (Width & Strength)",
+      "",
+      () => {
+        this.toggleBrushMenu(this.brushBtn);
+      },
+      "sliders-horizontal",
+      "umlcanvas-brush-btn"
+    );
+    modeGroup.appendChild(this.brushBtn);
 
     // Auto Shape Detection (Shift+P)
     this.autoShapeBtn = this.createButton(
@@ -1612,6 +1651,24 @@ export class Toolbar {
       this.enhanceBtn.disabled = !hasFreehandSelected;
       this.enhanceBtn.classList.toggle("is-hidden", !hasFreehandSelected);
 
+      if (this.contextBrushBtn) {
+        this.contextBrushBtn.disabled = !hasFreehandSelected;
+        this.contextBrushBtn.classList.toggle("is-hidden", !hasFreehandSelected);
+        if (hasFreehandSelected) {
+          const firstFreehand = this.editor.diagram.nodes.find(
+            (n) => this.editor.selectedNodeIds.includes(n.id) && n.kind === "generic.freehand"
+          );
+          if (firstFreehand?.style?.strokeWidth) {
+            this.currentBrushWidth = firstFreehand.style.strokeWidth;
+          }
+          if (firstFreehand?.style?.strokeOpacity !== undefined) {
+            this.currentBrushStrength = firstFreehand.style.strokeOpacity;
+          } else if (firstFreehand?.style?.opacity !== undefined) {
+            this.currentBrushStrength = firstFreehand.style.opacity;
+          }
+        }
+      }
+
       // Align & Distribute (2+ nodes selected)
       this.alignBtn.disabled = selectedNodeCount < 2;
       this.alignBtn.classList.toggle("is-hidden", selectedNodeCount < 2);
@@ -1845,6 +1902,18 @@ export class Toolbar {
         );
       }
     }
+    if (this.brushBtn) {
+      if (!this.freehandEnabled) {
+        this.brushBtn.classList.add("is-hidden");
+        this.brushBtn.classList.remove("is-active");
+      } else {
+        this.brushBtn.classList.remove("is-hidden");
+        this.brushBtn.classList.toggle(
+          "is-active",
+          Boolean(this.brushPopoverEl)
+        );
+      }
+    }
     if (this.autoShapeBtn) {
       if (!this.freehandEnabled) {
         this.autoShapeBtn.classList.add("is-hidden");
@@ -1889,6 +1958,7 @@ export class Toolbar {
     this.closeColorPalette();
     this.closeAlignMenu();
     this.closeFontSizeMenu();
+    this.closeBrushMenu();
   }
 
   // ==========================================
@@ -2963,6 +3033,319 @@ export class Toolbar {
       }
       this.fontSizeWinClickBound = null;
     }
+  }
+
+  // ==========================================
+  // Brush Settings Popover Menu
+  // ==========================================
+  toggleBrushMenu(anchorEl?: HTMLElement): void {
+    if (this.brushPopoverEl) {
+      this.closeBrushMenu();
+    } else {
+      this.openBrushMenu(anchorEl);
+    }
+  }
+
+  openBrushMenu(anchorEl?: HTMLElement): void {
+    if (this.brushPopoverEl) return;
+    this.closeAllPopovers();
+
+    const anchor = anchorEl ?? this.brushBtn ?? this.drawBtn;
+    const popover = createDiv({
+      cls: "umlcanvas-menu-dropdown umlcanvas-brush-popover",
+    });
+    popover.addEventListener("mousedown", (e) => {
+      markEventHandled(e);
+      e.stopPropagation();
+    });
+
+    // 1. Header
+    popover.createDiv({ cls: "umlcanvas-menu-header", text: "Brush Settings" });
+
+    // 2. Brush Width Section
+    const widthSection = popover.createDiv({ cls: "umlcanvas-brush-section" });
+    const widthHeader = widthSection.createDiv({ cls: "umlcanvas-brush-header-row" });
+    widthHeader.createSpan({ cls: "umlcanvas-brush-title", text: "Brush Width" });
+    const widthBadge = widthHeader.createSpan({
+      cls: "umlcanvas-brush-badge",
+      text: `${this.currentBrushWidth}px`,
+    });
+
+    // Quick Width Presets
+    const widthPresetsRow = widthSection.createDiv({ cls: "umlcanvas-brush-presets-row" });
+    const widthPresets = [1, 2, 4, 6, 10];
+    const widthPresetBtns: HTMLButtonElement[] = [];
+
+    for (const w of widthPresets) {
+      const btn = widthPresetsRow.createEl("button", {
+        cls: "umlcanvas-brush-preset-btn",
+        text: `${w}px`,
+      });
+      if (Math.round(this.currentBrushWidth) === w) {
+        btn.classList.add("is-active");
+      }
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.applyBrushSettings(w, this.currentBrushStrength);
+      });
+      widthPresetBtns.push(btn);
+    }
+
+    // Width Stepper & Slider
+    const widthStepperRow = widthSection.createDiv({ cls: "umlcanvas-brush-stepper-row" });
+    const widthDecBtn = widthStepperRow.createEl("button", {
+      cls: "umlcanvas-brush-step-btn",
+      text: "−",
+      title: "Decrease brush width (-1px)",
+    });
+    widthDecBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.applyBrushSettings(Math.max(1, this.currentBrushWidth - 1), this.currentBrushStrength);
+    });
+
+    const widthSlider = widthStepperRow.createEl("input", {
+      type: "range",
+      cls: "umlcanvas-brush-slider",
+      attr: { min: "1", max: "24", step: "1" },
+    });
+    widthSlider.value = String(Math.round(this.currentBrushWidth));
+    widthSlider.addEventListener("input", (e) => {
+      e.stopPropagation();
+      const val = parseInt((e.target as HTMLInputElement).value, 10);
+      if (!isNaN(val)) {
+        this.applyBrushSettings(val, this.currentBrushStrength);
+      }
+    });
+
+    const widthIncBtn = widthStepperRow.createEl("button", {
+      cls: "umlcanvas-brush-step-btn",
+      text: "+",
+      title: "Increase brush width (+1px)",
+    });
+    widthIncBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.applyBrushSettings(Math.min(50, this.currentBrushWidth + 1), this.currentBrushStrength);
+    });
+
+    popover.createDiv({ cls: "umlcanvas-menu-divider" });
+
+    // 3. Brush Strength / Opacity Section
+    const strengthSection = popover.createDiv({ cls: "umlcanvas-brush-section" });
+    const strengthHeader = strengthSection.createDiv({ cls: "umlcanvas-brush-header-row" });
+    strengthHeader.createSpan({ cls: "umlcanvas-brush-title", text: "Brush Strength" });
+    const strengthBadge = strengthHeader.createSpan({
+      cls: "umlcanvas-brush-badge",
+      text: `${Math.round(this.currentBrushStrength * 100)}%`,
+    });
+
+    // Quick Strength Presets
+    const strengthPresetsRow = strengthSection.createDiv({ cls: "umlcanvas-brush-presets-row" });
+    const strengthPresets = [0.25, 0.5, 0.75, 1.0];
+    const strengthLabels = ["25%", "50%", "75%", "100%"];
+    const strengthPresetBtns: HTMLButtonElement[] = [];
+
+    for (let i = 0; i < strengthPresets.length; i++) {
+      const s = strengthPresets[i];
+      const btn = strengthPresetsRow.createEl("button", {
+        cls: "umlcanvas-brush-preset-btn",
+        text: strengthLabels[i],
+      });
+      if (Math.abs(this.currentBrushStrength - s) < 0.05) {
+        btn.classList.add("is-active");
+      }
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.applyBrushSettings(this.currentBrushWidth, s);
+      });
+      strengthPresetBtns.push(btn);
+    }
+
+    // Strength Stepper & Slider
+    const strengthStepperRow = strengthSection.createDiv({ cls: "umlcanvas-brush-stepper-row" });
+    const strengthDecBtn = strengthStepperRow.createEl("button", {
+      cls: "umlcanvas-brush-step-btn",
+      text: "−",
+      title: "Decrease brush strength (-10%)",
+    });
+    strengthDecBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.applyBrushSettings(
+        this.currentBrushWidth,
+        Math.max(0.1, Math.round((this.currentBrushStrength - 0.1) * 10) / 10)
+      );
+    });
+
+    const strengthSlider = strengthStepperRow.createEl("input", {
+      type: "range",
+      cls: "umlcanvas-brush-slider",
+      attr: { min: "10", max: "100", step: "5" },
+    });
+    strengthSlider.value = String(Math.round(this.currentBrushStrength * 100));
+    strengthSlider.addEventListener("input", (e) => {
+      e.stopPropagation();
+      const val = parseInt((e.target as HTMLInputElement).value, 10);
+      if (!isNaN(val)) {
+        this.applyBrushSettings(this.currentBrushWidth, val / 100);
+      }
+    });
+
+    const strengthIncBtn = strengthStepperRow.createEl("button", {
+      cls: "umlcanvas-brush-step-btn",
+      text: "+",
+      title: "Increase brush strength (+10%)",
+    });
+    strengthIncBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.applyBrushSettings(
+        this.currentBrushWidth,
+        Math.min(1.0, Math.round((this.currentBrushStrength + 0.1) * 10) / 10)
+      );
+    });
+
+    popover.createDiv({ cls: "umlcanvas-menu-divider" });
+
+    // 4. Live Preview Box
+    const previewBox = popover.createDiv({ cls: "umlcanvas-brush-preview-box" });
+    const previewSvg = previewBox.createSvg("svg", {
+      cls: "umlcanvas-brush-preview-svg",
+      attr: { viewBox: "0 0 200 36", width: "100%", height: "36" },
+    });
+    const previewPath = previewSvg.createSvg("path", {
+      cls: "umlcanvas-brush-preview-line",
+      attr: {
+        d: "M 15,18 C 60,6 140,30 185,18",
+        fill: "none",
+        stroke: "currentColor",
+        "stroke-linecap": "round",
+        "stroke-linejoin": "round",
+        "stroke-width": String(this.currentBrushWidth),
+        "stroke-opacity": String(this.currentBrushStrength),
+      },
+    });
+    previewPath.style.strokeWidth = `${this.currentBrushWidth}px`;
+    previewPath.style.strokeOpacity = String(this.currentBrushStrength);
+
+    const previewLabel = previewBox.createSpan({
+      cls: "umlcanvas-brush-preview-label",
+      text: `${this.currentBrushWidth}px • ${Math.round(this.currentBrushStrength * 100)}% strength`,
+    });
+
+    // Helper to refresh live controls inside popover
+    this.updateBrushPopoverElements = () => {
+      widthBadge.textContent = `${this.currentBrushWidth}px`;
+      widthSlider.value = String(Math.round(this.currentBrushWidth));
+      for (let i = 0; i < widthPresets.length; i++) {
+        widthPresetBtns[i].classList.toggle(
+          "is-active",
+          Math.round(this.currentBrushWidth) === widthPresets[i]
+        );
+      }
+
+      strengthBadge.textContent = `${Math.round(this.currentBrushStrength * 100)}%`;
+      strengthSlider.value = String(Math.round(this.currentBrushStrength * 100));
+      for (let i = 0; i < strengthPresets.length; i++) {
+        strengthPresetBtns[i].classList.toggle(
+          "is-active",
+          Math.abs(this.currentBrushStrength - strengthPresets[i]) < 0.05
+        );
+      }
+
+      previewPath.setAttribute("stroke-width", String(this.currentBrushWidth));
+      previewPath.style.strokeWidth = `${this.currentBrushWidth}px`;
+      previewPath.setAttribute("stroke-opacity", String(this.currentBrushStrength));
+      previewPath.style.strokeOpacity = String(this.currentBrushStrength);
+      previewLabel.textContent = `${this.currentBrushWidth}px • ${Math.round(
+        this.currentBrushStrength * 100
+      )}% strength`;
+    };
+
+    this.container.appendChild(popover);
+    this.brushPopoverEl = popover;
+    if (anchor) {
+      anchor.classList.add("is-active");
+    }
+
+    this.positionPopover(popover, anchor, 6, 260);
+
+    this.brushWinClickBound = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (
+        this.brushPopoverEl &&
+        !this.brushPopoverEl.contains(target) &&
+        target !== this.brushBtn &&
+        !this.brushBtn?.contains(target) &&
+        target !== this.contextBrushBtn &&
+        !this.contextBrushBtn?.contains(target) &&
+        target !== this.drawBtn &&
+        !this.drawBtn?.contains(target)
+      ) {
+        this.closeBrushMenu();
+      }
+    };
+    window.setTimeout(() => {
+      if (typeof window !== "undefined" && window?.addEventListener && this.brushWinClickBound) {
+        window.addEventListener("mousedown", this.brushWinClickBound);
+      }
+    }, 0);
+  }
+
+  closeBrushMenu(): void {
+    if (this.brushPopoverEl) {
+      this.brushPopoverEl.remove();
+      this.brushPopoverEl = null;
+    }
+    this.updateBrushPopoverElements = null;
+    if (this.brushBtn) {
+      this.brushBtn.classList.remove("is-active");
+    }
+    if (this.contextBrushBtn) {
+      this.contextBrushBtn.classList.remove("is-active");
+    }
+    if (this.brushWinClickBound) {
+      if (typeof window !== "undefined" && window?.removeEventListener) {
+        window.removeEventListener("mousedown", this.brushWinClickBound);
+      }
+      this.brushWinClickBound = null;
+    }
+    this.updateToolMode();
+  }
+
+  applyBrushSettings(width: number, strength: number): void {
+    this.currentBrushWidth = Math.max(1, Math.min(50, Math.round(width)));
+    this.currentBrushStrength = Math.max(0.05, Math.min(1.0, Math.round(strength * 100) / 100));
+
+    if (this.renderer) {
+      this.renderer.setFreehandBrushWidth(this.currentBrushWidth);
+      this.renderer.setFreehandBrushStrength(this.currentBrushStrength);
+    }
+    if (this.editor) {
+      this.editor.setFreehandBrushSettings({
+        strokeWidth: this.currentBrushWidth,
+        strokeStrength: this.currentBrushStrength,
+      });
+    }
+    if (this.onBrushSettingsChange) {
+      this.onBrushSettingsChange(this.currentBrushWidth, this.currentBrushStrength);
+    }
+    if (this.updateBrushPopoverElements) {
+      this.updateBrushPopoverElements();
+    }
+  }
+
+  setBrushWidth(width: number): void {
+    this.applyBrushSettings(width, this.currentBrushStrength);
+  }
+
+  setBrushStrength(strength: number): void {
+    this.applyBrushSettings(this.currentBrushWidth, strength);
+  }
+
+  getBrushWidth(): number {
+    return this.currentBrushWidth;
+  }
+
+  getBrushStrength(): number {
+    return this.currentBrushStrength;
   }
 
   destroy(): void {

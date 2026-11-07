@@ -834,7 +834,10 @@ export class SvgExporter {
             pathData = `${pathData} L ${coords[0]},${coords[1]}`;
           }
         }
-        out += `    <path class="umlcanvas-freehand-path" d="${escapeXml(pathData)}" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />\n`;
+        const strokeW = node.style?.strokeWidth ?? 2;
+        const strokeOp = node.style?.strokeOpacity ?? node.style?.opacity ?? 1.0;
+        const opacityAttr = strokeOp < 1.0 ? ` stroke-opacity="${strokeOp}"` : "";
+        out += `    <path class="umlcanvas-freehand-path" d="${escapeXml(pathData)}" fill="none" stroke="${strokeColor}" stroke-width="${strokeW}"${opacityAttr} stroke-linecap="round" stroke-linejoin="round" />\n`;
         break;
       }
 

@@ -3857,12 +3857,15 @@ export class ShapeRegistry {
           }
         }
 
+        const strokeWidth = node.style?.strokeWidth ?? 2;
+        const strokeOpacity = node.style?.strokeOpacity ?? node.style?.opacity ?? 1.0;
+
         // Generous stroke hitbox along the path for easy selecting and moving without blocking empty canvas inside bounding box
         const hitbox = document.createElementNS(svgNS, "path");
         hitbox.setAttribute("d", pathData);
         hitbox.setAttribute("fill", "none");
         hitbox.setAttribute("stroke", "transparent");
-        hitbox.setAttribute("stroke-width", "16");
+        hitbox.setAttribute("stroke-width", String(Math.max(16, strokeWidth + 12)));
         hitbox.setAttribute("stroke-linecap", "round");
         hitbox.setAttribute("stroke-linejoin", "round");
         hitbox.setAttribute("class", "umlcanvas-freehand-hitbox");
@@ -3879,7 +3882,12 @@ export class ShapeRegistry {
         path.setAttribute("fill", "none");
         const strokeColor = node.style?.strokeColor || node.style?.color || "currentColor";
         path.setAttribute("stroke", strokeColor);
-        path.setAttribute("stroke-width", String(node.style?.strokeWidth || 2));
+        path.setAttribute("stroke-width", String(strokeWidth));
+        path.style.strokeWidth = `${strokeWidth}px`;
+        if (strokeOpacity < 1.0) {
+          path.setAttribute("stroke-opacity", String(strokeOpacity));
+          path.style.strokeOpacity = String(strokeOpacity);
+        }
         path.setAttribute("stroke-linecap", "round");
         path.setAttribute("stroke-linejoin", "round");
         group.appendChild(path);

@@ -84,6 +84,26 @@ export class UmlCanvasSettingTab extends PluginSettingTab {
         },
       },
       {
+        name: "Freehand brush width",
+        desc: "Default stroke width in pixels for the freehand draw tool (1 to 50).",
+        control: {
+          type: "number",
+          key: "freehandBrushWidth",
+          placeholder: "2",
+          min: 1,
+        },
+      },
+      {
+        name: "Freehand brush strength",
+        desc: "Default brush strength / opacity for the freehand draw tool (0.1 to 1.0).",
+        control: {
+          type: "number",
+          key: "freehandBrushStrength",
+          placeholder: "1.0",
+          min: 0.1,
+        },
+      },
+      {
         name: "Canvas theme",
         desc: "Choose between pastel light theme (off-white), dark theme, or follow Obsidian's system theme.",
         control: {
@@ -238,6 +258,38 @@ export class UmlCanvasSettingTab extends PluginSettingTab {
           .onChange(async (value) => {
             this.plugin.settings.autoShapeDetection = value;
             await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Freehand brush width")
+      .setDesc("Default stroke width in pixels for the freehand draw tool (1 to 50).")
+      .addText((text) => {
+        text
+          .setPlaceholder("2")
+          .setValue(String(this.plugin.settings.freehandBrushWidth ?? 2))
+          .onChange(async (value) => {
+            const num = parseFloat(value);
+            if (!isNaN(num) && num >= 1 && num <= 50) {
+              this.plugin.settings.freehandBrushWidth = num;
+              await this.plugin.saveSettings();
+            }
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Freehand brush strength")
+      .setDesc("Default brush strength / opacity for the freehand draw tool (0.1 to 1.0).")
+      .addText((text) => {
+        text
+          .setPlaceholder("1.0")
+          .setValue(String(this.plugin.settings.freehandBrushStrength ?? 1.0))
+          .onChange(async (value) => {
+            const num = parseFloat(value);
+            if (!isNaN(num) && num >= 0.05 && num <= 1.0) {
+              this.plugin.settings.freehandBrushStrength = num;
+              await this.plugin.saveSettings();
+            }
           });
       });
 

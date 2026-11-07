@@ -60,6 +60,7 @@ import {
   CompoundCommand,
   SetColorCommand,
   SetFontCommand,
+  SetStrokeStyleCommand,
   FontStylePatch,
   UpdateChipNodeCommand,
   PropagateChipInterfaceCommand,
@@ -712,6 +713,38 @@ export class DiagramEditor {
   public defaultMarkerStart?: string;
   public defaultMarkerEnd?: string;
   public defaultLineType?: LinePatternType;
+  public freehandStrokeWidth: number = 2;
+  public freehandStrokeStrength: number = 1.0;
+
+  getFreehandBrushSettings(): { strokeWidth: number; strokeStrength: number } {
+    return {
+      strokeWidth: this.freehandStrokeWidth,
+      strokeStrength: this.freehandStrokeStrength,
+    };
+  }
+
+  setFreehandBrushSettings(options: { strokeWidth?: number; strokeStrength?: number }): void {
+    if (options.strokeWidth !== undefined && options.strokeWidth > 0) {
+      this.freehandStrokeWidth = options.strokeWidth;
+    }
+    if (options.strokeStrength !== undefined && options.strokeStrength > 0) {
+      this.freehandStrokeStrength = Math.min(1.0, Math.max(0.05, options.strokeStrength));
+    }
+
+    const freehandNodes = this.diagram.nodes.filter(
+      (n) => this.selectedNodeIds.includes(n.id) && n.kind === "generic.freehand"
+    );
+
+    if (freehandNodes.length > 0) {
+      const cmd = new SetStrokeStyleCommand(freehandNodes, {
+        strokeWidth: options.strokeWidth,
+        strokeOpacity: options.strokeStrength,
+      });
+      this.commandStack.execute(cmd);
+    } else {
+      this.notify();
+    }
+  }
 
   addEdge(
     fromNodeId: string,
@@ -1821,8 +1854,30 @@ export class DiagramEditor {
 
   // --- Hand-Drawing, Shape Snapping & Freehand Escape Hatch (F-071, F-072, F-073) ---
 
-  addFreehandNode(stroke: Stroke, options?: { select?: boolean }): DiagramNode {
+  addFreehandNode(
+    stroke: Stroke,
+    options?: {
+      select?: boolean;
+      strokeWidth?: number;
+      strokeOpacity?: number;
+      style?: NodeStyle;
+    }
+  ): DiagramNode {
     const select = options?.select ?? false;
+    const strokeWidth =
+      options?.strokeWidth ?? options?.style?.strokeWidth ?? this.freehandStrokeWidth;
+    const strokeOpacity =
+      options?.strokeOpacity ??
+      options?.style?.strokeOpacity ??
+      options?.style?.opacity ??
+      this.freehandStrokeStrength;
+
+    const effectiveStyle: NodeStyle = {
+      ...(options?.style ?? {}),
+      ...(strokeWidth !== undefined ? { strokeWidth } : {}),
+      ...(strokeOpacity !== undefined ? { strokeOpacity, opacity: strokeOpacity } : {}),
+    };
+
     const points = stroke.points;
     if (!points || points.length === 0) {
       return this.addNode({
@@ -1830,6 +1885,7 @@ export class DiagramEditor {
         position: { x: 0, y: 0 },
         size: { width: 100, height: 60 },
         title: "",
+        style: effectiveStyle,
         customData: { pathData: "", points: [] },
         select,
       });
@@ -1890,6 +1946,7 @@ export class DiagramEditor {
       position: { x: Math.round(minX), y: Math.round(minY) },
       size: { width: Math.round(width), height: Math.round(height) },
       title: "",
+      style: effectiveStyle,
       customData: {
         pathData,
         points: relPoints,
@@ -1899,11 +1956,27 @@ export class DiagramEditor {
     });
   }
 
-  addStroke(stroke: Stroke): DiagramNode {
-    return this.addFreehandNode(stroke);
+  addStroke(
+    stroke: Stroke,
+    options?: {
+      select?: boolean;
+      strokeWidth?: number;
+      strokeOpacity?: number;
+      style?: NodeStyle;
+    }
+  ): DiagramNode {
+    return this.addFreehandNode(stroke, options);
   }
 
-  keepAsFreehand(stroke: Stroke, options?: { select?: boolean }): DiagramNode {
+  keepAsFreehand(
+    stroke: Stroke,
+    options?: {
+      select?: boolean;
+      strokeWidth?: number;
+      strokeOpacity?: number;
+      style?: NodeStyle;
+    }
+  ): DiagramNode {
     return this.addFreehandNode(stroke, options);
   }
 
@@ -2742,6 +2815,8 @@ export class DiagramEditor {
       forceFreehand?: boolean;
       fallbackToFreehand?: boolean;
       select?: boolean;
+      strokeWidth?: number;
+      strokeOpacity?: number;
     } | number = 0.65
   ): DiagramNode | DiagramEdge | null {
     const opts =
@@ -2752,7 +2827,11 @@ export class DiagramEditor {
     const select = opts.select ?? false;
 
     if (opts.forceFreehand) {
-      return this.addFreehandNode(stroke, { select: select ?? false });
+      return this.addFreehandNode(stroke, {
+        select: select ?? false,
+        strokeWidth: opts.strokeWidth,
+        strokeOpacity: opts.strokeOpacity,
+      });
     }
 
     const confidenceThreshold = opts.confidenceThreshold ?? 0.65;
@@ -2896,7 +2975,11 @@ export class DiagramEditor {
 
     if (result.confidence < confidenceThreshold || result.shape === "none") {
       if (opts.fallbackToFreehand) {
-        return this.addFreehandNode(stroke, { select: select ?? false });
+        return this.addFreehandNode(stroke, {
+          select: select ?? false,
+          strokeWidth: opts.strokeWidth,
+          strokeOpacity: opts.strokeOpacity,
+        });
       }
       return null;
     }
@@ -3024,7 +3107,11 @@ export class DiagramEditor {
     }
 
     if (opts.fallbackToFreehand) {
-      return this.addFreehandNode(stroke, { select: select ?? false });
+      return this.addFreehandNode(stroke, {
+        select: select ?? false,
+        strokeWidth: opts.strokeWidth,
+        strokeOpacity: opts.strokeOpacity,
+      });
     }
 
     return null;

@@ -294,11 +294,18 @@ export class UmlCanvasView extends TextFileView {
       settings?.autosaveDelayMs ?? 1000
     );
 
+    const initialBrushWidth = settings?.freehandBrushWidth ?? 2;
+    const initialBrushStrength = settings?.freehandBrushStrength ?? 1.0;
+    this.editor.freehandStrokeWidth = initialBrushWidth;
+    this.editor.freehandStrokeStrength = initialBrushStrength;
+
     // Setup SVG Renderer
     this.renderer = new SvgSceneRenderer(svgContainer, this.editor, {
       showGrid: settings?.showGrid ?? true,
       enableFreehand: settings?.enableFreehand ?? true,
       autoShapeDetection: settings?.autoShapeDetection ?? true,
+      freehandBrushWidth: initialBrushWidth,
+      freehandBrushStrength: initialBrushStrength,
       onModeChange: (mode) => {
         if (mode !== "handwrite") {
           this.flushHandwritingBuffer();
@@ -323,6 +330,10 @@ export class UmlCanvasView extends TextFileView {
           this.handleHandwrittenStroke(stroke);
           return;
         }
+
+        const strokeWidth = strokeOpts?.strokeWidth ?? this.renderer?.brushWidth ?? 2;
+        const strokeOpacity = strokeOpts?.strokeOpacity ?? this.renderer?.brushStrength ?? 1.0;
+
         const autoDetect = strokeOpts?.autoDetect ?? this.renderer?.isAutoShapeDetection ?? true;
         if (autoDetect) {
           const emptyConn = this.editor.detectStrokeToEmptySpace(stroke);
@@ -341,6 +352,8 @@ export class UmlCanvasView extends TextFileView {
           const result = this.editor.snapStrokeToShape(stroke, {
             select: false,
             fallbackToFreehand: true,
+            strokeWidth,
+            strokeOpacity,
           });
           if (result) {
             const isText = (result as DiagramNode).kind === "generic.text";
@@ -352,10 +365,10 @@ export class UmlCanvasView extends TextFileView {
               );
             }
           } else {
-            this.editor.keepAsFreehand(stroke, { select: false });
+            this.editor.keepAsFreehand(stroke, { select: false, strokeWidth, strokeOpacity });
           }
         } else {
-          this.editor.keepAsFreehand(stroke, { select: false });
+          this.editor.keepAsFreehand(stroke, { select: false, strokeWidth, strokeOpacity });
         }
         if (this.editor.hasSelection) {
           this.editor.clearSelection();
@@ -460,6 +473,13 @@ export class UmlCanvasView extends TextFileView {
       },
       () => {
         void this.pasteFromClipboardOrEditor();
+      },
+      (width, strength) => {
+        if (this.plugin?.settings) {
+          this.plugin.settings.freehandBrushWidth = width;
+          this.plugin.settings.freehandBrushStrength = strength;
+          void this.plugin.saveSettings?.();
+        }
       }
     );
 
@@ -571,6 +591,18 @@ export class UmlCanvasView extends TextFileView {
       } else if (mod && e.key === "]" && !isInput) {
         e.preventDefault();
         this.editor?.adjustFontSizeForSelection(2);
+      } else if (!mod && (e.key === "[" || e.key === "]") && !isInput && this.renderer?.freehandMode) {
+        e.preventDefault();
+        const delta = e.key === "]" ? 1 : -1;
+        const curW = this.renderer?.brushWidth ?? 2;
+        const newW = Math.max(1, Math.min(50, curW + delta));
+        this.renderer.setFreehandBrushWidth(newW);
+        this.editor?.setFreehandBrushSettings({ strokeWidth: newW });
+        this.toolbar?.setBrushWidth(newW);
+        if (this.plugin?.settings) {
+          this.plugin.settings.freehandBrushWidth = newW;
+          void this.plugin.saveSettings?.();
+        }
       } else if (!mod && (e.key === "m" || e.key === "M") && !isInput) {
         e.preventDefault();
         this.minimap?.toggle();
@@ -612,7 +644,9 @@ export class UmlCanvasView extends TextFileView {
       e.stopPropagation();
       if (this.editor) {
         this.editor.undo();
-        this.editor.keepAsFreehand(stroke, { select: false });
+        const strokeWidth = this.renderer?.brushWidth ?? 2;
+        const strokeOpacity = this.renderer?.brushStrength ?? 1.0;
+        this.editor.keepAsFreehand(stroke, { select: false, strokeWidth, strokeOpacity });
         if (this.editor.hasSelection) {
           this.editor.clearSelection();
         }
@@ -633,7 +667,13 @@ export class UmlCanvasView extends TextFileView {
 
   public handleHandwrittenStroke(stroke: Stroke): void {
     if (!this.editor) return;
-    const tempNode = this.editor.keepAsFreehand(stroke, { select: false });
+    const strokeWidth = this.renderer?.brushWidth ?? 2;
+    const strokeOpacity = this.renderer?.brushStrength ?? 1.0;
+    const tempNode = this.editor.keepAsFreehand(stroke, {
+      select: false,
+      strokeWidth,
+      strokeOpacity,
+    });
     this.handwritingBuffer.push({ stroke, nodeId: tempNode.id });
 
     if (this.handwritingCommitTimer !== null) {
@@ -705,9 +745,29 @@ export class UmlCanvasView extends TextFileView {
       this.renderer.setEnableFreehand(settings.enableFreehand);
       this.renderer.setAutoShapeDetection(settings.autoShapeDetection ?? true);
       this.renderer.setGridVisible(settings.showGrid);
+      if (settings.freehandBrushWidth !== undefined) {
+        this.renderer.setFreehandBrushWidth(settings.freehandBrushWidth);
+      }
+      if (settings.freehandBrushStrength !== undefined) {
+        this.renderer.setFreehandBrushStrength(settings.freehandBrushStrength);
+      }
+    }
+    if (this.editor) {
+      if (settings.freehandBrushWidth !== undefined) {
+        this.editor.freehandStrokeWidth = settings.freehandBrushWidth;
+      }
+      if (settings.freehandBrushStrength !== undefined) {
+        this.editor.freehandStrokeStrength = settings.freehandBrushStrength;
+      }
     }
     if (this.toolbar) {
       this.toolbar.setFreehandEnabled(settings.enableFreehand);
+      if (settings.freehandBrushWidth !== undefined) {
+        this.toolbar.setBrushWidth(settings.freehandBrushWidth);
+      }
+      if (settings.freehandBrushStrength !== undefined) {
+        this.toolbar.setBrushStrength(settings.freehandBrushStrength);
+      }
       this.toolbar.updateToolMode();
     }
   }

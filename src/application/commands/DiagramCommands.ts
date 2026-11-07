@@ -2502,3 +2502,51 @@ export class EnhanceHanddrawnNotesCommand implements Command {
   }
 }
 
+export class SetStrokeStyleCommand implements Command {
+  readonly description = "Set stroke style";
+  private previousStyles: Map<
+    string,
+    { strokeWidth?: number; strokeOpacity?: number; opacity?: number }
+  > = new Map();
+
+  constructor(
+    private readonly nodes: DiagramNode[],
+    private readonly newStyle: { strokeWidth?: number; strokeOpacity?: number }
+  ) {
+    for (const node of nodes) {
+      this.previousStyles.set(node.id, {
+        strokeWidth: node.style?.strokeWidth,
+        strokeOpacity: node.style?.strokeOpacity,
+        opacity: node.style?.opacity,
+      });
+    }
+  }
+
+  execute(): void {
+    for (const node of this.nodes) {
+      if (!node.style) {
+        node.style = {};
+      }
+      if (this.newStyle.strokeWidth !== undefined) {
+        node.style.strokeWidth = this.newStyle.strokeWidth;
+      }
+      if (this.newStyle.strokeOpacity !== undefined) {
+        node.style.strokeOpacity = this.newStyle.strokeOpacity;
+        node.style.opacity = this.newStyle.strokeOpacity;
+      }
+    }
+  }
+
+  undo(): void {
+    for (const node of this.nodes) {
+      const prev = this.previousStyles.get(node.id);
+      if (prev && node.style) {
+        node.style.strokeWidth = prev.strokeWidth;
+        node.style.strokeOpacity = prev.strokeOpacity;
+        node.style.opacity = prev.opacity;
+      }
+    }
+  }
+}
+
+

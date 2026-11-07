@@ -56,11 +56,21 @@ export interface SvgSceneRendererOptions {
   showGrid?: boolean;
   initialTransform?: ViewportTransform;
   onTransformChange?: (transform: ViewportTransform) => void;
-  onStrokeComplete?: (stroke: Stroke, options?: { autoDetect?: boolean; handwritingText?: boolean }) => void;
+  onStrokeComplete?: (
+    stroke: Stroke,
+    options?: {
+      autoDetect?: boolean;
+      handwritingText?: boolean;
+      strokeWidth?: number;
+      strokeOpacity?: number;
+    }
+  ) => void;
   enableVirtualization?: boolean;
   virtualizationThreshold?: number;
   enableFreehand?: boolean;
   autoShapeDetection?: boolean;
+  freehandBrushWidth?: number;
+  freehandBrushStrength?: number;
   onModeChange?: (mode: "select" | "draw" | "grab" | "handwrite") => void;
   onContextMenu?: (
     e: MouseEvent,
@@ -221,7 +231,18 @@ export class SvgSceneRenderer {
   private showGrid: boolean;
   private transform: ViewportTransform = { panX: 0, panY: 0, zoom: 1.0 };
   private onTransformChange?: (transform: ViewportTransform) => void;
-  private onStrokeComplete?: (stroke: Stroke, options?: { autoDetect?: boolean; handwritingText?: boolean }) => void;
+  private onStrokeComplete?: (
+    stroke: Stroke,
+    options?: {
+      autoDetect?: boolean;
+      handwritingText?: boolean;
+      strokeWidth?: number;
+      strokeOpacity?: number;
+    }
+  ) => void;
+
+  private freehandBrushWidth = 2;
+  private freehandBrushStrength = 1.0;
 
   private isFreehandMode = false;
   private autoShapeDetection = true;
@@ -303,6 +324,8 @@ export class SvgSceneRenderer {
     this.enableVirtualization = options?.enableVirtualization ?? false;
     this.virtualizationThreshold = options?.virtualizationThreshold ?? 200;
     this.enableFreehand = options?.enableFreehand ?? true;
+    this.freehandBrushWidth = options?.freehandBrushWidth ?? 2;
+    this.freehandBrushStrength = options?.freehandBrushStrength ?? 1.0;
     this.onModeChange = options?.onModeChange;
     this.onContextMenu = options?.onContextMenu;
     this.onNoteOpen = options?.onNoteOpen;
@@ -593,6 +616,26 @@ export class SvgSceneRenderer {
 
   get isFreehandEnabled(): boolean {
     return this.enableFreehand;
+  }
+
+  get brushWidth(): number {
+    return this.freehandBrushWidth;
+  }
+
+  setFreehandBrushWidth(width: number): void {
+    if (typeof width === "number" && !isNaN(width) && width > 0) {
+      this.freehandBrushWidth = Math.max(0.5, Math.min(100, width));
+    }
+  }
+
+  get brushStrength(): number {
+    return this.freehandBrushStrength;
+  }
+
+  setFreehandBrushStrength(strength: number): void {
+    if (typeof strength === "number" && !isNaN(strength) && strength > 0) {
+      this.freehandBrushStrength = Math.max(0.05, Math.min(1.0, strength));
+    }
   }
 
   setFreehandMode(active: boolean): void {
@@ -3021,8 +3064,16 @@ export class SvgSceneRenderer {
 
       const path = this.viewportEl.createSvg("path", {
         cls: "umlcanvas-freehand-stroke",
-        attr: { d: `M ${canvasPoint.x},${canvasPoint.y} L ${canvasPoint.x},${canvasPoint.y}` },
+        attr: {
+          d: `M ${canvasPoint.x},${canvasPoint.y} L ${canvasPoint.x},${canvasPoint.y}`,
+          "stroke-width": String(this.freehandBrushWidth),
+          "stroke-opacity": String(this.freehandBrushStrength),
+        },
       });
+      path.style.strokeWidth = `${this.freehandBrushWidth}px`;
+      if (this.freehandBrushStrength < 1.0) {
+        path.style.strokeOpacity = String(this.freehandBrushStrength);
+      }
       this.freehandPathEl = path;
 
       this.dragMode = { type: "freehand" };
@@ -4060,14 +4111,25 @@ export class SvgSceneRenderer {
             this.onStrokeComplete(stroke, {
               autoDetect: effectiveAutoDetect,
               handwritingText: this.handwritingTextMode,
+              strokeWidth: this.freehandBrushWidth,
+              strokeOpacity: this.freehandBrushStrength,
             });
           } else {
             if (this.handwritingTextMode) {
               this.editor.handwriteTextFromStrokes([stroke]);
             } else if (effectiveAutoDetect) {
-              this.editor.snapStrokeToShape(stroke, { select: false, fallbackToFreehand: true });
+              this.editor.snapStrokeToShape(stroke, {
+                select: false,
+                fallbackToFreehand: true,
+                strokeWidth: this.freehandBrushWidth,
+                strokeOpacity: this.freehandBrushStrength,
+              });
             } else {
-              this.editor.keepAsFreehand(stroke, { select: false });
+              this.editor.keepAsFreehand(stroke, {
+                select: false,
+                strokeWidth: this.freehandBrushWidth,
+                strokeOpacity: this.freehandBrushStrength,
+              });
             }
           }
           if (this.editor.hasSelection) {

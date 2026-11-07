@@ -2763,7 +2763,6 @@ body .umlcanvas-moving * {
 .umlcanvas-freehand-stroke {
   fill: none;
   stroke: var(--interactive-accent);
-  stroke-width: 2.5;
   stroke-linecap: round;
   stroke-linejoin: round;
   pointer-events: none;
@@ -2783,7 +2782,6 @@ body .umlcanvas-moving * {
 .umlcanvas-freehand-path {
   fill: none;
   stroke: var(--text-normal);
-  stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
   cursor: move;
@@ -2791,7 +2789,6 @@ body .umlcanvas-moving * {
 
 .umlcanvas-freehand-path.umlcanvas-node-selected {
   stroke: var(--interactive-accent);
-  stroke-width: 2.5;
 }
 
 .umlcanvas-escape-hatch-toast {
@@ -3599,6 +3596,149 @@ body .umlcanvas-moving * {
 
 .umlcanvas-font-apply-all-btn:hover {
   background: rgba(var(--interactive-accent-rgb, 120, 100, 255), 0.18);
+}
+
+/* Brush Settings Popover */
+.umlcanvas-brush-popover {
+  position: absolute;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 12px;
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m, 8px);
+  box-shadow: var(--shadow-m, 0 4px 14px rgba(0, 0, 0, 0.22));
+  min-width: 240px;
+  max-width: calc(100vw - 24px);
+  gap: 8px;
+  box-sizing: border-box;
+}
+
+.umlcanvas-brush-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.umlcanvas-brush-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.umlcanvas-brush-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.umlcanvas-brush-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 4px);
+  color: var(--text-accent);
+}
+
+.umlcanvas-brush-presets-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(38px, 1fr));
+  gap: 4px;
+}
+
+.umlcanvas-brush-preset-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-normal);
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 4px);
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.umlcanvas-brush-preset-btn:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-accent);
+}
+
+.umlcanvas-brush-preset-btn.is-active {
+  background-color: rgba(var(--interactive-accent-rgb, 120, 100, 255), 0.15) !important;
+  border-color: var(--interactive-accent, #7b68ee) !important;
+  color: var(--interactive-accent, #7b68ee) !important;
+  font-weight: 700;
+}
+
+.umlcanvas-brush-stepper-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.umlcanvas-brush-step-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  border-radius: var(--radius-s, 4px);
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 13px;
+  transition: background-color 0.1s ease;
+  flex-shrink: 0;
+}
+
+.umlcanvas-brush-step-btn:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-accent);
+}
+
+.umlcanvas-brush-slider {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--background-modifier-border);
+  outline: none;
+  cursor: pointer;
+  accent-color: var(--interactive-accent, #7b68ee);
+}
+
+.umlcanvas-brush-preview-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  background-color: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 4px);
+}
+
+.umlcanvas-brush-preview-svg {
+  width: 100%;
+  height: 36px;
+}
+
+.umlcanvas-brush-preview-line {
+  stroke: var(--interactive-accent, #7b68ee);
+}
+
+.umlcanvas-brush-preview-label {
+  font-size: 11px;
+  color: var(--text-muted);
 }
 
 .umlcanvas-font-reset-btn {

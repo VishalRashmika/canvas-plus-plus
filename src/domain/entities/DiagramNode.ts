@@ -17,6 +17,8 @@ export interface NodeStyle {
   fontWeight?: string | number;
   fontStyle?: "normal" | "italic";
   fontFamily?: string;
+  strokeOpacity?: number;
+  opacity?: number;
 }
 
 /**

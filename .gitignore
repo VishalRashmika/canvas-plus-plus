@@ -100,3 +100,15 @@ $RECYCLE.BIN/
 .nfs*
 # agyq runtime state and transcripts
 .agyq/
+# agyq runtime state, queues, cache, and logs
+queue.md
+QUEUE.md
+queue.*.md
+*.queue.md
+.queue.md
+agyq.json
+agyq.local.json
+*.agyq.json
+errors.log
+*.log
+*.cache

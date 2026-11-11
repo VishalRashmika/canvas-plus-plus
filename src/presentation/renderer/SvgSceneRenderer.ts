@@ -245,7 +245,7 @@ export class SvgSceneRenderer {
   private freehandBrushStrength = 1.0;
 
   private isFreehandMode = false;
-  private autoShapeDetection = true;
+  private autoShapeDetection = false;
   private handwritingTextMode = false;
   private activeStroke: Stroke | null = null;
   private freehandPathEl: SVGPathElement | null = null;
@@ -320,7 +320,7 @@ export class SvgSceneRenderer {
     this.showGrid = options?.showGrid ?? true;
     this.onTransformChange = options?.onTransformChange;
     this.onStrokeComplete = options?.onStrokeComplete;
-    this.autoShapeDetection = options?.autoShapeDetection ?? true;
+    this.autoShapeDetection = options?.autoShapeDetection ?? false;
     this.enableVirtualization = options?.enableVirtualization ?? false;
     this.virtualizationThreshold = options?.virtualizationThreshold ?? 200;
     this.enableFreehand = options?.enableFreehand ?? true;
@@ -653,6 +653,7 @@ export class SvgSceneRenderer {
     this.isFreehandMode = active;
     if (!active) {
       this.handwritingTextMode = false;
+      this.autoShapeDetection = false;
     }
     if (active) {
       this.container.classList.add("umlcanvas-freehand-mode");
@@ -4081,7 +4082,7 @@ export class SvgSceneRenderer {
         }
 
         const shiftKeyHeld = Boolean(e.shiftKey);
-        const effectiveAutoDetect = shiftKeyHeld ? !this.autoShapeDetection : this.autoShapeDetection;
+        const effectiveAutoDetect = this.autoShapeDetection && !shiftKeyHeld;
         const isNormalDraw = !effectiveAutoDetect && !this.handwritingTextMode;
 
         // Discard micro-strokes / accidental clicks
@@ -4469,7 +4470,7 @@ export class SvgSceneRenderer {
   }
 
   private handleDblClick(e: MouseEvent): void {
-    if (this.isGrabMode) return;
+    if (this.isGrabMode || this.isFreehandMode) return;
     const clientPoint = this.getClientCoords(e);
     const canvasPoint = screenToCanvas(clientPoint, this.transform);
     const target = e.target as Element;

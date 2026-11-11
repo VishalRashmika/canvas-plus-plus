@@ -254,7 +254,7 @@ export class UmlCanvasSettingTab extends PluginSettingTab {
       )
       .addToggle((toggle) => {
         toggle
-          .setValue(this.plugin.settings.autoShapeDetection ?? true)
+          .setValue(this.plugin.settings.autoShapeDetection ?? false)
           .onChange(async (value) => {
             this.plugin.settings.autoShapeDetection = value;
             await this.plugin.saveSettings();

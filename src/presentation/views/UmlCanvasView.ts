@@ -304,7 +304,7 @@ export class UmlCanvasView extends TextFileView {
     this.renderer = new SvgSceneRenderer(svgContainer, this.editor, {
       showGrid: settings?.showGrid ?? true,
       enableFreehand: settings?.enableFreehand ?? true,
-      autoShapeDetection: settings?.autoShapeDetection ?? true,
+      autoShapeDetection: settings?.autoShapeDetection ?? false,
       freehandBrushWidth: initialBrushWidth,
       freehandBrushStrength: initialBrushStrength,
       onModeChange: (mode) => {
@@ -341,7 +341,7 @@ export class UmlCanvasView extends TextFileView {
         const strokeWidth = strokeOpts?.strokeWidth ?? this.renderer?.brushWidth ?? 2;
         const strokeOpacity = strokeOpts?.strokeOpacity ?? this.renderer?.brushStrength ?? 1.0;
 
-        const autoDetect = strokeOpts?.autoDetect ?? this.renderer?.isAutoShapeDetection ?? true;
+        const autoDetect = strokeOpts?.autoDetect ?? this.renderer?.isAutoShapeDetection ?? false;
         if (autoDetect) {
           const emptyConn = this.editor.detectStrokeToEmptySpace(stroke);
           if (emptyConn && this.renderer) {

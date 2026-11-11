@@ -22,7 +22,7 @@ export const DEFAULT_SETTINGS: UmlCanvasSettings = {
   autosaveDelayMs: 500,
   enableCliBridge: true,
   enableFreehand: true,
-  autoShapeDetection: true,
+  autoShapeDetection: false,
   theme: "system",
   freehandBrushWidth: 2,
   freehandBrushStrength: 1.0,

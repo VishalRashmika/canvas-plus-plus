@@ -60,7 +60,6 @@ export interface SvgSceneRendererOptions {
     stroke: Stroke,
     options?: {
       autoDetect?: boolean;
-      handwritingText?: boolean;
       strokeWidth?: number;
       strokeOpacity?: number;
     }
@@ -71,7 +70,7 @@ export interface SvgSceneRendererOptions {
   autoShapeDetection?: boolean;
   freehandBrushWidth?: number;
   freehandBrushStrength?: number;
-  onModeChange?: (mode: "select" | "draw" | "grab" | "handwrite") => void;
+  onModeChange?: (mode: "select" | "draw" | "grab") => void;
   onContextMenu?: (
     e: MouseEvent,
     canvasPoint: Point,
@@ -235,7 +234,6 @@ export class SvgSceneRenderer {
     stroke: Stroke,
     options?: {
       autoDetect?: boolean;
-      handwritingText?: boolean;
       strokeWidth?: number;
       strokeOpacity?: number;
     }
@@ -246,14 +244,13 @@ export class SvgSceneRenderer {
 
   private isFreehandMode = false;
   private autoShapeDetection = false;
-  private handwritingTextMode = false;
   private activeStroke: Stroke | null = null;
   private freehandPathEl: SVGPathElement | null = null;
   private cachedContainerRect: { left: number; top: number; width: number; height: number } | null = null;
   private enableVirtualization: boolean;
   private virtualizationThreshold: number;
   private enableFreehand: boolean;
-  private onModeChange?: (mode: "select" | "draw" | "grab" | "handwrite") => void;
+  private onModeChange?: (mode: "select" | "draw" | "grab") => void;
 
   private isGrabMode = false;
 
@@ -652,7 +649,6 @@ export class SvgSceneRenderer {
     }
     this.isFreehandMode = active;
     if (!active) {
-      this.handwritingTextMode = false;
       this.autoShapeDetection = false;
     }
     if (active) {
@@ -662,9 +658,7 @@ export class SvgSceneRenderer {
     }
     this.onModeChange?.(
       active
-        ? this.handwritingTextMode
-          ? "handwrite"
-          : "draw"
+        ? "draw"
         : this.isGrabMode
         ? "grab"
         : "select"
@@ -678,7 +672,6 @@ export class SvgSceneRenderer {
   setGrabMode(active: boolean): void {
     if (active && this.isFreehandMode) {
       this.isFreehandMode = false;
-      this.handwritingTextMode = false;
       this.container.classList.remove("umlcanvas-freehand-mode");
     }
     this.isGrabMode = active;
@@ -691,9 +684,7 @@ export class SvgSceneRenderer {
       active
         ? "grab"
         : this.isFreehandMode
-        ? this.handwritingTextMode
-          ? "handwrite"
-          : "draw"
+        ? "draw"
         : "select"
     );
   }
@@ -705,7 +696,6 @@ export class SvgSceneRenderer {
   setAutoShapeDetection(active: boolean): void {
     this.autoShapeDetection = active;
     if (active) {
-      this.handwritingTextMode = false;
       if (this.isGrabMode) {
         this.isGrabMode = false;
         this.container.classList.remove("umlcanvas-grab-mode");
@@ -715,39 +705,13 @@ export class SvgSceneRenderer {
       this.isGrabMode
         ? "grab"
         : this.isFreehandMode
-        ? this.handwritingTextMode
-          ? "handwrite"
-          : "draw"
+        ? "draw"
         : "select"
     );
   }
 
   get isAutoShapeDetection(): boolean {
     return this.autoShapeDetection;
-  }
-
-  setHandwritingTextMode(active: boolean): void {
-    this.handwritingTextMode = active;
-    if (active) {
-      this.autoShapeDetection = false;
-      if (this.isGrabMode) {
-        this.isGrabMode = false;
-        this.container.classList.remove("umlcanvas-grab-mode");
-      }
-    }
-    this.onModeChange?.(
-      this.isGrabMode
-        ? "grab"
-        : this.isFreehandMode
-        ? this.handwritingTextMode
-          ? "handwrite"
-          : "draw"
-        : "select"
-    );
-  }
-
-  get isHandwritingTextMode(): boolean {
-    return this.handwritingTextMode;
   }
 
   zoomIn(): void {
@@ -4083,7 +4047,7 @@ export class SvgSceneRenderer {
 
         const shiftKeyHeld = Boolean(e.shiftKey);
         const effectiveAutoDetect = this.autoShapeDetection && !shiftKeyHeld;
-        const isNormalDraw = !effectiveAutoDetect && !this.handwritingTextMode;
+        const isNormalDraw = !effectiveAutoDetect;
 
         // Discard micro-strokes / accidental clicks
         let minX = Infinity;
@@ -4099,13 +4063,11 @@ export class SvgSceneRenderer {
         const width = maxX - minX;
         const height = maxY - minY;
 
-        // In normal draw mode (not enhance/shape mode and not handwriting text mode),
+        // In normal draw mode (not enhance/shape mode),
         // we explicitly support short drawings, single-tap dots, and small marks.
         // In shape detection mode, micro-strokes (< 15px or < 4 points) are discarded as accidental clicks.
         const isMicroStroke = isNormalDraw
           ? stroke.points.length === 0
-          : this.handwritingTextMode
-          ? stroke.points.length < 2 || (width < 3 && height < 3)
           : stroke.points.length < 4 || (width < 15 && height < 15);
 
         if (!isMicroStroke) {
@@ -4116,14 +4078,11 @@ export class SvgSceneRenderer {
           if (this.onStrokeComplete) {
             this.onStrokeComplete(stroke, {
               autoDetect: effectiveAutoDetect,
-              handwritingText: this.handwritingTextMode,
               strokeWidth: this.freehandBrushWidth,
               strokeOpacity: this.freehandBrushStrength,
             });
           } else {
-            if (this.handwritingTextMode) {
-              this.editor.handwriteTextFromStrokes([stroke]);
-            } else if (effectiveAutoDetect) {
+            if (effectiveAutoDetect) {
               this.editor.snapStrokeToShape(stroke, {
                 select: false,
                 fallbackToFreehand: true,
@@ -6124,31 +6083,15 @@ export class SvgSceneRenderer {
         return;
       } else {
         e.preventDefault();
-        const isDrawActive = this.isFreehandMode && !this.autoShapeDetection && !this.handwritingTextMode;
+        const isDrawActive = this.isFreehandMode && !this.autoShapeDetection;
         if (isDrawActive) {
           this.setFreehandMode(false);
         } else {
           this.setAutoShapeDetection(false);
-          this.setHandwritingTextMode(false);
           this.setFreehandMode(true);
         }
         return;
       }
-    }
-
-    // Handwrite Text tool shortcut: W or Shift+W (toggle Handwrite Text mode)
-    if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "w" && this.isFreehandEnabled) {
-      e.preventDefault();
-      const isHandwriteActive = this.isFreehandMode && this.handwritingTextMode;
-      if (isHandwriteActive) {
-        this.setFreehandMode(false);
-        this.setHandwritingTextMode(false);
-      } else {
-        this.setAutoShapeDetection(false);
-        this.setHandwritingTextMode(true);
-        this.setFreehandMode(true);
-      }
-      return;
     }
   }
 

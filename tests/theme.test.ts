@@ -554,7 +554,6 @@ describe("Pastel-Inspired Light Theme Tests", () => {
         freehandMode: false,
         grabMode: false,
         isAutoShapeDetection: false,
-        isHandwritingTextMode: false,
         isFreehandEnabled: true,
         enableFreehand: true,
         currentTransform: { panX: 0, panY: 0, zoom: 1 },
@@ -566,9 +565,6 @@ describe("Pastel-Inspired Light Theme Tests", () => {
         setGrabMode: jest.fn(),
         setAutoShapeDetection: jest.fn((val: boolean) => {
           rendererMock.isAutoShapeDetection = val;
-        }),
-        setHandwritingTextMode: jest.fn((val: boolean) => {
-          rendererMock.isHandwritingTextMode = val;
         }),
         setEnableFreehand: jest.fn((val?: boolean) => {
           rendererMock.enableFreehand = val ?? true;

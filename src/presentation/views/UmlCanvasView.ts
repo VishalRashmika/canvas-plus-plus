@@ -57,8 +57,6 @@ export class UmlCanvasView extends TextFileView {
   private rootEl: HTMLElement | null = null;
   private escapeHatchEl: HTMLElement | null = null;
   private escapeHatchTimer: number | null = null;
-  private handwritingBuffer: Array<{ stroke: Stroke; nodeId: string }> = [];
-  private handwritingCommitTimer: number | null = null;
   private _canvasAttachmentService: CanvasAttachmentService | null = null;
   private _attachmentServiceApp: App | null = null;
   private lastMouseCanvasPos: Point | null = null;
@@ -255,11 +253,6 @@ export class UmlCanvasView extends TextFileView {
       window.clearTimeout(this.escapeHatchTimer);
       this.escapeHatchTimer = null;
     }
-    if (this.handwritingCommitTimer !== null) {
-      window.clearTimeout(this.handwritingCommitTimer);
-      this.handwritingCommitTimer = null;
-    }
-    this.handwritingBuffer = [];
     if (this.rootEl) {
       this.rootEl.remove();
       this.rootEl = null;
@@ -308,13 +301,10 @@ export class UmlCanvasView extends TextFileView {
       freehandBrushWidth: initialBrushWidth,
       freehandBrushStrength: initialBrushStrength,
       onModeChange: (mode) => {
-        if (mode !== "handwrite") {
-          this.flushHandwritingBuffer();
-        }
         if (this.rootEl) {
           this.rootEl.classList.toggle(
             "umlcanvas-freehand-mode",
-            mode === "draw" || mode === "handwrite"
+            mode === "draw"
           );
         }
         if (this.toolbar) {
@@ -331,12 +321,6 @@ export class UmlCanvasView extends TextFileView {
       },
       onStrokeComplete: (stroke, strokeOpts) => {
         if (!this.editor) return;
-        const isHandwrite =
-          strokeOpts?.handwritingText ?? this.renderer?.isHandwritingTextMode ?? false;
-        if (isHandwrite) {
-          this.handleHandwrittenStroke(stroke);
-          return;
-        }
 
         const strokeWidth = strokeOpts?.strokeWidth ?? this.renderer?.brushWidth ?? 2;
         const strokeOpacity = strokeOpts?.strokeOpacity ?? this.renderer?.brushStrength ?? 1.0;
@@ -363,12 +347,11 @@ export class UmlCanvasView extends TextFileView {
             strokeOpacity,
           });
           if (result) {
-            const isText = (result as DiagramNode).kind === "generic.text";
             const isFreehand = (result as DiagramNode).kind === "generic.freehand";
             if (!isFreehand) {
               this.showFreehandEscapeHatch(
                 stroke,
-                isText ? "Handwriting recognized" : "Shape recognized"
+                "Shape recognized"
               );
             }
           } else {
@@ -684,61 +667,6 @@ export class UmlCanvasView extends TextFileView {
         this.escapeHatchEl = null;
       }
     }, 5000);
-  }
-
-  public handleHandwrittenStroke(stroke: Stroke): void {
-    if (!this.editor) return;
-    const strokeWidth = this.renderer?.brushWidth ?? 2;
-    const strokeOpacity = this.renderer?.brushStrength ?? 1.0;
-    const tempNode = this.editor.keepAsFreehand(stroke, {
-      select: false,
-      strokeWidth,
-      strokeOpacity,
-    });
-    this.handwritingBuffer.push({ stroke, nodeId: tempNode.id });
-
-    if (this.handwritingCommitTimer !== null) {
-      window.clearTimeout(this.handwritingCommitTimer);
-    }
-
-    this.handwritingCommitTimer = window.setTimeout(() => {
-      this.flushHandwritingBuffer();
-    }, 700);
-  }
-
-  public flushHandwritingBuffer(): DiagramNode | null {
-    if (this.handwritingCommitTimer !== null) {
-      window.clearTimeout(this.handwritingCommitTimer);
-      this.handwritingCommitTimer = null;
-    }
-    if (!this.editor || this.handwritingBuffer.length === 0) return null;
-
-    const items = [...this.handwritingBuffer];
-    this.handwritingBuffer = [];
-
-    // Remove the temporary freehand nodes
-    for (const item of items) {
-      this.editor.deleteNode(item.nodeId);
-    }
-
-    // Recognize handwritten strokes into lowercase text
-    const textNode = this.editor.handwriteTextFromStrokes(
-      items.map((i) => i.stroke),
-      { select: false, appendToNearby: true }
-    );
-
-    if (textNode) {
-      this.showFreehandEscapeHatch(
-        items[0].stroke,
-        `Handwriting recognized: ${textNode.title}`
-      );
-    }
-
-    if (this.editor.hasSelection) {
-      this.editor.clearSelection();
-    }
-
-    return textNode;
   }
 
   get diagramEditor(): DiagramEditor | null {
@@ -1138,7 +1066,7 @@ export class UmlCanvasView extends TextFileView {
       if (hasFreehand) {
         menu.addItem((item) => {
           item
-            .setTitle("Enhance handwriting to text (Sparkles)")
+            .setTitle("Enhance to shape (Sparkles)")
             .setIcon("sparkles")
             .onClick(() => {
               this.editor?.enhanceSelection();

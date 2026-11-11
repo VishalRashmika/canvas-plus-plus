@@ -800,4 +800,385 @@ describe("Toolbar Redesign Tests", () => {
 
     toolbar.destroy();
   });
+
+  it("should render visual shortcut letter badges for each bottom toolbar button like Excalidraw", () => {
+    const onAddNote = jest.fn();
+    const onAddImage = jest.fn();
+    const onAddPdf = jest.fn();
+
+    const toolbar = new Toolbar(
+      container as any,
+      editor,
+      rendererMock as any,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      onAddNote,
+      undefined,
+      onAddImage,
+      onAddPdf
+    );
+
+    const bottomToolbar = container.querySelector(".umlcanvas-floating-bottom-toolbar");
+    expect(bottomToolbar).not.toBeNull();
+
+    const buttons = bottomToolbar?.querySelectorAll("button") || [];
+    const shortcuts = buttons.map((b) => {
+      const badge = b.querySelector(".umlcanvas-btn-shortcut");
+      return {
+        title: b.title,
+        shortcut: badge ? badge.textContent : null,
+      };
+    });
+
+    // Check that each tool has its badge letter
+    expect(shortcuts.find((s) => s.title.includes("Select"))?.shortcut).toBe("V");
+    expect(shortcuts.find((s) => s.title.includes("Grab"))?.shortcut).toBe("H");
+    expect(shortcuts.find((s) => s.title.includes("Draw"))?.shortcut).toBe("P");
+    expect(shortcuts.find((s) => s.title.includes("Auto Shape"))?.shortcut).toBe("S");
+    expect(shortcuts.find((s) => s.title.includes("Rectangle"))?.shortcut).toBe("R");
+    expect(shortcuts.find((s) => s.title.includes("Circle"))?.shortcut).toBe("O");
+    expect(shortcuts.find((s) => s.title.includes("Diamond"))?.shortcut).toBe("D");
+    expect(shortcuts.find((s) => s.title.includes("Triangle"))?.shortcut).toBe("Y");
+    expect(shortcuts.find((s) => s.title.includes("Table"))?.shortcut).toBe("B");
+    expect(shortcuts.find((s) => s.title.includes("Sticky Note"))?.shortcut).toBe("N");
+    expect(shortcuts.find((s) => s.title.includes("Text"))?.shortcut).toBe("T");
+    expect(shortcuts.find((s) => s.title.includes("Image"))?.shortcut).toBe("I");
+    expect(shortcuts.find((s) => s.title.includes("PDF"))?.shortcut).toBe("F");
+    expect(shortcuts.find((s) => s.title.includes("Vault"))?.shortcut).toBe("W");
+    expect(shortcuts.find((s) => s.title.includes("Group Box"))?.shortcut).toBe("G");
+    expect(shortcuts.find((s) => s.title.includes("Connector"))?.shortcut).toBe("L");
+
+    // Verify styles.css contains .umlcanvas-btn-shortcut rules
+    const stylesPath = path.resolve(__dirname, "../styles.css");
+    const stylesContent = fs.readFileSync(stylesPath, "utf-8");
+    expect(stylesContent).toContain(".umlcanvas-btn-shortcut");
+
+    toolbar.destroy();
+  });
+
+  it("should quickly switch between tools and place shapes via shortcut letters", () => {
+    const onAddNote = jest.fn();
+    const onAddImage = jest.fn();
+    const onAddPdf = jest.fn();
+
+    const toolbar = new Toolbar(
+      container as any,
+      editor,
+      rendererMock as any,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      onAddNote,
+      undefined,
+      onAddImage,
+      onAddPdf
+    );
+
+    const makeEvent = (key: string, extra: any = {}) => ({
+      key,
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      shiftKey: false,
+      preventDefault: jest.fn(),
+      stopPropagation: jest.fn(),
+      ...extra,
+    });
+
+    // 1. Grab tool shortcut: 'h'
+    expect(rendererMock.setGrabMode).not.toHaveBeenCalledWith(true);
+    const hResult = toolbar.handleKeyDown(makeEvent("h") as any);
+    expect(hResult).toBe(true);
+    expect(rendererMock.setGrabMode).toHaveBeenCalledWith(true);
+
+    // 2. Select tool shortcut: 'v'
+    const vResult = toolbar.handleKeyDown(makeEvent("v") as any);
+    expect(vResult).toBe(true);
+    expect(rendererMock.setGrabMode).toHaveBeenCalledWith(false);
+    expect(rendererMock.setFreehandMode).toHaveBeenCalledWith(false);
+
+    // 3. Draw tool shortcut: 'p'
+    const pResult = toolbar.handleKeyDown(makeEvent("p") as any);
+    expect(pResult).toBe(true);
+    expect(rendererMock.setFreehandMode).toHaveBeenCalledWith(true);
+
+    // 4. Auto Shape shortcut: 's'
+    const sResult = toolbar.handleKeyDown(makeEvent("s") as any);
+    expect(sResult).toBe(true);
+    expect(rendererMock.setAutoShapeDetection).toHaveBeenCalledWith(true);
+
+    // 5. Rectangle shortcut: 'r'
+    expect(editor.diagram.nodes.length).toBe(0);
+    const rResult = toolbar.handleKeyDown(makeEvent("r") as any);
+    expect(rResult).toBe(true);
+    expect(editor.diagram.nodes.length).toBe(1);
+    expect(editor.diagram.nodes[0].kind).toBe("generic.rectangle");
+
+    // 6. Circle shortcut: 'o'
+    const oResult = toolbar.handleKeyDown(makeEvent("o") as any);
+    expect(oResult).toBe(true);
+    expect(editor.diagram.nodes.length).toBe(2);
+    expect(editor.diagram.nodes[1].kind).toBe("generic.circle");
+
+    // 7. Diamond shortcut: 'd'
+    const dResult = toolbar.handleKeyDown(makeEvent("d") as any);
+    expect(dResult).toBe(true);
+    expect(editor.diagram.nodes.length).toBe(3);
+    expect(editor.diagram.nodes[2].kind).toBe("generic.diamond");
+
+    // 8. Triangle shortcut: 'y'
+    const yResult = toolbar.handleKeyDown(makeEvent("y") as any);
+    expect(yResult).toBe(true);
+    expect(editor.diagram.nodes.length).toBe(4);
+    expect(editor.diagram.nodes[3].kind).toBe("generic.triangle");
+
+    // 9. Table shortcut: 'b'
+    const bResult = toolbar.handleKeyDown(makeEvent("b") as any);
+    expect(bResult).toBe(true);
+    expect(editor.diagram.nodes.length).toBe(5);
+    expect(editor.diagram.nodes[4].kind).toBe("generic.table");
+
+    // 10. Sticky Note shortcut: 'n'
+    const nResult = toolbar.handleKeyDown(makeEvent("n") as any);
+    expect(nResult).toBe(true);
+    expect(editor.diagram.nodes.length).toBe(6);
+    expect(editor.diagram.nodes[5].kind).toBe("generic.stickyNote");
+
+    // 11. Text shortcut: 't'
+    const tResult = toolbar.handleKeyDown(makeEvent("t") as any);
+    expect(tResult).toBe(true);
+    expect(editor.diagram.nodes.length).toBe(7);
+    expect(editor.diagram.nodes[6].kind).toBe("generic.text");
+
+    // 12. Image shortcut: 'i'
+    const iResult = toolbar.handleKeyDown(makeEvent("i") as any);
+    expect(iResult).toBe(true);
+    expect(onAddImage).toHaveBeenCalledTimes(1);
+
+    // 13. PDF shortcut: 'f'
+    const fResult = toolbar.handleKeyDown(makeEvent("f") as any);
+    expect(fResult).toBe(true);
+    expect(onAddPdf).toHaveBeenCalledTimes(1);
+
+    // 14. Vault Note shortcut: 'w'
+    const wResult = toolbar.handleKeyDown(makeEvent("w") as any);
+    expect(wResult).toBe(true);
+    expect(onAddNote).toHaveBeenCalledTimes(1);
+
+    // 15. Group Box shortcut: 'g'
+    expect(editor.diagram.groups.length).toBe(0);
+    const gResult = toolbar.handleKeyDown(makeEvent("g") as any);
+    expect(gResult).toBe(true);
+    expect(editor.diagram.groups.length).toBe(1);
+
+    // 16. Line shortcut: 'l' with 2 selected nodes
+    editor.clearSelection();
+    editor.selectNode(editor.diagram.nodes[0].id, false);
+    editor.selectNode(editor.diagram.nodes[1].id, true);
+    expect(editor.selectedNodeIds.length).toBe(2);
+    expect(editor.diagram.edges.length).toBe(0);
+
+    const lResult = toolbar.handleKeyDown(makeEvent("l") as any);
+    expect(lResult).toBe(true);
+    expect(editor.diagram.edges.length).toBe(1);
+
+    toolbar.destroy();
+  });
+
+  it("should support alternate shortcuts (X for text, C for circle, A for line, Shift+P for auto shape)", () => {
+    const toolbar = new Toolbar(
+      container as any,
+      editor,
+      rendererMock as any
+    );
+
+    const makeEvent = (key: string, extra: any = {}) => ({
+      key,
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      shiftKey: false,
+      preventDefault: jest.fn(),
+      stopPropagation: jest.fn(),
+      ...extra,
+    });
+
+    // 'x' adds direct text
+    const initialNodes = editor.diagram.nodes.length;
+    const xRes = toolbar.handleKeyDown(makeEvent("x") as any);
+    expect(xRes).toBe(true);
+    expect(editor.diagram.nodes.length).toBe(initialNodes + 1);
+    expect(editor.diagram.nodes[editor.diagram.nodes.length - 1].kind).toBe("generic.text");
+
+    // 'c' adds circle
+    const cRes = toolbar.handleKeyDown(makeEvent("c") as any);
+    expect(cRes).toBe(true);
+    expect(editor.diagram.nodes[editor.diagram.nodes.length - 1].kind).toBe("generic.circle");
+
+    // Shift+P activates auto shape
+    const shiftPRes = toolbar.handleKeyDown(makeEvent("p", { shiftKey: true }) as any);
+    expect(shiftPRes).toBe(true);
+    expect(rendererMock.setAutoShapeDetection).toHaveBeenCalledWith(true);
+
+    // Shift+T adds triangle
+    const shiftTRes = toolbar.handleKeyDown(makeEvent("t", { shiftKey: true }) as any);
+    expect(shiftTRes).toBe(true);
+    expect(editor.diagram.nodes[editor.diagram.nodes.length - 1].kind).toBe("generic.triangle");
+
+    toolbar.destroy();
+  });
+
+  it("should support Excalidraw number shortcuts 1-9 when no components are selected", () => {
+    const onAddImage = jest.fn();
+    const toolbar = new Toolbar(
+      container as any,
+      editor,
+      rendererMock as any,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      onAddImage
+    );
+
+    editor.clearSelection();
+    expect(editor.hasSelection).toBe(false);
+
+    const makeEvent = (key: string) => ({
+      key,
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      shiftKey: false,
+      preventDefault: jest.fn(),
+      stopPropagation: jest.fn(),
+    });
+
+    // 1 -> Select
+    expect(toolbar.handleKeyDown(makeEvent("1") as any)).toBe(true);
+    // 2 -> Grab
+    expect(toolbar.handleKeyDown(makeEvent("2") as any)).toBe(true);
+    // 3 -> Rectangle
+    const nodeCount = editor.diagram.nodes.length;
+    expect(toolbar.handleKeyDown(makeEvent("3") as any)).toBe(true);
+    expect(editor.diagram.nodes.length).toBe(nodeCount + 1);
+    expect(editor.diagram.nodes[editor.diagram.nodes.length - 1].kind).toBe("generic.rectangle");
+    // 4 -> Diamond (ensure no selection so 1-6 applies tool instead of color preset)
+    editor.clearSelection();
+    expect(toolbar.handleKeyDown(makeEvent("4") as any)).toBe(true);
+    expect(editor.diagram.nodes[editor.diagram.nodes.length - 1].kind).toBe("generic.diamond");
+    // 5 -> Circle
+    editor.clearSelection();
+    expect(toolbar.handleKeyDown(makeEvent("5") as any)).toBe(true);
+    expect(editor.diagram.nodes[editor.diagram.nodes.length - 1].kind).toBe("generic.circle");
+    // 7 -> Draw
+    editor.clearSelection();
+    expect(toolbar.handleKeyDown(makeEvent("7") as any)).toBe(true);
+    // 8 -> Text
+    editor.clearSelection();
+    expect(toolbar.handleKeyDown(makeEvent("8") as any)).toBe(true);
+    expect(editor.diagram.nodes[editor.diagram.nodes.length - 1].kind).toBe("generic.text");
+    // 9 -> Image
+    editor.clearSelection();
+    expect(toolbar.handleKeyDown(makeEvent("9") as any)).toBe(true);
+    expect(onAddImage).toHaveBeenCalledTimes(1);
+
+    toolbar.destroy();
+  });
+
+  it("should ignore shortcuts when typing in inputs, textareas or when inline editor is active", () => {
+    const toolbar = new Toolbar(
+      container as any,
+      editor,
+      rendererMock as any
+    );
+
+    const inputTarget = new MockElement("input");
+    const textareaTarget = new MockElement("textarea");
+
+    // Input target
+    const inputEvt = {
+      key: "r",
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      shiftKey: false,
+      target: inputTarget,
+      preventDefault: jest.fn(),
+      stopPropagation: jest.fn(),
+    };
+    expect(toolbar.handleKeyDown(inputEvt as any)).toBe(false);
+    expect(inputEvt.preventDefault).not.toHaveBeenCalled();
+
+    // Textarea target
+    const textareaEvt = {
+      key: "r",
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      shiftKey: false,
+      target: textareaTarget,
+      preventDefault: jest.fn(),
+      stopPropagation: jest.fn(),
+    };
+    expect(toolbar.handleKeyDown(textareaEvt as any)).toBe(false);
+    expect(textareaEvt.preventDefault).not.toHaveBeenCalled();
+
+    // Active inline editor
+    (rendererMock as any).activeInlineEditor = new MockElement("input");
+    const normalEvt = {
+      key: "r",
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      shiftKey: false,
+      target: new MockElement("div"),
+      preventDefault: jest.fn(),
+      stopPropagation: jest.fn(),
+    };
+    expect(toolbar.handleKeyDown(normalEvt as any)).toBe(false);
+
+    (rendererMock as any).activeInlineEditor = null;
+    toolbar.destroy();
+  });
+
+  it("should ignore shortcuts when modifier keys (Ctrl/Cmd, Alt) are held", () => {
+    const toolbar = new Toolbar(
+      container as any,
+      editor,
+      rendererMock as any
+    );
+
+    const makeEvt = (key: string, ctrl: boolean, meta: boolean, alt: boolean) => ({
+      key,
+      ctrlKey: ctrl,
+      metaKey: meta,
+      altKey: alt,
+      shiftKey: false,
+      preventDefault: jest.fn(),
+      stopPropagation: jest.fn(),
+    });
+
+    // Ctrl+C
+    expect(toolbar.handleKeyDown(makeEvt("c", true, false, false) as any)).toBe(false);
+    // Ctrl+V
+    expect(toolbar.handleKeyDown(makeEvt("v", true, false, false) as any)).toBe(false);
+    // Cmd+D
+    expect(toolbar.handleKeyDown(makeEvt("d", false, true, false) as any)).toBe(false);
+    // Alt+1
+    expect(toolbar.handleKeyDown(makeEvt("1", false, false, true) as any)).toBe(false);
+
+    toolbar.destroy();
+  });
 });

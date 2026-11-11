@@ -557,6 +557,10 @@ export class UmlCanvasView extends TextFileView {
 
     // Setup Copy / Paste (F-012) and Minimap (F-011) shortcuts
     this.rootEl.addEventListener("keydown", (e: KeyboardEvent) => {
+      if (this.toolbar && this.toolbar.handleKeyDown(e)) {
+        return;
+      }
+
       const isMac = Platform.isMacOS;
       const mod = isMac ? e.metaKey : e.ctrlKey;
       const target = e.target as HTMLElement | null;

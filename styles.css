@@ -133,6 +133,34 @@
   user-select: none;
   overflow: visible !important;
   transition: background-color 0.15s ease, color 0.15s ease, transform 0.08s ease;
+  position: relative;
+}
+
+.umlcanvas-toolbar-btn .umlcanvas-btn-shortcut {
+  position: absolute;
+  bottom: 1px;
+  right: 2px;
+  font-size: 8.5px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--text-muted);
+  opacity: 0.75;
+  pointer-events: none;
+  font-family: var(--font-monospace, monospace);
+  letter-spacing: -0.2px;
+  user-select: none;
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+
+.umlcanvas-toolbar-btn:hover .umlcanvas-btn-shortcut {
+  opacity: 1;
+  color: var(--text-normal);
+}
+
+.umlcanvas-toolbar-btn.is-active .umlcanvas-btn-shortcut {
+  color: var(--interactive-accent);
+  opacity: 1;
+  font-weight: 700;
 }
 
 .umlcanvas-toolbar-btn.is-icon-only,

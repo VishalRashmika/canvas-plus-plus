@@ -152,6 +152,7 @@ export class Toolbar {
 
   private freehandEnabled = true;
   private unsubscribe: (() => void) | null = null;
+  private onKeyDownBound: ((e: KeyboardEvent) => void) | null = null;
 
   constructor(
     private readonly container: HTMLElement,
@@ -204,6 +205,13 @@ export class Toolbar {
       this.updateState();
     });
 
+    this.onKeyDownBound = (e: KeyboardEvent) => {
+      this.handleKeyDown(e);
+    };
+    if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+      window.addEventListener("keydown", this.onKeyDownBound);
+    }
+
     this.updateState();
   }
 
@@ -253,7 +261,8 @@ export class Toolbar {
     text: string,
     onClick: () => void,
     iconId?: string,
-    extraClass?: string
+    extraClass?: string,
+    shortcutKey?: string
   ): HTMLButtonElement {
     const btn = createEl("button", {
       cls: "umlcanvas-toolbar-btn clickable-icon",
@@ -277,6 +286,14 @@ export class Toolbar {
 
     if (text) {
       btn.createSpan({ cls: "umlcanvas-btn-text", text });
+    }
+
+    if (shortcutKey) {
+      btn.createSpan({
+        cls: "umlcanvas-btn-shortcut",
+        text: shortcutKey,
+        attr: { "aria-hidden": "true" },
+      });
     }
 
     btn.addEventListener("mousedown", (e) => {
@@ -1186,9 +1203,9 @@ export class Toolbar {
     // Mode Group (Select, Grab, Draw, Auto Shape)
     const modeGroup = this.createGroup(this.bottomToolbarEl);
 
-    // Select Tool (V / Esc)
+    // Select Tool (V)
     this.selectBtn = this.createButton(
-      "Select & Move (V / Esc)",
+      "Select & Move (V)",
       "",
       () => {
         if (typeof this.renderer.setGrabMode === "function") {
@@ -1198,7 +1215,8 @@ export class Toolbar {
         this.updateToolMode();
       },
       "mouse-pointer",
-      "umlcanvas-select-btn"
+      "umlcanvas-select-btn",
+      "V"
     );
     modeGroup.appendChild(this.selectBtn);
 
@@ -1217,7 +1235,8 @@ export class Toolbar {
         this.updateToolMode();
       },
       "hand",
-      "umlcanvas-grab-btn"
+      "umlcanvas-grab-btn",
+      "H"
     );
     modeGroup.appendChild(this.grabBtn);
 
@@ -1241,7 +1260,8 @@ export class Toolbar {
         this.updateToolMode();
       },
       "pencil",
-      "umlcanvas-draw-btn"
+      "umlcanvas-draw-btn",
+      "P"
     );
     this.drawBtn.addEventListener("contextmenu", (e) => {
       e.preventDefault();
@@ -1261,9 +1281,9 @@ export class Toolbar {
     });
     modeGroup.appendChild(this.drawBtn);
 
-    // Auto Shape Detection (Shift+P)
+    // Auto Shape Detection (S / Shift+P)
     this.autoShapeBtn = this.createButton(
-      "Auto Shape Recognition (Shift+P) - Automatically recognize common shapes",
+      "Auto Shape Recognition (S) - Automatically recognize common shapes",
       "",
       () => {
         if (typeof this.renderer.setGrabMode === "function") {
@@ -1281,7 +1301,8 @@ export class Toolbar {
         this.updateToolMode();
       },
       "sparkles",
-      "umlcanvas-autoshape-btn"
+      "umlcanvas-autoshape-btn",
+      "S"
     );
     modeGroup.appendChild(this.autoShapeBtn);
 
@@ -1300,7 +1321,9 @@ export class Toolbar {
           height: 80,
         });
       },
-      "square"
+      "square",
+      undefined,
+      "R"
     );
     shapeGroup.appendChild(this.rectBtn);
 
@@ -1314,7 +1337,9 @@ export class Toolbar {
           height: 90,
         });
       },
-      "circle"
+      "circle",
+      undefined,
+      "O"
     );
     shapeGroup.appendChild(this.circleBtn);
 
@@ -1328,13 +1353,15 @@ export class Toolbar {
           height: 90,
         });
       },
-      "diamond"
+      "diamond",
+      undefined,
+      "D"
     );
     shapeGroup.appendChild(this.diamondBtn);
 
     // Triangle
     this.triangleBtn = this.createButton(
-      "Triangle (T)",
+      "Triangle (Y)",
       "",
       () => {
         this.addShapeAtCenter("generic.triangle", "Triangle", {
@@ -1342,18 +1369,22 @@ export class Toolbar {
           height: 90,
         });
       },
-      "triangle"
+      "triangle",
+      undefined,
+      "Y"
     );
     shapeGroup.appendChild(this.triangleBtn);
 
     // Table
     this.tableBtn = this.createButton(
-      "Table (3x3 Table)",
+      "Table (B) - Add structured table",
       "",
       () => {
         this.addTableAtCenter();
       },
-      "table"
+      "table",
+      undefined,
+      "B"
     );
     shapeGroup.appendChild(this.tableBtn);
 
@@ -1364,35 +1395,28 @@ export class Toolbar {
       () => {
         this.addStickyNoteAtCenter();
       },
-      "sticky-note"
+      "sticky-note",
+      undefined,
+      "N"
     );
     shapeGroup.appendChild(this.noteBtn);
 
     // Direct Text on Canvas
     this.textBtn = this.createButton(
-      "Text (X) - Add direct text on canvas",
+      "Text (T) - Add direct text on canvas",
       "",
       () => {
         this.addTextAtCenter();
       },
-      "type"
+      "type",
+      undefined,
+      "T"
     );
     shapeGroup.appendChild(this.textBtn);
 
-    // Table
-    this.tableBtn = this.createButton(
-      "Table - Add structured table",
-      "",
-      () => {
-        this.addTableAtCenter();
-      },
-      "table"
-    );
-    shapeGroup.appendChild(this.tableBtn);
-
     // Image (Photo Frame)
     this.imageBtn = this.createButton(
-      "Insert Image (Photo Frame)",
+      "Insert Image (I)",
       "",
       () => {
         if (this.onAddImageRequested) {
@@ -1401,13 +1425,15 @@ export class Toolbar {
           this.addImageAtCenter();
         }
       },
-      "image"
+      "image",
+      undefined,
+      "I"
     );
     shapeGroup.appendChild(this.imageBtn);
 
     // PDF Document
     this.pdfBtn = this.createButton(
-      "Insert PDF Document",
+      "Insert PDF Document (F)",
       "",
       () => {
         if (this.onAddPdfRequested) {
@@ -1416,19 +1442,23 @@ export class Toolbar {
           this.addPdfAtCenter();
         }
       },
-      "file-text"
+      "file-text",
+      undefined,
+      "F"
     );
     shapeGroup.appendChild(this.pdfBtn);
 
     // Vault Note
     if (this.onAddNoteRequested) {
       this.vaultNoteBtn = this.createButton(
-        "Insert Note from Vault",
+        "Insert Note from Vault (W)",
         "",
         () => {
           this.onAddNoteRequested!();
         },
-        "file-text"
+        "file-text",
+        undefined,
+        "W"
       );
       shapeGroup.appendChild(this.vaultNoteBtn);
     }
@@ -1440,7 +1470,9 @@ export class Toolbar {
       () => {
         this.addGroupBoxAtCenter();
       },
-      "boxes"
+      "boxes",
+      undefined,
+      "G"
     );
     shapeGroup.appendChild(this.groupBoxBtn);
 
@@ -1455,7 +1487,9 @@ export class Toolbar {
       () => {
         this.handleLineButtonClick();
       },
-      "arrow-up-right"
+      "arrow-up-right",
+      undefined,
+      "L"
     );
     lineGroup.appendChild(this.lineBtn);
   }
@@ -3331,7 +3365,272 @@ export class Toolbar {
     return this.currentBrushStrength;
   }
 
+  /**
+   * Handles keyboard shortcuts for quickly switching between tools and placing shapes,
+   * matching Excalidraw's tool shortcuts and letter badges.
+   */
+  public handleKeyDown(e: KeyboardEvent): boolean {
+    if (!e || (e as HandledEvent)._umlHandled || e.defaultPrevented) {
+      return false;
+    }
+
+    // Never handle when focused in text inputs, textareas, contenteditable elements, or inline editor
+    const target = e.target as HTMLElement | null;
+    const isInput =
+      target &&
+      (target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable ||
+        Boolean(target.closest?.(".umlcanvas-inline-editor")) ||
+        Boolean(target.closest?.("input")) ||
+        Boolean(target.closest?.("textarea")) ||
+        Boolean(target.closest?.(".modal")) ||
+        Boolean(target.closest?.(".menu")) ||
+        Boolean(target.closest?.("[class*='popover']")));
+
+    if (isInput) {
+      return false;
+    }
+
+    if (this.renderer?.activeInlineEditor) {
+      return false;
+    }
+
+    // If inside Obsidian workspace leaf, don't intercept events when leaf is not active
+    if (typeof this.container?.closest === "function") {
+      const leaf = this.container.closest(".workspace-leaf");
+      if (leaf && typeof leaf.classList?.contains === "function" && !leaf.classList.contains("mod-active")) {
+        return false;
+      }
+    }
+
+    // Do not interfere with Ctrl/Cmd or Alt key combinations (copy, paste, undo, redo, bold, italic, etc.)
+    if (e.ctrlKey || e.metaKey || e.altKey) {
+      return false;
+    }
+
+    // Shift combinations: Shift+P (Auto Shape), Shift+T (Triangle)
+    if (e.shiftKey) {
+      const key = e.key.toLowerCase();
+      if (key === "p") {
+        markEventHandled(e);
+        e.preventDefault();
+        e.stopPropagation();
+        this.autoShapeBtn?.click();
+        return true;
+      }
+      if (key === "t") {
+        markEventHandled(e);
+        e.preventDefault();
+        e.stopPropagation();
+        this.triangleBtn?.click();
+        return true;
+      }
+      return false;
+    }
+
+    const key = e.key.toLowerCase();
+
+    // Mode Tools
+    if (key === "v" || e.key === "Escape") {
+      markEventHandled(e);
+      e.preventDefault();
+      e.stopPropagation();
+      this.selectBtn?.click();
+      return true;
+    }
+    if (key === "h") {
+      markEventHandled(e);
+      e.preventDefault();
+      e.stopPropagation();
+      this.grabBtn?.click();
+      return true;
+    }
+    if (key === "p") {
+      markEventHandled(e);
+      e.preventDefault();
+      e.stopPropagation();
+      this.drawBtn?.click();
+      return true;
+    }
+    if (key === "s") {
+      markEventHandled(e);
+      e.preventDefault();
+      e.stopPropagation();
+      this.autoShapeBtn?.click();
+      return true;
+    }
+
+    // Shapes & Components
+    if (key === "r") {
+      markEventHandled(e);
+      e.preventDefault();
+      e.stopPropagation();
+      this.rectBtn?.click();
+      return true;
+    }
+    if (key === "o" || key === "c") {
+      markEventHandled(e);
+      e.preventDefault();
+      e.stopPropagation();
+      this.circleBtn?.click();
+      return true;
+    }
+    if (key === "d") {
+      markEventHandled(e);
+      e.preventDefault();
+      e.stopPropagation();
+      this.diamondBtn?.click();
+      return true;
+    }
+    if (key === "y") {
+      markEventHandled(e);
+      e.preventDefault();
+      e.stopPropagation();
+      this.triangleBtn?.click();
+      return true;
+    }
+    if (key === "b") {
+      markEventHandled(e);
+      e.preventDefault();
+      e.stopPropagation();
+      this.tableBtn?.click();
+      return true;
+    }
+    if (key === "n") {
+      markEventHandled(e);
+      e.preventDefault();
+      e.stopPropagation();
+      this.noteBtn?.click();
+      return true;
+    }
+    if (key === "t" || key === "x") {
+      markEventHandled(e);
+      e.preventDefault();
+      e.stopPropagation();
+      this.textBtn?.click();
+      return true;
+    }
+    if (key === "i") {
+      markEventHandled(e);
+      e.preventDefault();
+      e.stopPropagation();
+      this.imageBtn?.click();
+      return true;
+    }
+    if (key === "f") {
+      markEventHandled(e);
+      e.preventDefault();
+      e.stopPropagation();
+      this.pdfBtn?.click();
+      return true;
+    }
+    if (key === "w") {
+      markEventHandled(e);
+      e.preventDefault();
+      e.stopPropagation();
+      if (this.vaultNoteBtn) {
+        this.vaultNoteBtn.click();
+      } else if (this.onAddNoteRequested) {
+        this.onAddNoteRequested();
+      }
+      return true;
+    }
+    if (key === "g") {
+      markEventHandled(e);
+      e.preventDefault();
+      e.stopPropagation();
+      this.groupBoxBtn?.click();
+      return true;
+    }
+    if (key === "l" || key === "a") {
+      markEventHandled(e);
+      e.preventDefault();
+      e.stopPropagation();
+      this.lineBtn?.click();
+      return true;
+    }
+
+    // Excalidraw number keys: 1-9 (active when there is no selection, so 1-6 does not override selection color presets)
+    const hasSelection =
+      (this.editor?.selectedNodeIds.length ?? 0) > 0 ||
+      (this.editor?.selectedEdgeIds.length ?? 0) > 0 ||
+      (this.editor?.selectedGroupIds.length ?? 0) > 0;
+
+    if (!hasSelection) {
+      if (key === "1") {
+        markEventHandled(e);
+        e.preventDefault();
+        e.stopPropagation();
+        this.selectBtn?.click();
+        return true;
+      }
+      if (key === "2") {
+        markEventHandled(e);
+        e.preventDefault();
+        e.stopPropagation();
+        this.grabBtn?.click();
+        return true;
+      }
+      if (key === "3") {
+        markEventHandled(e);
+        e.preventDefault();
+        e.stopPropagation();
+        this.rectBtn?.click();
+        return true;
+      }
+      if (key === "4") {
+        markEventHandled(e);
+        e.preventDefault();
+        e.stopPropagation();
+        this.diamondBtn?.click();
+        return true;
+      }
+      if (key === "5") {
+        markEventHandled(e);
+        e.preventDefault();
+        e.stopPropagation();
+        this.circleBtn?.click();
+        return true;
+      }
+      if (key === "6") {
+        markEventHandled(e);
+        e.preventDefault();
+        e.stopPropagation();
+        this.lineBtn?.click();
+        return true;
+      }
+      if (key === "7") {
+        markEventHandled(e);
+        e.preventDefault();
+        e.stopPropagation();
+        this.drawBtn?.click();
+        return true;
+      }
+      if (key === "8") {
+        markEventHandled(e);
+        e.preventDefault();
+        e.stopPropagation();
+        this.textBtn?.click();
+        return true;
+      }
+      if (key === "9") {
+        markEventHandled(e);
+        e.preventDefault();
+        e.stopPropagation();
+        this.imageBtn?.click();
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   destroy(): void {
+    if (this.onKeyDownBound && typeof window !== "undefined" && typeof window.removeEventListener === "function") {
+      window.removeEventListener("keydown", this.onKeyDownBound);
+      this.onKeyDownBound = null;
+    }
     this.closeAllPopovers();
     if (this.unsubscribe) {
       this.unsubscribe();

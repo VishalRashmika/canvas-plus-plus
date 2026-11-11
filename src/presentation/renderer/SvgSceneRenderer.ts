@@ -51,6 +51,20 @@ interface HandledMouseEvent extends MouseEvent {
   _umlHandled?: boolean;
 }
 
+interface HandledEvent extends Event {
+  _umlHandled?: boolean;
+}
+
+function markEventHandled(e: Event): void {
+  if (!e) return;
+  (e as HandledEvent)._umlHandled = true;
+  try {
+    Object.defineProperty(e, "defaultPrevented", { value: true, configurable: true });
+  } catch (_err) {
+    void _err;
+  }
+}
+
 export interface SvgSceneRendererOptions {
   shapeRegistry?: ShapeRegistry;
   showGrid?: boolean;
@@ -5994,6 +6008,7 @@ export class SvgSceneRenderer {
     // Group Box tool shortcut: G (without Ctrl/Cmd: add standalone group box at center if no selection)
     if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "g" && !this.freehandMode) {
       if (this.editor.selectedNodeIds.length === 0 && this.editor.selectedGroupIds.length === 0 && this.editor.selectedEdgeIds.length === 0) {
+        markEventHandled(e);
         e.preventDefault();
         const centerCanvas = screenToCanvas(
           { x: this.container.clientWidth / 2, y: this.container.clientHeight / 2 },
@@ -6014,16 +6029,19 @@ export class SvgSceneRenderer {
     // Escape: dismiss arrow attachment popup, exit grab mode or freehand mode or deselect
     if (e.key === "Escape") {
       if (this.arrowAttachmentState) {
+        markEventHandled(e);
         e.preventDefault();
         this.dismissArrowAttachmentPopupToEmptySpace();
         return;
       }
       if (this.isGrabMode) {
+        markEventHandled(e);
         e.preventDefault();
         this.setGrabMode(false);
         return;
       }
       if (this.isFreehandMode) {
+        markEventHandled(e);
         e.preventDefault();
         this.setFreehandMode(false);
         return;
@@ -6033,15 +6051,17 @@ export class SvgSceneRenderer {
         this.editor.selectedEdgeIds.length > 0 ||
         this.editor.selectedGroupIds.length > 0
       ) {
+        markEventHandled(e);
         e.preventDefault();
         this.editor.clearSelection();
         return;
       }
     }
 
-    // Select tool shortcut: V
-    if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "v") {
+    // Select tool shortcut: V or 1 (when no selection)
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && (e.key.toLowerCase() === "v" || (e.key === "1" && !hasSelection))) {
       if (this.isFreehandMode || this.isGrabMode) {
+        markEventHandled(e);
         e.preventDefault();
         this.setFreehandMode(false);
         this.setGrabMode(false);
@@ -6049,16 +6069,18 @@ export class SvgSceneRenderer {
       }
     }
 
-    // Grab tool shortcut: H
-    if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "h") {
+    // Grab tool shortcut: H or 2 (when no selection)
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && (e.key.toLowerCase() === "h" || (e.key === "2" && !hasSelection))) {
+      markEventHandled(e);
       e.preventDefault();
       this.setGrabMode(!this.isGrabMode);
       return;
     }
 
-    // Connector / Line tool shortcut: L (connect 2 selected nodes)
-    if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "l") {
+    // Connector / Line tool shortcut: L or A (connect 2 selected nodes)
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && (e.key.toLowerCase() === "l" || e.key.toLowerCase() === "a")) {
       if (this.editor.selectedNodeIds.length === 2) {
+        markEventHandled(e);
         e.preventDefault();
         const [fromId, toId] = this.editor.selectedNodeIds;
         this.editor.addEdge(fromId, toId, {
@@ -6069,8 +6091,23 @@ export class SvgSceneRenderer {
       }
     }
 
-    // Draw tool shortcut: P (toggle Draw mode) or Shift+P (toggle Auto Shape detection)
-    if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "p" && this.isFreehandEnabled) {
+    // Auto Shape Detection tool shortcut: S
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "s" && this.isFreehandEnabled) {
+      markEventHandled(e);
+      e.preventDefault();
+      const isAutoShapeActive = this.isFreehandMode && this.autoShapeDetection;
+      if (isAutoShapeActive) {
+        this.setFreehandMode(false);
+      } else {
+        this.setAutoShapeDetection(true);
+        this.setFreehandMode(true);
+      }
+      return;
+    }
+
+    // Draw tool shortcut: P or 7 (toggle Draw mode) or Shift+P (toggle Auto Shape detection)
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && (e.key.toLowerCase() === "p" || (e.key === "7" && !hasSelection)) && this.isFreehandEnabled) {
+      markEventHandled(e);
       if (e.shiftKey) {
         e.preventDefault();
         const isAutoShapeActive = this.isFreehandMode && this.autoShapeDetection;

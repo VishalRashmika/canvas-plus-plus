@@ -120,7 +120,7 @@
   box-shadow: none !important;
   outline: none !important;
   border-radius: var(--radius-s, 4px);
-  cursor: pointer;
+  cursor: pointer !important;
   white-space: nowrap;
   user-select: none;
   overflow: visible !important;
@@ -277,8 +277,21 @@
 .umlcanvas-view-container.umlcanvas-freehand-mode,
 .umlcanvas-view-container.umlcanvas-freehand-mode .umlcanvas-svg-container,
 .umlcanvas-view-container.umlcanvas-freehand-mode .umlcanvas-svg,
-.umlcanvas-view-container.umlcanvas-freehand-mode * {
+.umlcanvas-view-container.umlcanvas-freehand-mode *:not(.umlcanvas-toolbar):not(.umlcanvas-toolbar *),
+.umlcanvas-svg-container.umlcanvas-freehand-mode,
+.umlcanvas-svg-container.umlcanvas-freehand-mode .umlcanvas-svg,
+.umlcanvas-svg-container.umlcanvas-freehand-mode *:not(.umlcanvas-toolbar):not(.umlcanvas-toolbar *) {
   cursor: crosshair;
+}
+
+.umlcanvas-view-container.umlcanvas-freehand-mode .umlcanvas-toolbar,
+.umlcanvas-svg-container.umlcanvas-freehand-mode ~ .umlcanvas-toolbar {
+  cursor: default;
+}
+
+.umlcanvas-view-container.umlcanvas-freehand-mode .umlcanvas-toolbar-btn,
+.umlcanvas-view-container.umlcanvas-freehand-mode .umlcanvas-toolbar-btn * {
+  cursor: pointer !important;
 }
 
 body .umlcanvas-moving,

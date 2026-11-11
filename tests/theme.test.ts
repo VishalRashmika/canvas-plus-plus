@@ -375,5 +375,434 @@ describe("Pastel-Inspired Light Theme Tests", () => {
       expect(rootEl.classList.contains("umlcanvas-theme-light")).toBe(false);
       expect(fakePlugin.saveSettings).toHaveBeenCalledTimes(2);
     });
+
+    it("should include crosshair cursor for .umlcanvas-svg-container.umlcanvas-freehand-mode and keep button cursor as pointer", () => {
+      expect(css).toContain(".umlcanvas-svg-container.umlcanvas-freehand-mode");
+      expect(css).toContain("cursor: crosshair;");
+      expect(css).toContain(".umlcanvas-view-container.umlcanvas-freehand-mode .umlcanvas-toolbar-btn");
+      expect(css).toContain("cursor: pointer !important;");
+    });
+  });
+
+  describe("Theme Switching & Freehand Draw Tool 1:1 Parity", () => {
+    // Clean mock DOM element
+    class MockElement {
+      tagName: string;
+      className: string = "";
+      classList = {
+        classes: new Set<string>(),
+        add: (...cls: string[]) => {
+          cls.forEach((c) => {
+            if (!c) return;
+            this.classList.classes.add(c);
+          });
+          this.className = Array.from(this.classList.classes).join(" ");
+        },
+        remove: (...cls: string[]) => {
+          cls.forEach((c) => {
+            if (!c) return;
+            this.classList.classes.delete(c);
+          });
+          this.className = Array.from(this.classList.classes).join(" ");
+        },
+        toggle: (c: string, force?: boolean) => {
+          const willHave = force !== undefined ? force : !this.classList.contains(c);
+          if (willHave) this.classList.add(c);
+          else this.classList.remove(c);
+          return willHave;
+        },
+        contains: (c: string) => this.classList.classes.has(c),
+      };
+      attributes: Record<string, string> = {};
+      style: Record<string, string> = {};
+      children: MockElement[] = [];
+      parentElement: MockElement | null = null;
+      listeners: Record<string, ((e: any) => void)[]> = {};
+      title: string = "";
+      disabled: boolean = false;
+      clientWidth: number = 1000;
+      clientHeight: number = 800;
+
+      constructor(tagName: string, options?: any) {
+        this.tagName = tagName.toUpperCase();
+        if (options?.cls) {
+          const classes = options.cls.split(/\s+/).filter(Boolean);
+          classes.forEach((c: string) => this.classList.classes.add(c));
+          this.className = Array.from(this.classList.classes).join(" ");
+        }
+        if (options?.text) {
+          this.textContent = options.text;
+        }
+        if (options?.title) {
+          this.title = options.title;
+        }
+      }
+
+      textContent: string = "";
+      createDiv(options?: any): MockElement {
+        const el = new MockElement("div", options);
+        this.appendChild(el);
+        return el;
+      }
+      createSpan(options?: any): MockElement {
+        const el = new MockElement("span", options);
+        this.appendChild(el);
+        return el;
+      }
+      createEl(tag: string, options?: any): MockElement {
+        const el = new MockElement(tag, options);
+        this.appendChild(el);
+        return el;
+      }
+      appendChild(child: MockElement): MockElement {
+        child.parentElement = this;
+        this.children.push(child);
+        return child;
+      }
+      prepend(child: MockElement): MockElement {
+        child.parentElement = this;
+        this.children.unshift(child);
+        return child;
+      }
+      remove(): void {
+        if (this.parentElement) {
+          const idx = this.parentElement.children.indexOf(this);
+          if (idx !== -1) {
+            this.parentElement.children.splice(idx, 1);
+          }
+          this.parentElement = null;
+        }
+      }
+      empty(): void {
+        this.children = [];
+      }
+      addEventListener(event: string, handler: (e: any) => void): void {
+        if (!this.listeners[event]) this.listeners[event] = [];
+        this.listeners[event].push(handler);
+      }
+      removeEventListener(event: string, handler: (e: any) => void): void {
+        if (!this.listeners[event]) return;
+        this.listeners[event] = this.listeners[event].filter((h) => h !== handler);
+      }
+      dispatchEvent(event: { type: string; stopPropagation?: () => void; preventDefault?: () => void }): void {
+        const handlers = this.listeners[event.type] || [];
+        handlers.forEach((h) => h(event));
+      }
+      click(): void {
+        this.dispatchEvent({
+          type: "click",
+          stopPropagation: () => {},
+          preventDefault: () => {},
+        });
+      }
+      setAttribute(name: string, value: string): void {
+        this.attributes[name] = value;
+      }
+      getAttribute(name: string): string | null {
+        return this.attributes[name] || null;
+      }
+      removeAttribute(name: string): void {
+        delete this.attributes[name];
+      }
+      querySelector(selector: string): MockElement | null {
+        return this.querySelectorAll(selector)[0] || null;
+      }
+      querySelectorAll(selector: string): MockElement[] {
+        const results: MockElement[] = [];
+        const check = (el: MockElement) => {
+          let matches = false;
+          if (selector.startsWith(".")) {
+            const cls = selector.substring(1);
+            matches = el.classList.contains(cls);
+          } else if (selector.startsWith("#")) {
+            matches = el.attributes["id"] === selector.substring(1);
+          } else {
+            matches = el.tagName.toLowerCase() === selector.toLowerCase();
+          }
+          if (matches) results.push(el);
+          el.children.forEach(check);
+        };
+        this.children.forEach(check);
+        return results;
+      }
+    }
+
+    let container: any;
+    let rendererMock: any;
+    let toolbar: any;
+    let editor: any;
+    let fakePlugin: any;
+    let mockView: any;
+
+    beforeEach(() => {
+
+      (global as any).document = {
+        createElement: (tag: string, options?: any) => new MockElement(tag, options),
+        createElementNS: (_ns: string, tag: string) => new MockElement(tag),
+        body: new MockElement("body"),
+      };
+      (global as any).createDiv = (options?: any) => new MockElement("div", options);
+      (global as any).createSpan = (options?: any) => new MockElement("span", options);
+      (global as any).createEl = (tag: string, options?: any) => new MockElement(tag, options);
+
+      container = new MockElement("div", { cls: "umlcanvas-view-container umlcanvas-theme-dark theme-dark" });
+      const diagram = createDiagram({ id: "diag-theme", title: "Theme Test", diagramType: "general" });
+      const { DiagramEditor } = require("../src/application/use-cases/DiagramEditor");
+      editor = new DiagramEditor(diagram);
+
+      rendererMock = {
+        freehandMode: false,
+        grabMode: false,
+        isAutoShapeDetection: false,
+        isHandwritingTextMode: false,
+        isFreehandEnabled: true,
+        enableFreehand: true,
+        currentTransform: { panX: 0, panY: 0, zoom: 1 },
+        brushWidth: 2,
+        brushStrength: 1.0,
+        setFreehandMode: jest.fn((val: boolean) => {
+          rendererMock.freehandMode = val;
+        }),
+        setGrabMode: jest.fn(),
+        setAutoShapeDetection: jest.fn((val: boolean) => {
+          rendererMock.isAutoShapeDetection = val;
+        }),
+        setHandwritingTextMode: jest.fn((val: boolean) => {
+          rendererMock.isHandwritingTextMode = val;
+        }),
+        setEnableFreehand: jest.fn((val?: boolean) => {
+          rendererMock.enableFreehand = val ?? true;
+          rendererMock.isFreehandEnabled = val ?? true;
+        }),
+        setGridVisible: jest.fn(),
+        setFreehandBrushWidth: jest.fn(),
+        setFreehandBrushStrength: jest.fn(),
+        render: jest.fn(),
+      };
+
+      const { Toolbar } = require("../src/presentation/views/Toolbar");
+      toolbar = new Toolbar(
+        container,
+        editor,
+        rendererMock,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        () => {
+          mockView.toggleTheme();
+        }
+      );
+
+      fakePlugin = {
+        settings: {
+          ...DEFAULT_SETTINGS,
+          theme: "dark",
+        },
+        saveSettings: jest.fn().mockImplementation(async () => {
+          mockView.updateSettings(fakePlugin.settings);
+        }),
+      };
+
+      mockView = {
+        rootEl: container,
+        renderer: rendererMock,
+        toolbar: toolbar,
+        editor: editor,
+        plugin: fakePlugin,
+        applyTheme() {
+          const settingTheme = this.plugin?.settings?.theme ?? "system";
+          const isLight = settingTheme === "light";
+          if (isLight) {
+            this.rootEl.classList.remove("umlcanvas-theme-dark", "theme-dark");
+            this.rootEl.classList.add("umlcanvas-theme-light", "theme-light");
+          } else {
+            this.rootEl.classList.remove("umlcanvas-theme-light", "theme-light");
+            this.rootEl.classList.add("umlcanvas-theme-dark", "theme-dark");
+          }
+          if (this.toolbar) {
+            this.toolbar.updateToolMode();
+          }
+          if (this.renderer) {
+            this.renderer.render();
+          }
+        },
+        updateSettings(settings: any) {
+          this.applyTheme();
+          const enableFreehand =
+            settings?.enableFreehand ?? this.plugin?.settings?.enableFreehand ?? true;
+          const showGrid =
+            settings?.showGrid ?? this.plugin?.settings?.showGrid ?? true;
+
+          if (this.renderer) {
+            this.renderer.setEnableFreehand(enableFreehand);
+            if (!this.renderer.freehandMode && settings?.autoShapeDetection !== undefined) {
+              this.renderer.setAutoShapeDetection(settings.autoShapeDetection);
+            }
+            this.renderer.setGridVisible(showGrid);
+          }
+          if (this.toolbar) {
+            this.toolbar.setFreehandEnabled(enableFreehand);
+            this.toolbar.updateToolMode();
+          }
+        },
+        async toggleTheme() {
+          const isCurrentlyLight =
+            (this.rootEl?.classList?.contains("umlcanvas-theme-light") ||
+              this.rootEl?.classList?.contains("theme-light")) &&
+            !this.rootEl?.classList?.contains("umlcanvas-theme-dark") ||
+            false;
+          const nextTheme = isCurrentlyLight ? "dark" : "light";
+          if (this.plugin?.settings) {
+            this.plugin.settings.theme = nextTheme;
+          }
+          this.applyTheme();
+          if (this.plugin?.saveSettings) {
+            await this.plugin.saveSettings();
+          }
+        },
+      };
+    });
+
+    afterEach(() => {
+      toolbar.destroy();
+    });
+
+    it("should allow selecting freehand draw tool in dark mode initially", () => {
+      const drawBtn = container.querySelector(".umlcanvas-draw-btn");
+      expect(drawBtn).not.toBeNull();
+      expect(drawBtn.classList.contains("is-hidden")).toBe(false);
+
+      // Click to select draw tool
+      drawBtn.click();
+      expect(rendererMock.setFreehandMode).toHaveBeenCalledWith(true);
+      expect(rendererMock.setAutoShapeDetection).toHaveBeenCalledWith(false);
+      expect(drawBtn.classList.contains("is-active")).toBe(true);
+    });
+
+    it("should remain selectable when switched from dark mode to light mode", async () => {
+      // 1. Initially dark mode
+      expect(container.classList.contains("umlcanvas-theme-dark")).toBe(true);
+      const drawBtn = container.querySelector(".umlcanvas-draw-btn");
+      expect(drawBtn).not.toBeNull();
+      expect(drawBtn.classList.contains("is-hidden")).toBe(false);
+
+      // 2. Switch to light mode
+      await mockView.toggleTheme();
+      expect(container.classList.contains("umlcanvas-theme-light")).toBe(true);
+      expect(container.classList.contains("umlcanvas-theme-dark")).toBe(false);
+
+      // Draw button must NOT be hidden
+      expect(drawBtn.classList.contains("is-hidden")).toBe(false);
+
+      // Draw button MUST be selectable in light mode
+      drawBtn.click();
+      expect(rendererMock.setFreehandMode).toHaveBeenCalledWith(true);
+      expect(rendererMock.setAutoShapeDetection).toHaveBeenCalledWith(false);
+      expect(drawBtn.classList.contains("is-active")).toBe(true);
+    });
+
+    it("should remain selectable when switching back to dark mode after light mode (1:1 parity)", async () => {
+      const drawBtn = container.querySelector(".umlcanvas-draw-btn");
+
+      // Switch to light mode
+      await mockView.toggleTheme();
+      expect(container.classList.contains("umlcanvas-theme-light")).toBe(true);
+      expect(drawBtn.classList.contains("is-hidden")).toBe(false);
+
+      // Switch back to dark mode
+      await mockView.toggleTheme();
+      expect(container.classList.contains("umlcanvas-theme-dark")).toBe(true);
+      expect(container.classList.contains("umlcanvas-theme-light")).toBe(false);
+
+      // Draw tool MUST still be selectable
+      expect(drawBtn.classList.contains("is-hidden")).toBe(false);
+      drawBtn.click();
+      expect(rendererMock.setFreehandMode).toHaveBeenCalledWith(true);
+      expect(drawBtn.classList.contains("is-active")).toBe(true);
+    });
+
+    it("should not hide or disable draw tool when updateSettings is called with partial settings (e.g. { theme: 'light' })", () => {
+      const drawBtn = container.querySelector(".umlcanvas-draw-btn");
+      expect(drawBtn.classList.contains("is-hidden")).toBe(false);
+
+      // Partial settings object without enableFreehand
+      mockView.updateSettings({ theme: "light" });
+
+      expect(rendererMock.setEnableFreehand).toHaveBeenCalledWith(true);
+      expect(drawBtn.classList.contains("is-hidden")).toBe(false);
+
+      // Click to draw works
+      drawBtn.click();
+      expect(rendererMock.setFreehandMode).toHaveBeenCalledWith(true);
+      expect(drawBtn.classList.contains("is-active")).toBe(true);
+    });
+
+    it("should preserve active draw mode when switching theme (does not kick user into auto-shape mode)", async () => {
+      const drawBtn = container.querySelector(".umlcanvas-draw-btn");
+      const autoShapeBtn = container.querySelector(".umlcanvas-autoshape-btn");
+
+      // User selects draw mode in dark theme
+      drawBtn.click();
+      expect(rendererMock.freehandMode).toBe(true);
+      expect(rendererMock.isAutoShapeDetection).toBe(false);
+      expect(drawBtn.classList.contains("is-active")).toBe(true);
+
+      // Switch theme to light while drawing tool is active
+      await mockView.toggleTheme();
+      expect(container.classList.contains("umlcanvas-theme-light")).toBe(true);
+
+      // User must STILL be in draw mode, NOT auto-shape mode
+      expect(rendererMock.freehandMode).toBe(true);
+      expect(rendererMock.isAutoShapeDetection).toBe(false);
+      expect(drawBtn.classList.contains("is-active")).toBe(true);
+      expect(autoShapeBtn.classList.contains("is-active")).toBe(false);
+    });
+
+    it("SvgSceneRenderer should safeguard enableFreehand defaulting when setEnableFreehand is called with undefined", () => {
+      const { SvgSceneRenderer } = require("../src/presentation/renderer/SvgSceneRenderer");
+      const svgContainer = new MockElement("div");
+      const renderer = new SvgSceneRenderer(svgContainer, editor, {
+        enableFreehand: true,
+      });
+
+      expect(renderer.isFreehandEnabled).toBe(true);
+
+      // Call with undefined (simulating partial settings update)
+      renderer.setEnableFreehand(undefined);
+      expect(renderer.isFreehandEnabled).toBe(true);
+
+      // Turning on draw mode must succeed
+      renderer.setAutoShapeDetection(false);
+      renderer.setFreehandMode(true);
+      expect(renderer.freehandMode).toBe(true);
+
+      // Keyboard shortcut 'P' must toggle draw mode
+      const preventDefault = jest.fn();
+      (renderer as any).onKeyDownBound({
+        key: "p",
+        ctrlKey: false,
+        metaKey: false,
+        altKey: false,
+        shiftKey: false,
+        preventDefault,
+      });
+      // Toggle off
+      expect(renderer.freehandMode).toBe(false);
+
+      // Press 'P' again to toggle on
+      (renderer as any).onKeyDownBound({
+        key: "p",
+        ctrlKey: false,
+        metaKey: false,
+        altKey: false,
+        shiftKey: false,
+        preventDefault,
+      });
+      expect(renderer.freehandMode).toBe(true);
+    });
   });
 });

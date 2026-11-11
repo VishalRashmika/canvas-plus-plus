@@ -240,7 +240,7 @@ export class UmlCanvasSettingTab extends PluginSettingTab {
       )
       .addToggle((toggle) => {
         toggle
-          .setValue(this.plugin.settings.enableFreehand)
+          .setValue(this.plugin.settings.enableFreehand ?? true)
           .onChange(async (value) => {
             this.plugin.settings.enableFreehand = value;
             await this.plugin.saveSettings();

@@ -171,7 +171,7 @@ export class Toolbar {
     private readonly onPasteRequested?: () => void,
     private readonly onBrushSettingsChange?: (width: number, strength: number) => void
   ) {
-    this.freehandEnabled = this.renderer.isFreehandEnabled;
+    this.freehandEnabled = this.renderer?.isFreehandEnabled ?? true;
     this.currentBrushWidth = this.renderer.brushWidth ?? 2;
     this.currentBrushStrength = this.renderer.brushStrength ?? 1.0;
 
@@ -1171,7 +1171,8 @@ export class Toolbar {
         this.renderer.setFreehandMode(false);
         this.updateToolMode();
       },
-      "mouse-pointer"
+      "mouse-pointer",
+      "umlcanvas-select-btn"
     );
     modeGroup.appendChild(this.selectBtn);
 
@@ -1192,7 +1193,8 @@ export class Toolbar {
         }
         this.updateToolMode();
       },
-      "hand"
+      "hand",
+      "umlcanvas-grab-btn"
     );
     modeGroup.appendChild(this.grabBtn);
 
@@ -1219,7 +1221,8 @@ export class Toolbar {
         }
         this.updateToolMode();
       },
-      "pencil"
+      "pencil",
+      "umlcanvas-draw-btn"
     );
     this.drawBtn.addEventListener("contextmenu", (e) => {
       e.preventDefault();
@@ -1263,7 +1266,8 @@ export class Toolbar {
         }
         this.updateToolMode();
       },
-      "sparkles"
+      "sparkles",
+      "umlcanvas-autoshape-btn"
     );
     modeGroup.appendChild(this.autoShapeBtn);
 
@@ -1291,7 +1295,8 @@ export class Toolbar {
         }
         this.updateToolMode();
       },
-      "pen-tool"
+      "pen-tool",
+      "umlcanvas-handwrite-btn"
     );
     modeGroup.appendChild(this.handwriteTextBtn);
 
@@ -1879,10 +1884,11 @@ export class Toolbar {
   }
 
   updateToolMode(): void {
-    const isFreehand = this.renderer.freehandMode;
-    const isGrab = Boolean(this.renderer.grabMode);
-    const isHandwrite = Boolean(this.renderer.isHandwritingTextMode);
-    const isAutoShape = Boolean(this.renderer.isAutoShapeDetection);
+    const isFreehand = Boolean(this.renderer?.freehandMode);
+    const isGrab = Boolean(this.renderer?.grabMode);
+    const isHandwrite = Boolean(this.renderer?.isHandwritingTextMode);
+    const isAutoShape = Boolean(this.renderer?.isAutoShapeDetection);
+    const isFreehandEnabled = this.freehandEnabled ?? true;
 
     if (this.selectBtn) {
       this.selectBtn.classList.toggle("is-active", !isFreehand && !isGrab);
@@ -1891,7 +1897,7 @@ export class Toolbar {
       this.grabBtn.classList.toggle("is-active", isGrab);
     }
     if (this.drawBtn) {
-      if (!this.freehandEnabled) {
+      if (!isFreehandEnabled) {
         this.drawBtn.classList.add("is-hidden");
         this.drawBtn.classList.remove("is-active");
       } else {
@@ -1903,7 +1909,7 @@ export class Toolbar {
       }
     }
     if (this.brushBtn) {
-      if (!this.freehandEnabled) {
+      if (!isFreehandEnabled) {
         this.brushBtn.classList.add("is-hidden");
         this.brushBtn.classList.remove("is-active");
       } else {
@@ -1915,7 +1921,7 @@ export class Toolbar {
       }
     }
     if (this.autoShapeBtn) {
-      if (!this.freehandEnabled) {
+      if (!isFreehandEnabled) {
         this.autoShapeBtn.classList.add("is-hidden");
         this.autoShapeBtn.classList.remove("is-active");
       } else {
@@ -1927,7 +1933,7 @@ export class Toolbar {
       }
     }
     if (this.handwriteTextBtn) {
-      if (!this.freehandEnabled) {
+      if (!isFreehandEnabled) {
         this.handwriteTextBtn.classList.add("is-hidden");
         this.handwriteTextBtn.classList.remove("is-active");
       } else {
@@ -1940,8 +1946,8 @@ export class Toolbar {
     }
   }
 
-  setFreehandEnabled(enabled: boolean): void {
-    this.freehandEnabled = enabled;
+  setFreehandEnabled(enabled?: boolean): void {
+    this.freehandEnabled = enabled ?? true;
     this.updateToolMode();
   }
 

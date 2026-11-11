@@ -311,6 +311,12 @@ export class UmlCanvasView extends TextFileView {
         if (mode !== "handwrite") {
           this.flushHandwritingBuffer();
         }
+        if (this.rootEl) {
+          this.rootEl.classList.toggle(
+            "umlcanvas-freehand-mode",
+            mode === "draw" || mode === "handwrite"
+          );
+        }
         if (this.toolbar) {
           this.toolbar.updateToolMode();
         }
@@ -756,31 +762,38 @@ export class UmlCanvasView extends TextFileView {
 
   updateSettings(settings: UmlCanvasSettings): void {
     this.applyTheme();
+    const enableFreehand =
+      settings?.enableFreehand ?? this.plugin?.settings?.enableFreehand ?? true;
+    const showGrid =
+      settings?.showGrid ?? this.plugin?.settings?.showGrid ?? true;
+
     if (this.renderer) {
-      this.renderer.setEnableFreehand(settings.enableFreehand);
-      this.renderer.setAutoShapeDetection(settings.autoShapeDetection ?? true);
-      this.renderer.setGridVisible(settings.showGrid);
-      if (settings.freehandBrushWidth !== undefined) {
+      this.renderer.setEnableFreehand(enableFreehand);
+      if (!this.renderer.freehandMode && settings?.autoShapeDetection !== undefined) {
+        this.renderer.setAutoShapeDetection(settings.autoShapeDetection);
+      }
+      this.renderer.setGridVisible(showGrid);
+      if (settings?.freehandBrushWidth !== undefined) {
         this.renderer.setFreehandBrushWidth(settings.freehandBrushWidth);
       }
-      if (settings.freehandBrushStrength !== undefined) {
+      if (settings?.freehandBrushStrength !== undefined) {
         this.renderer.setFreehandBrushStrength(settings.freehandBrushStrength);
       }
     }
     if (this.editor) {
-      if (settings.freehandBrushWidth !== undefined) {
+      if (settings?.freehandBrushWidth !== undefined) {
         this.editor.freehandStrokeWidth = settings.freehandBrushWidth;
       }
-      if (settings.freehandBrushStrength !== undefined) {
+      if (settings?.freehandBrushStrength !== undefined) {
         this.editor.freehandStrokeStrength = settings.freehandBrushStrength;
       }
     }
     if (this.toolbar) {
-      this.toolbar.setFreehandEnabled(settings.enableFreehand);
-      if (settings.freehandBrushWidth !== undefined) {
+      this.toolbar.setFreehandEnabled(enableFreehand);
+      if (settings?.freehandBrushWidth !== undefined) {
         this.toolbar.setBrushWidth(settings.freehandBrushWidth);
       }
-      if (settings.freehandBrushStrength !== undefined) {
+      if (settings?.freehandBrushStrength !== undefined) {
         this.toolbar.setBrushStrength(settings.freehandBrushStrength);
       }
       this.toolbar.updateToolMode();
@@ -810,6 +823,13 @@ export class UmlCanvasView extends TextFileView {
     } else {
       this.rootEl.classList.remove("umlcanvas-theme-light", "theme-light");
       this.rootEl.classList.add("umlcanvas-theme-dark", "theme-dark");
+    }
+
+    if (this.toolbar) {
+      this.toolbar.updateToolMode();
+    }
+    if (this.renderer) {
+      this.renderer.render();
     }
   }
 

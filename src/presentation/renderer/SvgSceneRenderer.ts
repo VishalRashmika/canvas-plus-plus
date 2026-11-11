@@ -607,15 +607,16 @@ export class SvgSceneRenderer {
     return this.container.clientHeight || 600;
   }
 
-  setEnableFreehand(enabled: boolean): void {
-    this.enableFreehand = enabled;
-    if (!enabled && this.isFreehandMode) {
+  setEnableFreehand(enabled?: boolean): void {
+    const isEnabled = enabled ?? true;
+    this.enableFreehand = isEnabled;
+    if (!isEnabled && this.isFreehandMode) {
       this.setFreehandMode(false);
     }
   }
 
   get isFreehandEnabled(): boolean {
-    return this.enableFreehand;
+    return Boolean(this.enableFreehand ?? true);
   }
 
   get brushWidth(): number {
@@ -639,7 +640,7 @@ export class SvgSceneRenderer {
   }
 
   setFreehandMode(active: boolean): void {
-    if (active && !this.enableFreehand) {
+    if (active && !this.isFreehandEnabled) {
       return;
     }
     if (active && this.isGrabMode) {
@@ -3042,7 +3043,7 @@ export class SvgSceneRenderer {
     if (e.button !== 0) return;
 
     // Freehand / Hand-drawing mode: Start drawing stroke across canvas (F-070, F-071)
-    if (this.isFreehandMode && this.enableFreehand && !this.isSpacePressed) {
+    if (this.isFreehandMode && this.isFreehandEnabled && !this.isSpacePressed) {
       e.preventDefault();
       if (!e.shiftKey && !e.metaKey && !e.ctrlKey && this.editor.hasSelection) {
         this.editor.clearSelection();
@@ -6109,7 +6110,7 @@ export class SvgSceneRenderer {
     }
 
     // Draw tool shortcut: P (toggle Draw mode) or Shift+P (toggle Auto Shape detection)
-    if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "p" && this.enableFreehand) {
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "p" && this.isFreehandEnabled) {
       if (e.shiftKey) {
         e.preventDefault();
         const isAutoShapeActive = this.isFreehandMode && this.autoShapeDetection;
@@ -6135,7 +6136,7 @@ export class SvgSceneRenderer {
     }
 
     // Handwrite Text tool shortcut: W or Shift+W (toggle Handwrite Text mode)
-    if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "w" && this.enableFreehand) {
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "w" && this.isFreehandEnabled) {
       e.preventDefault();
       const isHandwriteActive = this.isFreehandMode && this.handwritingTextMode;
       if (isHandwriteActive) {

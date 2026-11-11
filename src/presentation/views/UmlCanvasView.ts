@@ -17,7 +17,7 @@ import { DiagramEdge } from "../../domain/entities/DiagramEdge";
 import { Group } from "../../domain/entities/Group";
 import { Point } from "../../domain/value-objects/Point";
 import { Size } from "../../domain/value-objects/Rect";
-import { DiagramEditor } from "../../application/use-cases/DiagramEditor";
+import { DiagramEditor, CanvasClipboardData } from "../../application/use-cases/DiagramEditor";
 import { AutosaveCoordinator } from "../../application/use-cases/AutosaveCoordinator";
 import { JsonCanvasSerializer } from "../../infrastructure/persistence/JsonCanvasSerializer";
 import { defaultJsonCanvasImporter } from "../../infrastructure/persistence/JsonCanvasImporter";
@@ -474,32 +474,26 @@ export class UmlCanvasView extends TextFileView {
     );
 
     // Track cursor canvas position for accurate pasting (#5)
-    this.rootEl.addEventListener("mousemove", (e: MouseEvent) => {
-      if (this.renderer) {
-        const pos = this.renderer.lastMouseCanvasPosition;
-        if (pos) {
-          this.lastMouseCanvasPos = pos;
-          return;
-        }
+    const updateCursorPos = (e: MouseEvent) => {
+      const pos = this.renderer?.lastMouseCanvasPosition;
+      if (pos) {
+        this.lastMouseCanvasPos = pos;
+        return;
       }
-      if (this.rootEl) {
-        if (!this.cachedRootElRect) {
-          this.cachedRootElRect = typeof this.rootEl.getBoundingClientRect === "function"
-            ? this.rootEl.getBoundingClientRect()
-            : null;
-        }
-        const rect = this.cachedRootElRect;
-        if (rect) {
-          const clientX = e.clientX - rect.left;
-          const clientY = e.clientY - rect.top;
-          const transform = this.renderer?.currentTransform ?? { panX: 0, panY: 0, zoom: 1 };
-          this.lastMouseCanvasPos = {
-            x: Math.round((clientX - transform.panX) / transform.zoom),
-            y: Math.round((clientY - transform.panY) / transform.zoom),
-          };
-        }
+      if (this.rootEl && typeof this.rootEl.getBoundingClientRect === "function") {
+        const rect = this.rootEl.getBoundingClientRect();
+        const clientX = e.clientX - rect.left;
+        const clientY = e.clientY - rect.top;
+        const transform = this.renderer?.currentTransform ?? { panX: 0, panY: 0, zoom: 1 };
+        this.lastMouseCanvasPos = {
+          x: Math.round((clientX - transform.panX) / transform.zoom),
+          y: Math.round((clientY - transform.panY) / transform.zoom),
+        };
       }
-    });
+    };
+    this.rootEl.addEventListener("mousemove", updateCursorPos);
+    this.rootEl.addEventListener("mousedown", updateCursorPos);
+    this.rootEl.addEventListener("contextmenu", updateCursorPos);
 
     // Deselect currently selected component(s) when clicking empty canvas space (#9)
     this.rootEl.addEventListener("mousedown", (e: MouseEvent) => {
@@ -586,7 +580,7 @@ export class UmlCanvasView extends TextFileView {
         this.editor?.copySelection();
       } else if (mod && e.key.toLowerCase() === "v" && !isInput) {
         e.preventDefault();
-        void this.pasteFromClipboardOrEditor(this.lastMouseCanvasPos ?? undefined);
+        void this.pasteFromClipboardOrEditor(this.getCursorCanvasPosition());
       } else if (mod && e.key.toLowerCase() === "b" && !isInput) {
         e.preventDefault();
         this.editor?.toggleBoldForSelection();
@@ -2296,14 +2290,39 @@ export class UmlCanvasView extends TextFileView {
     }
   }
 
+  public getCursorCanvasPosition(): Point {
+    const rendererPos = this.renderer?.lastMouseCanvasPosition;
+    if (rendererPos) {
+      this.lastMouseCanvasPos = rendererPos;
+      return rendererPos;
+    }
+    if (this.lastMouseCanvasPos) {
+      return { ...this.lastMouseCanvasPos };
+    }
+    const transform = this.renderer?.currentTransform ?? { panX: 0, panY: 0, zoom: 1 };
+    const centerScreen = {
+      x: (this.rootEl?.clientWidth ?? 800) / 2,
+      y: (this.rootEl?.clientHeight ?? 600) / 2,
+    };
+    return {
+      x: Math.round((centerScreen.x - transform.panX) / transform.zoom),
+      y: Math.round((centerScreen.y - transform.panY) / transform.zoom),
+    };
+  }
+
   /**
    * Reads from system clipboard (images, files) or falls back to canvas editor selection paste.
    */
   public async pasteFromClipboardOrEditor(canvasPoint?: Point): Promise<void> {
-    const targetPoint = canvasPoint ?? this.lastMouseCanvasPos ?? undefined;
+    const targetPoint = canvasPoint ?? this.getCursorCanvasPosition();
 
-    // 1. Check system clipboard if navigator.clipboard is available
+    // 1. If internal canvas copy was performed recently, prioritize it over stale system clipboard images
+    const lastCopyTime = DiagramEditor.lastCopyTimestamp;
+    const isInternalCopyRecent = lastCopyTime > 0 && Date.now() - lastCopyTime < 1000 * 60 * 60;
+
+    // Check system clipboard if navigator.clipboard is available (for external images)
     if (
+      (!this.editor?.canPaste || !isInternalCopyRecent) &&
       typeof navigator !== "undefined" &&
       navigator.clipboard &&
       typeof navigator.clipboard.read === "function"
@@ -2325,22 +2344,14 @@ export class UmlCanvasView extends TextFileView {
       }
     }
 
-    // 2. Fallback to diagram selection paste
+    // 2. Diagram selection paste at cursor position
     if (this.editor?.canPaste) {
-      this.editor.paste(targetPoint);
+      this.editor.pasteAt(targetPoint);
     }
   }
 
   public handlePaste(e: ClipboardEvent): void {
-    const transform = this.renderer?.currentTransform ?? { panX: 0, panY: 0, zoom: 1 };
-    const centerScreen = {
-      x: (this.rootEl?.clientWidth ?? 800) / 2,
-      y: (this.rootEl?.clientHeight ?? 600) / 2,
-    };
-    const basePoint = this.lastMouseCanvasPos ?? {
-      x: Math.round((centerScreen.x - transform.panX) / transform.zoom - 110),
-      y: Math.round((centerScreen.y - transform.panY) / transform.zoom - 130),
-    };
+    const basePoint = this.getCursorCanvasPosition();
 
     // 1. Check binary items (blobs from clipboard)
     const imageBlobs: Blob[] = [];
@@ -2436,6 +2447,24 @@ export class UmlCanvasView extends TextFileView {
     // 2. Check text from clipboard for base64 data URL, PDF or image link/path
     const text = e.clipboardData?.getData("text/plain")?.trim();
     if (text) {
+      if (text.startsWith("{") && text.includes('"format":"canvas-plus-plus"')) {
+        try {
+          const parsed = JSON.parse(text) as CanvasClipboardData;
+          if (
+            parsed &&
+            ((parsed.nodes && parsed.nodes.length > 0) ||
+              (parsed.edges && parsed.edges.length > 0) ||
+              (parsed.groups && parsed.groups.length > 0))
+          ) {
+            e.preventDefault();
+            this.editor?.pasteAt(basePoint, parsed);
+            return;
+          }
+        } catch {
+          // not json, continue
+        }
+      }
+
       if (text.startsWith("data:image/")) {
         e.preventDefault();
         const blob = this.canvasAttachmentService.dataUrlToBlob(text);
@@ -2504,7 +2533,7 @@ export class UmlCanvasView extends TextFileView {
     // 3. Fallback: if user copied internal nodes in canvas editor, paste them
     if (this.editor?.canPaste) {
       e.preventDefault();
-      this.editor.paste(basePoint);
+      this.editor.pasteAt(basePoint);
     }
   }
 

@@ -2921,6 +2921,7 @@ export class SvgSceneRenderer {
 
     e.preventDefault();
     const cursor = this.getClientCoords(e);
+    this.lastMouseCanvasPos = screenToCanvas(cursor, this.transform);
     const zoomFactor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
     this.setTransform(zoomAtPoint(cursor, this.transform, zoomFactor));
   }
@@ -3006,6 +3007,7 @@ export class SvgSceneRenderer {
 
     const clientPoint = this.getClientCoords(e);
     const canvasPoint = screenToCanvas(clientPoint, this.transform);
+    this.lastMouseCanvasPos = canvasPoint;
 
     // Pan via middle button or spacebar + left click or grab tool + left click
     if (e.button === 1 || (e.button === 0 && (this.isSpacePressed || this.isGrabMode))) {
@@ -3588,6 +3590,12 @@ export class SvgSceneRenderer {
     return this.lastMouseCanvasPos ? { ...this.lastMouseCanvasPos } : undefined;
   }
 
+  public getViewportCenterCanvasPoint(): Point {
+    const w = this.container.clientWidth || 800;
+    const h = this.container.clientHeight || 600;
+    return screenToCanvas({ x: w / 2, y: h / 2 }, this.transform);
+  }
+
   private handleMouseMove(e: MouseEvent): void {
     const clientPoint = this.getClientCoords(e);
     const canvasPoint = screenToCanvas(clientPoint, this.transform);
@@ -4035,6 +4043,7 @@ export class SvgSceneRenderer {
   private handleMouseUp(e: MouseEvent): void {
     const clientPoint = this.getClientCoords(e);
     const canvasPoint = screenToCanvas(clientPoint, this.transform);
+    this.lastMouseCanvasPos = canvasPoint;
 
     if (this.dragMode.type === "freehand") {
       this.cachedContainerRect = null;
@@ -4446,6 +4455,7 @@ export class SvgSceneRenderer {
     if (this.isGrabMode || this.isFreehandMode) return;
     const clientPoint = this.getClientCoords(e);
     const canvasPoint = screenToCanvas(clientPoint, this.transform);
+    this.lastMouseCanvasPos = canvasPoint;
     const target = e.target as Element;
 
     if (
@@ -4630,6 +4640,7 @@ export class SvgSceneRenderer {
     e.preventDefault();
     const clientPoint = this.getClientCoords(e);
     const canvasPoint = screenToCanvas(clientPoint, this.transform);
+    this.lastMouseCanvasPos = canvasPoint;
 
     const target = e.target as Element;
     const nodeEl = target.closest(".umlcanvas-node");
@@ -5912,6 +5923,8 @@ export class SvgSceneRenderer {
     // Duplicate Selection: Ctrl+D / Cmd+D
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d") {
       e.preventDefault();
+      e.stopPropagation();
+      (e as unknown as { _umlHandled?: boolean })._umlHandled = true;
       this.editor.duplicateSelection();
       return;
     }
@@ -5919,19 +5932,23 @@ export class SvgSceneRenderer {
     // Copy: Ctrl+C / Cmd+C
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
       e.preventDefault();
+      e.stopPropagation();
+      (e as unknown as { _umlHandled?: boolean })._umlHandled = true;
       this.editor.copySelection();
       return;
     }
 
     // Paste: Ctrl+V / Cmd+V
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
+      e.preventDefault();
+      e.stopPropagation();
+      (e as unknown as { _umlHandled?: boolean })._umlHandled = true;
+      const targetPoint = this.lastMouseCanvasPos ?? this.getViewportCenterCanvasPoint();
       if (this.onPasteRequested) {
-        e.preventDefault();
-        this.onPasteRequested(this.lastMouseCanvasPos ?? undefined);
+        this.onPasteRequested(targetPoint);
         return;
       }
-      e.preventDefault();
-      this.editor.paste(this.lastMouseCanvasPos ?? undefined);
+      this.editor.pasteAt(targetPoint);
       return;
     }
 

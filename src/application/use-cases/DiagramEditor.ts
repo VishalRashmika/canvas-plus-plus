@@ -11,7 +11,7 @@ import { Rect, Size, rect, intersects, contains, center, right, bottom } from ".
 import { Command } from "../commands/Command";
 import { CommandStack } from "../commands/CommandStack";
 import { Layer, createLayer } from "../../domain/entities/Layer";
-import { Group } from "../../domain/entities/Group";
+import { Group, createGroup } from "../../domain/entities/Group";
 import { Port } from "../../domain/entities/Port";
 import { Compartment } from "../../domain/entities/Compartment";
 import { Label } from "../../domain/entities/Label";
@@ -23,6 +23,7 @@ import {
   AddEdgeCommand,
   DeleteEdgesCommand,
   UpdateNodeLabelCommand,
+  AddGroupCommand,
   GroupSelectionCommand,
   UngroupSelectionCommand,
   RenameGroupCommand,
@@ -134,6 +135,7 @@ export interface CanvasClipboardData {
   diagramType?: string;
   nodes: DiagramNode[];
   edges: DiagramEdge[];
+  groups?: Group[];
 }
 
 export type AlignmentType =
@@ -2966,19 +2968,34 @@ export class DiagramEditor {
   // --- Copy / Paste (F-012) ---
 
   private static globalClipboard: CanvasClipboardData | null = null;
+  public static lastCopyTimestamp = 0;
 
   get canPaste(): boolean {
     const data = DiagramEditor.globalClipboard;
     return Boolean(
       data &&
         ((data.nodes && data.nodes.length > 0) ||
-          (data.edges && data.edges.length > 0))
+          (data.edges && data.edges.length > 0) ||
+          (data.groups && data.groups.length > 0))
     );
   }
 
   copySelection(): CanvasClipboardData {
-    const selectedNodes = this.diagram.nodes.filter((n) =>
-      this.selectedNodeIdSet.has(n.id)
+    const groupMemberNodeIds = new Set<string>();
+    const selectedGroups: Group[] = [];
+    if (this.diagram.groups) {
+      for (const group of this.diagram.groups) {
+        if (this.selectedGroupIdSet.has(group.id)) {
+          selectedGroups.push(JSON.parse(JSON.stringify(group)) as Group);
+          for (const nid of group.nodeIds || []) {
+            groupMemberNodeIds.add(nid);
+          }
+        }
+      }
+    }
+
+    const selectedNodes = this.diagram.nodes.filter(
+      (n) => this.selectedNodeIdSet.has(n.id) || groupMemberNodeIds.has(n.id)
     );
     const selectedNodeIds = new Set(selectedNodes.map((n) => n.id));
 
@@ -2994,30 +3011,105 @@ export class DiagramEditor {
       diagramType: this.diagram.diagramType,
       nodes: JSON.parse(JSON.stringify(selectedNodes)) as DiagramNode[],
       edges: JSON.parse(JSON.stringify(selectedEdges)) as DiagramEdge[],
+      groups: selectedGroups.length > 0 ? selectedGroups : undefined,
     };
 
     DiagramEditor.globalClipboard = payload;
+    DiagramEditor.lastCopyTimestamp = Date.now();
+
+    if (
+      typeof navigator !== "undefined" &&
+      navigator.clipboard &&
+      typeof navigator.clipboard.writeText === "function"
+    ) {
+      try {
+        void navigator.clipboard.writeText(JSON.stringify(payload));
+      } catch {
+        // Ignore clipboard write failures (e.g. headless or unfocused context)
+      }
+    }
+
     return payload;
   }
 
-  paste(
-    offset: Point = { x: 20, y: 20 },
+  pasteAt(
+    position: Point,
     sourceData?: CanvasClipboardData
-  ): { nodes: DiagramNode[]; edges: DiagramEdge[] } {
+  ): { nodes: DiagramNode[]; edges: DiagramEdge[]; groups: Group[] } {
+    return this.paste(position, sourceData, { isPosition: true });
+  }
+
+  paste(
+    targetOrOffset: Point = { x: 20, y: 20 },
+    sourceData?: CanvasClipboardData,
+    options?: { isPosition?: boolean }
+  ): { nodes: DiagramNode[]; edges: DiagramEdge[]; groups: Group[] } {
     const data = sourceData ?? DiagramEditor.globalClipboard;
     if (
       !data ||
       ((!data.nodes || data.nodes.length === 0) &&
-        (!data.edges || data.edges.length === 0))
+        (!data.edges || data.edges.length === 0) &&
+        (!data.groups || data.groups.length === 0))
     ) {
-      return { nodes: [], edges: [] };
+      return { nodes: [], edges: [], groups: [] };
+    }
+
+    let offset: Point = { x: targetOrOffset.x, y: targetOrOffset.y };
+
+    if (options?.isPosition) {
+      const allX: number[] = [];
+      const allY: number[] = [];
+
+      for (const node of data.nodes || []) {
+        allX.push(node.position.x);
+        allY.push(node.position.y);
+      }
+
+      for (const group of data.groups || []) {
+        if (group.position) {
+          allX.push(group.position.x);
+          allY.push(group.position.y);
+        }
+      }
+
+      if (allX.length > 0 && allY.length > 0) {
+        const minX = Math.min(...allX);
+        const minY = Math.min(...allY);
+        let dx = targetOrOffset.x - minX;
+        let dy = targetOrOffset.y - minY;
+
+        // If target coordinate matches the copied selection origin exactly,
+        // offset slightly so pasted elements do not completely overlap
+        if (dx === 0 && dy === 0) {
+          dx = 20;
+          dy = 20;
+        }
+
+        offset = { x: dx, y: dy };
+      } else if (data.edges && data.edges.length > 0) {
+        const waypoints = data.edges.flatMap((e) => e.waypoints || []);
+        if (waypoints.length > 0) {
+          const minX = Math.min(...waypoints.map((p) => p.x));
+          const minY = Math.min(...waypoints.map((p) => p.y));
+          let dx = targetOrOffset.x - minX;
+          let dy = targetOrOffset.y - minY;
+          if (dx === 0 && dy === 0) {
+            dx = 20;
+            dy = 20;
+          }
+          offset = { x: dx, y: dy };
+        } else {
+          offset = { x: 20, y: 20 };
+        }
+      }
     }
 
     const nodeIdMap = new Map<string, string>();
     const portIdMap = new Map<string, string>();
     const newNodes: DiagramNode[] = [];
     const newEdges: DiagramEdge[] = [];
-    const commands: (AddNodeCommand | AddEdgeCommand)[] = [];
+    const newGroups: Group[] = [];
+    const commands: (AddNodeCommand | AddEdgeCommand | AddGroupCommand)[] = [];
 
     // Remap nodes
     for (const node of data.nodes || []) {
@@ -3064,6 +3156,34 @@ export class DiagramEditor {
 
       newNodes.push(clonedNode);
       commands.push(new AddNodeCommand(this.diagram, clonedNode));
+    }
+
+    // Remap groups
+    for (const group of data.groups || []) {
+      const newGroupId = `group-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      const newNodeIds = (group.nodeIds || [])
+        .map((id) => nodeIdMap.get(id))
+        .filter((id): id is string => typeof id === "string");
+
+      const clonedGroup = createGroup({
+        id: newGroupId,
+        name: group.name ? `${group.name} (Copy)` : "Group",
+        nodeIds: newNodeIds,
+        collapsed: group.collapsed,
+        color: group.color,
+        position: group.position
+          ? { x: group.position.x + offset.x, y: group.position.y + offset.y }
+          : undefined,
+        size: group.size ? { ...group.size } : undefined,
+        locked: false,
+        fontSize: group.fontSize,
+        bold: group.bold,
+        italic: group.italic,
+        fontFamily: group.fontFamily,
+      });
+
+      newGroups.push(clonedGroup);
+      commands.push(new AddGroupCommand(this.diagram, clonedGroup));
     }
 
     // Remap edges connecting copied nodes, or duplicate selected edges connecting existing nodes
@@ -3128,25 +3248,29 @@ export class DiagramEditor {
 
       this.selectedNodeIdSet.clear();
       this.selectedEdgeIdSet.clear();
+      this.selectedGroupIdSet.clear();
       for (const n of newNodes) this.selectedNodeIdSet.add(n.id);
       for (const e of newEdges) this.selectedEdgeIdSet.add(e.id);
+      for (const g of newGroups) this.selectedGroupIdSet.add(g.id);
       this.notify();
     }
 
-    return { nodes: newNodes, edges: newEdges };
+    return { nodes: newNodes, edges: newEdges, groups: newGroups };
   }
 
   duplicateSelection(
     offset: Point = { x: 30, y: 30 }
-  ): { nodes: DiagramNode[]; edges: DiagramEdge[] } {
+  ): { nodes: DiagramNode[]; edges: DiagramEdge[]; groups: Group[] } {
     const clipboardData = this.copySelection();
     if (
       !clipboardData ||
-      (clipboardData.nodes.length === 0 && clipboardData.edges.length === 0)
+      ((!clipboardData.nodes || clipboardData.nodes.length === 0) &&
+        (!clipboardData.edges || clipboardData.edges.length === 0) &&
+        (!clipboardData.groups || clipboardData.groups.length === 0))
     ) {
-      return { nodes: [], edges: [] };
+      return { nodes: [], edges: [], groups: [] };
     }
-    return this.paste(offset, clipboardData);
+    return this.paste(offset, clipboardData, { isPosition: false });
   }
 
   alignNodes(type: AlignmentType): boolean {

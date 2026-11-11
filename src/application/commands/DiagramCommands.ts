@@ -670,6 +670,26 @@ export class GroupSelectionCommand implements Command {
   }
 }
 
+export class AddGroupCommand implements Command {
+  readonly description = "Add group";
+
+  constructor(
+    private readonly diagram: Diagram,
+    private readonly group: Group
+  ) {}
+
+  execute(): void {
+    this.diagram.groups.push(this.group);
+  }
+
+  undo(): void {
+    const idx = this.diagram.groups.findIndex((g) => g.id === this.group.id);
+    if (idx !== -1) {
+      this.diagram.groups.splice(idx, 1);
+    }
+  }
+}
+
 export class UngroupSelectionCommand implements Command {
   readonly description = "Ungroup";
   private removedGroups: Group[] = [];

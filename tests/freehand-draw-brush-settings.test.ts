@@ -539,29 +539,42 @@ describe("Freehand Draw Tool Brush Settings (Width & Strength)", () => {
       toolbar.destroy();
     });
 
-    it("should provide Brush Settings button in the bottom floating toolbar", () => {
+    it("should not provide Brush Settings button in the bottom floating toolbar", () => {
       const bottomToolbar = container.querySelector(".umlcanvas-floating-bottom-toolbar");
       expect(bottomToolbar).not.toBeNull();
 
       const buttons = bottomToolbar?.querySelectorAll("button") || [];
       const brushBtn = buttons.find((b) => b.title.includes("Brush Settings"));
-      expect(brushBtn).toBeDefined();
-      expect(brushBtn?.classList.contains("umlcanvas-brush-btn")).toBe(true);
+      expect(brushBtn).toBeUndefined();
     });
 
-    it("should open and close the Brush Settings popover on button click", () => {
+    it("should provide Brush Settings button in the top toolbar only when Draw tool is chosen", () => {
       const bottomToolbar = container.querySelector(".umlcanvas-floating-bottom-toolbar");
-      const buttons = bottomToolbar?.querySelectorAll("button") || [];
-      const brushBtn = buttons.find((b) => b.title.includes("Brush Settings"));
+      const topToolbar = container.querySelector(".umlcanvas-main-toolbar");
+      expect(bottomToolbar).not.toBeNull();
+      expect(topToolbar).not.toBeNull();
 
-      expect(container.querySelector(".umlcanvas-brush-popover")).toBeNull();
+      const bottomButtons = bottomToolbar?.querySelectorAll("button") || [];
+      const topButtons = topToolbar?.querySelectorAll("button") || [];
+      const brushBtn = topButtons.find((b) => b.title.includes("Brush Settings"));
+      expect(brushBtn).toBeDefined();
+      expect(brushBtn?.classList.contains("umlcanvas-brush-btn")).toBe(true);
+
+      // Initially hidden when draw tool is not chosen
+      expect(brushBtn?.classList.contains("is-hidden")).toBe(true);
+
+      // Choose Draw tool
+      const drawBtn = bottomButtons.find((b) => b.title.includes("Draw"));
+      expect(drawBtn).toBeDefined();
+      drawBtn?.click();
+
+      // Now Brush Settings button is visible in the top bar
+      expect(brushBtn?.classList.contains("is-hidden")).toBe(false);
 
       // Open popover
       brushBtn?.click();
       const popover = container.querySelector(".umlcanvas-brush-popover");
       expect(popover).not.toBeNull();
-
-      // Popover should contain sections for width and strength
       const text = popover?.textContent || "";
       expect(text).toContain("Brush Settings");
       expect(text).toContain("Brush Width");
@@ -570,6 +583,32 @@ describe("Freehand Draw Tool Brush Settings (Width & Strength)", () => {
       // Click again toggles closed
       brushBtn?.click();
       expect(container.querySelector(".umlcanvas-brush-popover")).toBeNull();
+
+      // Deselect Draw tool
+      drawBtn?.click();
+      expect(brushBtn?.classList.contains("is-hidden")).toBe(true);
+    });
+
+    it("should close Brush Settings popover when Draw tool is deactivated", () => {
+      const bottomToolbar = container.querySelector(".umlcanvas-floating-bottom-toolbar");
+      const topToolbar = container.querySelector(".umlcanvas-main-toolbar");
+      const bottomButtons = bottomToolbar?.querySelectorAll("button") || [];
+      const topButtons = topToolbar?.querySelectorAll("button") || [];
+      const drawBtn = bottomButtons.find((b) => b.title.includes("Draw"));
+      const brushBtn = topButtons.find((b) => b.title.includes("Brush Settings"));
+
+      // Activate Draw tool
+      drawBtn?.click();
+      expect(brushBtn?.classList.contains("is-hidden")).toBe(false);
+
+      // Open popover
+      brushBtn?.click();
+      expect(container.querySelector(".umlcanvas-brush-popover")).not.toBeNull();
+
+      // Deactivate Draw tool (e.g. toggle Draw off)
+      drawBtn?.click();
+      expect(container.querySelector(".umlcanvas-brush-popover")).toBeNull();
+      expect(brushBtn?.classList.contains("is-hidden")).toBe(true);
     });
 
     it("should adjust brush width via quick presets in the popover", () => {

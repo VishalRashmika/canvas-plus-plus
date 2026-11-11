@@ -142,6 +142,7 @@ export class Toolbar {
   private contextFontFamilyBtn!: HTMLButtonElement;
 
   // Brush Settings Popover & Controls
+  private brushGroup!: HTMLElement;
   private brushBtn!: HTMLButtonElement;
   private contextBrushBtn!: HTMLButtonElement;
   private brushPopoverEl: HTMLElement | null = null;
@@ -228,13 +229,24 @@ export class Toolbar {
     offsetY = 6,
     defaultWidth = 240
   ): void {
-    const btnRect = anchorEl ? anchorEl.getBoundingClientRect() : { left: 10, bottom: 10 };
+    const btnRect = anchorEl ? anchorEl.getBoundingClientRect() : { left: 10, top: 10, right: 10, bottom: 10 };
     const containerRect = this.container.getBoundingClientRect();
     const popoverWidth = popover.offsetWidth || defaultWidth;
     const maxLeft = Math.max(10, containerRect.width - popoverWidth - 10);
     const left = Math.min(Math.max(10, btnRect.left - containerRect.left), maxLeft);
-    const top = btnRect.bottom - containerRect.top + offsetY;
-    popover.setCssStyles({ left: `${left}px`, top: `${top}px` });
+    const isBottomToolbar =
+      anchorEl &&
+      this.bottomToolbarEl &&
+      typeof this.bottomToolbarEl.contains === "function" &&
+      this.bottomToolbarEl.contains(anchorEl);
+
+    if (isBottomToolbar) {
+      const bottom = containerRect.bottom - btnRect.top + offsetY;
+      popover.setCssStyles({ left: `${left}px`, bottom: `${bottom}px` });
+    } else {
+      const top = btnRect.bottom - containerRect.top + offsetY;
+      popover.setCssStyles({ left: `${left}px`, top: `${top}px` });
+    }
   }
 
   private createButton(
@@ -777,6 +789,24 @@ export class Toolbar {
     this.typographyGroup.appendChild(this.fontFamilyBtn);
 
     // ----------------------------------------
+    // Group 4b: Brush Settings (visible only when Draw tool is chosen)
+    // ----------------------------------------
+    this.brushGroup = this.createGroup(
+      this.mainToolbarEl,
+      "umlcanvas-brush-group is-hidden"
+    );
+    this.brushBtn = this.createButton(
+      "Brush Settings (Width & Strength)",
+      "Brush",
+      () => {
+        this.toggleBrushMenu(this.brushBtn);
+      },
+      "sliders-horizontal",
+      "umlcanvas-brush-btn is-hidden"
+    );
+    this.brushGroup.appendChild(this.brushBtn);
+
+    // ----------------------------------------
     // Group 5: Context-Sensitive Selection Inspector
     // (Only appears when a component is selected)
     // ----------------------------------------
@@ -1227,21 +1257,24 @@ export class Toolbar {
     this.drawBtn.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       e.stopPropagation();
+      const isDrawActive =
+        this.renderer.freehandMode &&
+        !this.renderer.isAutoShapeDetection &&
+        !this.renderer.isHandwritingTextMode;
+      if (!isDrawActive) {
+        if (typeof this.renderer.setGrabMode === "function") {
+          this.renderer.setGrabMode(false);
+        }
+        if (typeof this.renderer.setHandwritingTextMode === "function") {
+          this.renderer.setHandwritingTextMode(false);
+        }
+        this.renderer.setAutoShapeDetection(false);
+        this.renderer.setFreehandMode(true);
+        this.updateToolMode();
+      }
       this.toggleBrushMenu(this.brushBtn || this.drawBtn);
     });
     modeGroup.appendChild(this.drawBtn);
-
-    // Brush Settings Tool (Width & Strength)
-    this.brushBtn = this.createButton(
-      "Brush Settings (Width & Strength)",
-      "",
-      () => {
-        this.toggleBrushMenu(this.brushBtn);
-      },
-      "sliders-horizontal",
-      "umlcanvas-brush-btn"
-    );
-    modeGroup.appendChild(this.brushBtn);
 
     // Auto Shape Detection (Shift+P)
     this.autoShapeBtn = this.createButton(
@@ -1896,22 +1929,27 @@ export class Toolbar {
     if (this.grabBtn) {
       this.grabBtn.classList.toggle("is-active", isGrab);
     }
+    const isDrawActive = isFreehand && !isAutoShape && !isHandwrite;
     if (this.drawBtn) {
       if (!isFreehandEnabled) {
         this.drawBtn.classList.add("is-hidden");
         this.drawBtn.classList.remove("is-active");
       } else {
         this.drawBtn.classList.remove("is-hidden");
-        this.drawBtn.classList.toggle(
-          "is-active",
-          isFreehand && !isAutoShape && !isHandwrite
-        );
+        this.drawBtn.classList.toggle("is-active", isDrawActive);
       }
     }
+    const isDrawToolActive = isFreehandEnabled && isDrawActive;
+    if (this.brushGroup) {
+      this.brushGroup.classList.toggle("is-hidden", !isDrawToolActive);
+    }
     if (this.brushBtn) {
-      if (!isFreehandEnabled) {
+      if (!isDrawToolActive) {
         this.brushBtn.classList.add("is-hidden");
         this.brushBtn.classList.remove("is-active");
+        if (this.brushPopoverEl && !this.contextBrushBtn?.classList.contains("is-active")) {
+          this.closeBrushMenu();
+        }
       } else {
         this.brushBtn.classList.remove("is-hidden");
         this.brushBtn.classList.toggle(

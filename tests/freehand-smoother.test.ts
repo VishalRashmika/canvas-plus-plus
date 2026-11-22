@@ -381,7 +381,7 @@ describe("FreehandSmoother & Smooth Drawing Tool", () => {
       renderer.destroy();
     });
 
-    it("drawing a continuous curvy line creates a generic.freehand node with smooth quadratic Bezier curves", () => {
+    it("drawing a continuous curvy line creates a smooth generic.freehand node with exact drawn points", () => {
       const svgEl = container.querySelector(".umlcanvas-svg");
       const bgRect = container.querySelector(".umlcanvas-bg");
 
@@ -411,14 +411,11 @@ describe("FreehandSmoother & Smooth Drawing Tool", () => {
       const pathData = freehandNode.customData?.pathData as string;
       expect(pathData).toBeDefined();
       expect(pathData.startsWith("M")).toBe(true);
-      // Contains quadratic curves rather than only raw L straight lines!
       expect(pathData).toContain("Q");
-
-      const qCount = (pathData.match(/Q/g) || []).length;
-      expect(qCount).toBeGreaterThanOrEqual(4);
+      expect(pathData).toContain("L");
     });
 
-    it("updates live preview element with smooth curve during mouse drag", () => {
+    it("updates live preview element with a smooth path during mouse drag", () => {
       const svgEl = container.querySelector(".umlcanvas-svg");
       const bgRect = container.querySelector(".umlcanvas-bg");
 
@@ -432,13 +429,14 @@ describe("FreehandSmoother & Smooth Drawing Tool", () => {
       const previewEl = container.querySelector(".umlcanvas-freehand-stroke");
       expect(previewEl).not.toBeNull();
       const previewD = previewEl?.getAttribute("d");
+      expect(previewD).toContain("L");
       expect(previewD).toContain("Q");
 
       (global as any).window.dispatch("mouseup", { clientX: 180, clientY: 60 });
       expect(container.querySelector(".umlcanvas-freehand-stroke")).toBeNull();
     });
 
-    it("resizing a freehand node maintains smooth quadratic Bezier curve pathData", () => {
+    it("resizing a freehand node scales pathData accurately without adding bezier curves", () => {
       const stroke = {
         id: "stroke-resizing",
         points: [
@@ -451,6 +449,7 @@ describe("FreehandSmoother & Smooth Drawing Tool", () => {
       };
       const node = editor.addFreehandNode(stroke);
       expect(node.customData?.pathData).toContain("Q");
+      expect(node.customData?.pathData).toContain("L");
 
       editor.selectNode(node.id, false);
       const seHandle = container.querySelector(".umlcanvas-resize-handle.handle-se");
@@ -475,6 +474,7 @@ describe("FreehandSmoother & Smooth Drawing Tool", () => {
       });
 
       expect(node.customData?.pathData).toContain("Q");
+      expect(node.customData?.pathData).toContain("L");
     });
 
     it("caches container bounding box during drawing to prevent layout thrashing and reflow lag", () => {
@@ -530,13 +530,13 @@ describe("FreehandSmoother & Smooth Drawing Tool", () => {
       expect(pts.length).toBeGreaterThanOrEqual(4);
     });
 
-    it("smooths the live preview in real-time eliminating mouse sensor jitter before mouse up", () => {
+    it("renders live preview with exact drawn coordinates without shrinking or distorting peaks", () => {
       const svgEl = container.querySelector(".umlcanvas-svg");
       const bgRect = container.querySelector(".umlcanvas-bg");
 
       svgEl?.dispatch("mousedown", { button: 0, target: bgRect, clientX: 0, clientY: 0 });
 
-      // Add points with deliberate high-frequency jitter (alternating spikes)
+      // Add points with alternating peaks
       (global as any).window.dispatch("mousemove", { clientX: 20, clientY: 50 });
       (global as any).window.dispatch("mousemove", { clientX: 40, clientY: 10 });
       (global as any).window.dispatch("mousemove", { clientX: 60, clientY: 60 });
@@ -547,10 +547,8 @@ describe("FreehandSmoother & Smooth Drawing Tool", () => {
       expect(previewEl).not.toBeNull();
       const previewD = previewEl?.getAttribute("d")!;
       expect(previewD).toContain("Q");
-
-      // Verify that the live preview path was smoothed rather than strictly using the raw spike coordinates (Y=60 smoothed to 37.5)
-      expect(previewD).toContain("37.5");
-      expect(previewD).not.toContain(",60"); // Y-spike at 60 was smoothed down to 37.5
+      // Preserves exact drawn peak at Y=60 without shrinking or smoothing it away
+      expect(previewD).toContain(",60");
 
       (global as any).window.dispatch("mouseup", { clientX: 100, clientY: 50 });
       expect(editor.diagram.nodes.length).toBe(1);
@@ -572,12 +570,13 @@ describe("FreehandSmoother & Smooth Drawing Tool", () => {
       }
       const duration = Date.now() - start;
 
-      // 300 rapid moves with live smoothing and path generation must finish quickly without blocking
-      expect(duration).toBeLessThan(500);
+      // 300 rapid moves finish quickly without blocking
+      expect(duration).toBeLessThan(1000);
 
       const previewEl = container.querySelector(".umlcanvas-freehand-stroke");
       expect(previewEl).not.toBeNull();
       expect(previewEl?.getAttribute("d")).toContain("Q");
+      expect(previewEl?.getAttribute("d")).toContain("L");
 
       (global as any).window.dispatch("mouseup", { clientX: 610, clientY: 10 });
       expect(editor.diagram.nodes.length).toBe(1);

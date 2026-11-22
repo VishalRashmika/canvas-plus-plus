@@ -1943,7 +1943,7 @@ body .umlcanvas-moving * {
   pointer-events: none;
 }
 
-/* Disable pointer-events inside the iframe and foreignObject while panning, moving, resizing, or selecting to avoid event swallowing */
+/* Disable pointer-events inside the iframe and foreignObject while panning, moving, resizing, selecting, connecting, drawing, scrolling, or dragging to avoid event swallowing and lag */
 .umlcanvas-moving .umlcanvas-pdf-frame,
 .umlcanvas-panning .umlcanvas-pdf-frame,
 .umlcanvas-resizing .umlcanvas-pdf-frame,
@@ -1953,6 +1953,8 @@ body .umlcanvas-moving * {
 .umlcanvas-freehand-mode .umlcanvas-pdf-frame,
 .umlcanvas-grab-mode .umlcanvas-pdf-frame,
 .umlcanvas-space-pressed .umlcanvas-pdf-frame,
+.umlcanvas-scrolling .umlcanvas-pdf-frame,
+.umlcanvas-dragging-active .umlcanvas-pdf-frame,
 .umlcanvas-moving .umlcanvas-pdf-foreign,
 .umlcanvas-panning .umlcanvas-pdf-foreign,
 .umlcanvas-resizing .umlcanvas-pdf-foreign,
@@ -1961,7 +1963,13 @@ body .umlcanvas-moving * {
 .umlcanvas-drawing .umlcanvas-pdf-foreign,
 .umlcanvas-freehand-mode .umlcanvas-pdf-foreign,
 .umlcanvas-grab-mode .umlcanvas-pdf-foreign,
-.umlcanvas-space-pressed .umlcanvas-pdf-foreign {
+.umlcanvas-space-pressed .umlcanvas-pdf-foreign,
+.umlcanvas-scrolling .umlcanvas-pdf-foreign,
+.umlcanvas-dragging-active .umlcanvas-pdf-foreign,
+.umlcanvas-scrolling iframe,
+.umlcanvas-dragging-active iframe,
+.umlcanvas-scrolling foreignObject,
+.umlcanvas-dragging-active foreignObject {
   pointer-events: none !important;
 }
 

@@ -37,7 +37,10 @@ export interface ArrowAttachmentContext {
   startPoint: Point;
 }
 import { Stroke, StrokePoint } from "../../domain/services/ShapeRecognizer";
-import { pointsToSmoothSvgPath, smoothPoints } from "../../domain/services/FreehandSmoother";
+import {
+  pointsToSmoothSvgPath,
+  roundCoord,
+} from "../../domain/services/FreehandSmoother";
 import { resolveCanvasColor, isCanvasColorPreset } from "../../domain/value-objects/CanvasColor";
 import { defaultCustomChipRegistry } from "../../domain/services/CustomChipRegistry";
 import {
@@ -284,6 +287,10 @@ export class SvgSceneRenderer {
   private groupSignatures = new Map<string, string>();
   private lastVirtualizationCenter: Point | null = null;
   private onWindowResizeBound: () => void;
+  private onWindowBlurBound: () => void;
+  private onVisibilityChangeBound: () => void;
+  private onPointerCancelBound: () => void;
+  private scrollingTimeout: any = null;
 
   // Bound event listeners for cleanup
   private onWheelBound: (e: WheelEvent) => void;
@@ -419,6 +426,9 @@ export class SvgSceneRenderer {
     this.onKeyUpBound = this.handleKeyUp.bind(this);
     this.onDblClickBound = this.handleDblClick.bind(this);
     this.onContextMenuBound = this.handleContextMenu.bind(this);
+    this.onWindowBlurBound = this.handleWindowBlur.bind(this);
+    this.onVisibilityChangeBound = this.handleVisibilityChange.bind(this);
+    this.onPointerCancelBound = this.handlePointerCancel.bind(this);
     this.onDragOverBound = (e: DragEvent) => {
       e.preventDefault();
       if (e.dataTransfer) {
@@ -493,6 +503,14 @@ export class SvgSceneRenderer {
     this.svgEl.addEventListener("dragover", this.onDragOverBound);
     this.svgEl.addEventListener("drop", this.onDropBound);
     this.svgEl.addEventListener("mouseleave", this.onMouseLeaveBound);
+
+    if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+      window.addEventListener("blur", this.onWindowBlurBound);
+      window.addEventListener("pointercancel", this.onPointerCancelBound);
+    }
+    if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+      document.addEventListener("visibilitychange", this.onVisibilityChangeBound);
+    }
 
     this.onWindowResizeBound = () => {
       this.cachedContainerRect = null;
@@ -650,7 +668,67 @@ export class SvgSceneRenderer {
     }
   }
 
+  public cancelOrResetActiveDrag(): void {
+    if (this.dragMode.type === "freehand") {
+      this.cachedContainerRect = null;
+      if (this.freehandPathEl) {
+        this.freehandPathEl.remove();
+        this.freehandPathEl = null;
+      }
+      this.activeStroke = null;
+    }
+    this.dragMode = { type: "none" };
+    if (this.container && typeof this.container.classList?.remove === "function") {
+      this.container.classList.remove(
+        "umlcanvas-panning",
+        "umlcanvas-moving",
+        "umlcanvas-resizing",
+        "umlcanvas-selecting",
+        "umlcanvas-connecting",
+        "umlcanvas-drawing",
+        "umlcanvas-dragging-active"
+      );
+    }
+    this.cachedContainerRect = null;
+    this.renderInteractions();
+  }
+
+  private handleWindowBlur(): void {
+    this.isSpacePressed = false;
+    if (this.container && typeof this.container.classList?.remove === "function") {
+      this.container.classList.remove("umlcanvas-space-pressed");
+    }
+    if (this.dragMode.type !== "none") {
+      this.cancelOrResetActiveDrag();
+    }
+  }
+
+  private handleVisibilityChange(): void {
+    if (typeof document !== "undefined" && document.hidden) {
+      this.isSpacePressed = false;
+      if (this.container && typeof this.container.classList?.remove === "function") {
+        this.container.classList.remove("umlcanvas-space-pressed");
+      }
+      if (this.dragMode.type !== "none") {
+        this.cancelOrResetActiveDrag();
+      }
+    }
+  }
+
+  private handlePointerCancel(): void {
+    if (this.dragMode.type !== "none") {
+      this.cancelOrResetActiveDrag();
+    }
+  }
+
   setFreehandMode(active: boolean): void {
+    if (this.dragMode.type !== "none") {
+      this.cancelOrResetActiveDrag();
+    }
+    this.isSpacePressed = false;
+    if (this.container && typeof this.container.classList?.remove === "function") {
+      this.container.classList.remove("umlcanvas-space-pressed");
+    }
     if (active && !this.isFreehandEnabled) {
       return;
     }
@@ -684,6 +762,13 @@ export class SvgSceneRenderer {
   }
 
   setGrabMode(active: boolean): void {
+    if (this.dragMode.type !== "none") {
+      this.cancelOrResetActiveDrag();
+    }
+    this.isSpacePressed = false;
+    if (this.container && typeof this.container.classList?.remove === "function") {
+      this.container.classList.remove("umlcanvas-space-pressed");
+    }
     if (active && this.isFreehandMode) {
       this.isFreehandMode = false;
       this.container.classList.remove("umlcanvas-freehand-mode");
@@ -1832,14 +1917,18 @@ export class SvgSceneRenderer {
           existingEl.setAttribute("transform", posStr);
         }
         const isLocked = this.editor.isNodeLocked(node.id);
+        const isSelected = this.editor.isNodeSelected(node.id);
         if (typeof existingEl.classList?.toggle === "function") {
           existingEl.classList.toggle("umlcanvas-node-locked", isLocked);
           existingEl.classList.toggle("umlcanvas-node-editing", this.editingNodeId === node.id);
+          existingEl.classList.toggle("umlcanvas-node-selected", isSelected);
         } else if (existingEl.classList) {
           if (isLocked) existingEl.classList.add("umlcanvas-node-locked");
           else existingEl.classList.remove("umlcanvas-node-locked");
           if (this.editingNodeId === node.id) existingEl.classList.add("umlcanvas-node-editing");
           else existingEl.classList.remove("umlcanvas-node-editing");
+          if (isSelected) existingEl.classList.add("umlcanvas-node-selected");
+          else existingEl.classList.remove("umlcanvas-node-selected");
         }
         continue;
       }
@@ -1941,6 +2030,9 @@ export class SvgSceneRenderer {
 
     const isSelected = this.editor.isNodeSelected(node.id);
     const isLocked = this.editor.isNodeLocked(node.id);
+    if (isSelected) {
+      nodeGroup.classList.add("umlcanvas-node-selected");
+    }
     if (isLocked) {
       nodeGroup.classList.add("umlcanvas-node-locked");
     }
@@ -2095,7 +2187,7 @@ export class SvgSceneRenderer {
       `translate(${node.position.x}, ${node.position.y})`
     );
 
-    // 2. Locked & Editing classes
+    // 2. Locked, Editing & Selected classes
     if (isLocked) {
       nodeGroup.classList.add("umlcanvas-node-locked");
     } else {
@@ -2105,6 +2197,11 @@ export class SvgSceneRenderer {
       nodeGroup.classList.add("umlcanvas-node-editing");
     } else {
       nodeGroup.classList.remove("umlcanvas-node-editing");
+    }
+    if (isSelected) {
+      nodeGroup.classList.add("umlcanvas-node-selected");
+    } else {
+      nodeGroup.classList.remove("umlcanvas-node-selected");
     }
 
     // 3. Styling / color
@@ -2920,6 +3017,18 @@ export class SvgSceneRenderer {
     }
 
     e.preventDefault();
+    if (this.container && typeof this.container.classList?.add === "function") {
+      this.container.classList.add("umlcanvas-scrolling");
+      if (this.scrollingTimeout) {
+        clearTimeout(this.scrollingTimeout);
+      }
+      this.scrollingTimeout = setTimeout(() => {
+        if (this.container && typeof this.container.classList?.remove === "function") {
+          this.container.classList.remove("umlcanvas-scrolling");
+        }
+        this.scrollingTimeout = null;
+      }, 150);
+    }
     const cursor = this.getClientCoords(e);
     this.lastMouseCanvasPos = screenToCanvas(cursor, this.transform);
     const zoomFactor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
@@ -3597,6 +3706,15 @@ export class SvgSceneRenderer {
   }
 
   private handleMouseMove(e: MouseEvent): void {
+    if (
+      typeof e.buttons === "number" &&
+      e.buttons === 0 &&
+      this.dragMode.type !== "none"
+    ) {
+      this.handleMouseUp(e);
+      return;
+    }
+
     const clientPoint = this.getClientCoords(e);
     const canvasPoint = screenToCanvas(clientPoint, this.transform);
     this.lastMouseCanvasPos = canvasPoint;
@@ -3635,8 +3753,7 @@ export class SvgSceneRenderer {
 
       if (added || this.activeStroke.points.length <= 2) {
         const pts = this.activeStroke.points;
-        const smoothed = pts.length <= 3 ? pts : smoothPoints(pts);
-        const d = pointsToSmoothSvgPath(smoothed);
+        const d = pointsToSmoothSvgPath(pts);
         this.freehandPathEl.setAttribute("d", d);
       }
       return;
@@ -3812,15 +3929,7 @@ export class SvgSceneRenderer {
             y: Math.round(p.y * sy * 10) / 10,
           }));
           node.customData.points = scaledPoints;
-          let newPathData: string;
-          if (scaledPoints.length <= 3) {
-            newPathData = scaledPoints.reduce(
-              (acc, p, i) => `${acc}${i === 0 ? "M" : " L"} ${p.x},${p.y}`,
-              ""
-            );
-          } else {
-            newPathData = pointsToSmoothSvgPath(smoothPoints(scaledPoints));
-          }
+          let newPathData = pointsToSmoothSvgPath(scaledPoints);
           if (
             newPathData.startsWith("M") &&
             !newPathData.includes("L") &&

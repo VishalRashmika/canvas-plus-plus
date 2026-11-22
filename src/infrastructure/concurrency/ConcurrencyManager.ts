@@ -221,11 +221,11 @@ export class ConcurrencyManager {
     fn: (...args: Args) => void,
     delayMs = 150
   ): { (...args: Args): void; cancel: () => void } {
-    let timer: ReturnType<typeof setTimeout> | null = null;
+    let timer: number | null = null;
 
     const debounced = (...args: Args) => {
-      if (timer !== null) clearTimeout(timer);
-      timer = setTimeout(() => {
+      if (timer !== null) window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
         timer = null;
         if (!this.isDisposed) {
           fn(...args);
@@ -235,7 +235,7 @@ export class ConcurrencyManager {
 
     debounced.cancel = () => {
       if (timer !== null) {
-        clearTimeout(timer);
+        window.clearTimeout(timer);
         timer = null;
       }
     };
@@ -251,7 +251,7 @@ export class ConcurrencyManager {
     intervalMs = 16
   ): { (...args: Args): void; cancel: () => void } {
     let lastTime = -Infinity;
-    let timer: ReturnType<typeof setTimeout> | null = null;
+    let timer: number | null = null;
     let lastArgs: Args | null = null;
 
     const throttled = (...args: Args) => {
@@ -261,13 +261,13 @@ export class ConcurrencyManager {
       if (now - lastTime >= intervalMs) {
         lastTime = now;
         if (timer !== null) {
-          clearTimeout(timer);
+          window.clearTimeout(timer);
           timer = null;
         }
         fn(...args);
       } else if (timer === null) {
         const remaining = intervalMs - (now - lastTime);
-        timer = setTimeout(() => {
+        timer = window.setTimeout(() => {
           timer = null;
           lastTime = performance.now();
           if (lastArgs && !this.isDisposed) {
@@ -279,7 +279,7 @@ export class ConcurrencyManager {
 
     throttled.cancel = () => {
       if (timer !== null) {
-        clearTimeout(timer);
+        window.clearTimeout(timer);
         timer = null;
       }
     };

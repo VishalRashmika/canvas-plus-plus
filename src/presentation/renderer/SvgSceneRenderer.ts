@@ -39,7 +39,6 @@ export interface ArrowAttachmentContext {
 import { Stroke, StrokePoint } from "../../domain/services/ShapeRecognizer";
 import {
   pointsToSmoothSvgPath,
-  roundCoord,
 } from "../../domain/services/FreehandSmoother";
 import { resolveCanvasColor, isCanvasColorPreset } from "../../domain/value-objects/CanvasColor";
 import { defaultCustomChipRegistry } from "../../domain/services/CustomChipRegistry";
@@ -290,7 +289,7 @@ export class SvgSceneRenderer {
   private onWindowBlurBound: () => void;
   private onVisibilityChangeBound: () => void;
   private onPointerCancelBound: () => void;
-  private scrollingTimeout: any = null;
+  private scrollingTimeout: number | null = null;
 
   // Bound event listeners for cleanup
   private onWheelBound: (e: WheelEvent) => void;
@@ -3019,10 +3018,10 @@ export class SvgSceneRenderer {
     e.preventDefault();
     if (this.container && typeof this.container.classList?.add === "function") {
       this.container.classList.add("umlcanvas-scrolling");
-      if (this.scrollingTimeout) {
-        clearTimeout(this.scrollingTimeout);
+      if (this.scrollingTimeout !== null) {
+        window.clearTimeout(this.scrollingTimeout);
       }
-      this.scrollingTimeout = setTimeout(() => {
+      this.scrollingTimeout = window.setTimeout(() => {
         if (this.container && typeof this.container.classList?.remove === "function") {
           this.container.classList.remove("umlcanvas-scrolling");
         }
@@ -6572,6 +6571,17 @@ export class SvgSceneRenderer {
     this.svgEl.removeEventListener("mouseleave", this.onMouseLeaveBound);
     if (this.onWindowResizeBound) {
       window.removeEventListener("resize", this.onWindowResizeBound);
+    }
+    if (typeof window !== "undefined" && typeof window.removeEventListener === "function") {
+      window.removeEventListener("blur", this.onWindowBlurBound);
+      window.removeEventListener("pointercancel", this.onPointerCancelBound);
+    }
+    if (typeof document !== "undefined" && typeof document.removeEventListener === "function") {
+      document.removeEventListener("visibilitychange", this.onVisibilityChangeBound);
+    }
+    if (this.scrollingTimeout !== null) {
+      window.clearTimeout(this.scrollingTimeout);
+      this.scrollingTimeout = null;
     }
 
     if (this.unsubscribeEditor) {

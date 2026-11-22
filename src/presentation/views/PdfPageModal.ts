@@ -38,7 +38,7 @@ export class PdfPageModal extends Modal {
             this.submit();
           }
         });
-        setTimeout(() => text.inputEl.focus(), 50);
+        window.setTimeout(() => text.inputEl.focus(), 50);
       });
 
     new Setting(contentEl)

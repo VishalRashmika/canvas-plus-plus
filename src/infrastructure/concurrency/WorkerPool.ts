@@ -183,7 +183,7 @@ interface PendingTask<R = unknown> {
   request: WorkerTaskRequest;
   resolve: (res: R) => void;
   reject: (err: Error) => void;
-  timeoutTimer?: ReturnType<typeof setTimeout>;
+  timeoutTimer?: number;
 }
 
 /**
@@ -197,10 +197,10 @@ export class WorkerPool {
   private pendingCallbacks = new Map<
     string,
     {
-      resolve: (res: any) => void;
+      resolve: (res: unknown) => void;
       reject: (err: Error) => void;
       workerIndex?: number;
-      timeoutTimer?: ReturnType<typeof setTimeout>;
+      timeoutTimer?: number;
     }
   >();
 
@@ -299,10 +299,10 @@ export class WorkerPool {
     }
 
     return new Promise<R>((resolve, reject) => {
-      let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
+      let timeoutTimer: number | undefined;
       const timeoutMs = options?.timeoutMs ?? 20000;
-      if (timeoutMs > 0 && typeof setTimeout !== "undefined") {
-        timeoutTimer = setTimeout(() => {
+      if (timeoutMs > 0 && typeof window !== "undefined") {
+        timeoutTimer = window.setTimeout(() => {
           this.pendingCallbacks.delete(taskId);
           // Free busy worker if this task was currently running
           const workerEntry = this.workers.find((w) => w.activeTaskId === taskId);
@@ -319,7 +319,7 @@ export class WorkerPool {
         request,
         resolve,
         reject: (err) => {
-          if (timeoutTimer) clearTimeout(timeoutTimer);
+          if (timeoutTimer) window.clearTimeout(timeoutTimer);
           reject(err);
         },
         timeoutTimer,
@@ -342,7 +342,7 @@ export class WorkerPool {
     workerEntry.activeTaskId = task.request.id;
 
     this.pendingCallbacks.set(task.request.id, {
-      resolve: task.resolve,
+      resolve: task.resolve as (res: unknown) => void,
       reject: task.reject,
       workerIndex: workerIdx,
       timeoutTimer: task.timeoutTimer,
@@ -370,7 +370,7 @@ export class WorkerPool {
     if (callback) {
       this.pendingCallbacks.delete(response.id);
       if (callback.timeoutTimer) {
-        clearTimeout(callback.timeoutTimer);
+        window.clearTimeout(callback.timeoutTimer);
       }
 
       if (response.success) {
@@ -396,7 +396,7 @@ export class WorkerPool {
       const callback = this.pendingCallbacks.get(taskId);
       if (callback) {
         this.pendingCallbacks.delete(taskId);
-        if (callback.timeoutTimer) clearTimeout(callback.timeoutTimer);
+        if (callback.timeoutTimer) window.clearTimeout(callback.timeoutTimer);
         callback.reject(new Error(err.message || "Worker error occurred"));
       }
     }
@@ -600,7 +600,7 @@ export class WorkerPool {
 
     // Cancel all queued and pending callbacks
     for (const [taskId, cb] of this.pendingCallbacks.entries()) {
-      if (cb.timeoutTimer) clearTimeout(cb.timeoutTimer);
+      if (cb.timeoutTimer) window.clearTimeout(cb.timeoutTimer);
       cb.reject(new Error(`WorkerPool terminated: task ${taskId} cancelled`));
     }
     this.pendingCallbacks.clear();

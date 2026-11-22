@@ -1,13 +1,13 @@
 // Jest test environment setup for Node
 const defaultWindow: any = {
   ...globalThis,
-  setTimeout: setTimeout.bind(globalThis),
-  clearTimeout: clearTimeout.bind(globalThis),
+  setTimeout: (...args: any[]) => (globalThis as any).setTimeout(...args),
+  clearTimeout: (...args: any[]) => (globalThis as any).clearTimeout(...args),
   requestAnimationFrame: (cb: (time: number) => void) => {
-    return setTimeout(() => cb(Date.now()), 0) as any;
+    return (globalThis as any).setTimeout(() => cb(Date.now()), 0);
   },
   cancelAnimationFrame: (id: any) => {
-    clearTimeout(id);
+    (globalThis as any).clearTimeout(id);
   },
   addEventListener: () => {},
   removeEventListener: () => {},
@@ -22,19 +22,19 @@ Object.defineProperty(global, "window", {
   set(val) {
     if (val && typeof val === "object") {
       if (!val.setTimeout) {
-        val.setTimeout = setTimeout.bind(globalThis);
+        val.setTimeout = (...args: any[]) => (globalThis as any).setTimeout(...args);
       }
       if (!val.clearTimeout) {
-        val.clearTimeout = clearTimeout.bind(globalThis);
+        val.clearTimeout = (...args: any[]) => (globalThis as any).clearTimeout(...args);
       }
       if (!val.requestAnimationFrame) {
         val.requestAnimationFrame = (cb: (time: number) => void) => {
-          return setTimeout(() => cb(Date.now()), 0) as any;
+          return (globalThis as any).setTimeout(() => cb(Date.now()), 0);
         };
       }
       if (!val.cancelAnimationFrame) {
         val.cancelAnimationFrame = (id: any) => {
-          clearTimeout(id);
+          (globalThis as any).clearTimeout(id);
         };
       }
     }

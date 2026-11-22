@@ -1,7 +1,6 @@
 import { Point } from "../../domain/value-objects/Point";
 import { Size } from "../../domain/value-objects/Rect";
 import { Side } from "../../domain/types";
-import { setIcon } from "obsidian";
 
 export interface ArrowAttachmentItem {
   id: string;
@@ -172,7 +171,14 @@ function createElHelper<T extends HTMLElement>(
   if (typeof customParent.createEl === "function") {
     return customParent.createEl(tag, options);
   }
-  const el = document.createElement(tag) as T;
+  if (typeof createEl === "function") {
+    const el = createEl(tag as keyof HTMLElementTagNameMap, options) as T;
+    parent.appendChild(el);
+    return el;
+  }
+  const el = (typeof document !== "undefined" && typeof document.createElementNS === "function"
+    ? document.createElementNS("http://www.w3.org/1999/xhtml", tag)
+    : ({} as HTMLElement)) as T;
   if (options?.cls) {
     el.className = options.cls;
   }
@@ -419,7 +425,7 @@ export class ArrowAttachmentPopup {
     this.listEl.textContent = "";
 
     if (this.filteredItems.length === 0) {
-      const emptyNotice = createElHelper<HTMLElement>(this.listEl, "div", {
+      createElHelper<HTMLElement>(this.listEl, "div", {
         cls: "umlcanvas-menu-tip",
         text: "No matching items. Press Esc to point to empty space.",
       });

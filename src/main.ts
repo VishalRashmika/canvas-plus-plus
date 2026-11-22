@@ -492,11 +492,19 @@ export default class CanvasPlusPlusPlugin extends Plugin {
       }
 
       // 1h. DOM container inspection
-      if (view.containerEl && typeof view.containerEl.querySelectorAll === "function") {
-        const activeEls = view.containerEl.querySelectorAll<HTMLElement>(
-          ".nav-folder.is-active, .nav-folder.is-selected, .nav-folder-title.is-active, .nav-folder-title.is-selected, .tree-item.is-selected, .tree-item-self.is-selected, .tree-item-self.is-active"
-        );
-        for (const el of Array.from(activeEls)) {
+      if (view.containerEl) {
+        const activeEls: Element[] = typeof view.containerEl.findAll === "function"
+          ? view.containerEl.findAll(
+              ".nav-folder.is-active, .nav-folder.is-selected, .nav-folder-title.is-active, .nav-folder-title.is-selected, .tree-item.is-selected, .tree-item-self.is-selected, .tree-item-self.is-active"
+            )
+          : (typeof (view.containerEl as unknown as { querySelectorAll?: (s: string) => NodeListOf<Element> }).querySelectorAll === "function"
+            ? Array.from(
+                (view.containerEl as unknown as { querySelectorAll: (s: string) => NodeListOf<Element> }).querySelectorAll(
+                  ".nav-folder.is-active, .nav-folder.is-selected, .nav-folder-title.is-active, .nav-folder-title.is-selected, .tree-item.is-selected, .tree-item-self.is-selected, .tree-item-self.is-active"
+                )
+              )
+            : []);
+        for (const el of activeEls) {
           let dataPath = el.getAttribute("data-path");
           if (!dataPath) {
             const titleEl = el.querySelector(".nav-folder-title, .tree-item-self, [data-path]");

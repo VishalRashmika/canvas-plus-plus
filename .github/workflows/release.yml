@@ -1,6 +1,11 @@
 name: Release
 
 on:
+  pull_request:
+    types:
+      - closed
+    branches:
+      - main
   push:
     tags:
       - "*"
@@ -12,10 +17,13 @@ permissions:
 
 jobs:
   release:
+    if: (github.event_name == 'pull_request' && github.event.pull_request.merged == true) || startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && 'main' || '' }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -32,6 +40,12 @@ jobs:
       - name: Build plugin assets
         run: npm run build
 
+      - name: Get version from manifest.json
+        id: version
+        run: |
+          VERSION=$(node -p "require('./manifest.json').version")
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
       - name: Generate build provenance attestations
         uses: actions/attest-build-provenance@v2
         with:
@@ -43,6 +57,8 @@ jobs:
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: Release ${{ steps.version.outputs.version }}
           files: |
             main.js
             manifest.json

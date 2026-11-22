@@ -4654,8 +4654,13 @@ export function safeCreateDiv(options?: { cls?: string; text?: string; attr?: Re
 }
 
 export function safeCreateEl(tag: string, options?: { cls?: string; attr?: Record<string, string> }): HTMLElement {
+  if (typeof createEl === "function") {
+    return createEl(tag as keyof HTMLElementTagNameMap, options);
+  }
   if (typeof document !== "undefined") {
-    const el = document.createElement(tag);
+    const el = typeof document.createElementNS === "function"
+      ? document.createElementNS("http://www.w3.org/1999/xhtml", tag)
+      : createEl(tag as keyof HTMLElementTagNameMap, options);
     if (options?.cls) {
       el.className = options.cls;
       if (el.classList && typeof el.classList.add === "function") {

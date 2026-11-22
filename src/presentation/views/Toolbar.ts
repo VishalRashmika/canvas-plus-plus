@@ -1208,8 +1208,8 @@ export class Toolbar {
       "Select & Move (V)",
       "",
       () => {
-        if (typeof (this.renderer as any).cancelOrResetActiveDrag === "function") {
-          (this.renderer as any).cancelOrResetActiveDrag();
+        if (typeof this.renderer.cancelOrResetActiveDrag === "function") {
+          this.renderer.cancelOrResetActiveDrag();
         }
         if (typeof this.renderer.setGrabMode === "function") {
           this.renderer.setGrabMode(false);
@@ -1228,8 +1228,8 @@ export class Toolbar {
       "Grab / Move Canvas (H)",
       "",
       () => {
-        if (typeof (this.renderer as any).cancelOrResetActiveDrag === "function") {
-          (this.renderer as any).cancelOrResetActiveDrag();
+        if (typeof this.renderer.cancelOrResetActiveDrag === "function") {
+          this.renderer.cancelOrResetActiveDrag();
         }
         const active = !this.renderer.grabMode;
         if (active && typeof this.renderer.setFreehandMode === "function") {
@@ -1251,8 +1251,8 @@ export class Toolbar {
       "Draw / Freehand (P)",
       "",
       () => {
-        if (typeof (this.renderer as any).cancelOrResetActiveDrag === "function") {
-          (this.renderer as any).cancelOrResetActiveDrag();
+        if (typeof this.renderer.cancelOrResetActiveDrag === "function") {
+          this.renderer.cancelOrResetActiveDrag();
         }
         if (typeof this.renderer.setGrabMode === "function") {
           this.renderer.setGrabMode(false);
@@ -1275,8 +1275,8 @@ export class Toolbar {
     this.drawBtn.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      if (typeof (this.renderer as any).cancelOrResetActiveDrag === "function") {
-        (this.renderer as any).cancelOrResetActiveDrag();
+      if (typeof this.renderer.cancelOrResetActiveDrag === "function") {
+        this.renderer.cancelOrResetActiveDrag();
       }
       const isDrawActive =
         this.renderer.freehandMode &&
@@ -1298,8 +1298,8 @@ export class Toolbar {
       "Auto Shape Recognition (S) - Automatically recognize common shapes",
       "",
       () => {
-        if (typeof (this.renderer as any).cancelOrResetActiveDrag === "function") {
-          (this.renderer as any).cancelOrResetActiveDrag();
+        if (typeof this.renderer.cancelOrResetActiveDrag === "function") {
+          this.renderer.cancelOrResetActiveDrag();
         }
         if (typeof this.renderer.setGrabMode === "function") {
           this.renderer.setGrabMode(false);

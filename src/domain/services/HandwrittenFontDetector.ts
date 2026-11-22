@@ -1353,7 +1353,6 @@ export class HandwrittenFontDetector {
     const leftB = s1.cx <= s2.cx ? s1 : s2;
     const rightB = s1.cx <= s2.cx ? s2 : s1;
     const leftBStroke = leftB === s1 ? s1 : s2;
-    const rightBStroke = leftB === s1 ? s2 : s1;
 
     if (rightB.height > 0.50 * h) {
       const leftDistSE = Math.hypot(

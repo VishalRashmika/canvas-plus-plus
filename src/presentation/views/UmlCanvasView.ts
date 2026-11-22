@@ -518,7 +518,7 @@ export class UmlCanvasView extends TextFileView {
 
     // Register hotkeys on view's scope so Obsidian keymap delegates Delete / Backspace directly to canvas
     if (!this.scope && typeof Scope !== "undefined") {
-      this.scope = new Scope((this.app as any)?.scope);
+      this.scope = new Scope(this.app.scope);
     }
     if (this.scope) {
       this.scope.register([], "Delete", (evt: KeyboardEvent) => {

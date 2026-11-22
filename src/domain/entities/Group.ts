@@ -8,6 +8,7 @@ export interface Group {
   readonly id: Id;
   name: string;
   nodeIds: Id[];
+  groupIds?: Id[];
   collapsed: boolean;
   color?: string;
   position?: Point;
@@ -26,6 +27,7 @@ export function createGroup(params: {
   id: Id;
   name: string;
   nodeIds?: Id[];
+  groupIds?: Id[];
   collapsed?: boolean;
   color?: string;
   position?: Point;
@@ -43,6 +45,7 @@ export function createGroup(params: {
     id: params.id,
     name: params.name,
     nodeIds: params.nodeIds ?? [],
+    groupIds: params.groupIds ? [...params.groupIds] : [],
     collapsed: params.collapsed ?? false,
     color: params.color,
     position: params.position,

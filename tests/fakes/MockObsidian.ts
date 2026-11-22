@@ -91,7 +91,9 @@ export class Modal {
 
 export class FuzzySuggestModal<T> {
   app: any;
+  placeholder: string = "";
   constructor(app: any) { this.app = app; }
+  setPlaceholder(text: string) { this.placeholder = text; }
   open() {}
   close() {}
 }
@@ -145,9 +147,26 @@ export function createMockElement(tagName = "div"): any {
   return el;
 }
 
+export class Scope {
+  parent?: Scope;
+  keys: Array<{ modifiers: any[]; key: string | null; func: any }> = [];
+  constructor(parent?: Scope) {
+    this.parent = parent;
+  }
+  register(modifiers: any[], key: string | null, func: any): any {
+    const handler = { modifiers, key, func, scope: this };
+    this.keys.push(handler);
+    return handler;
+  }
+  unregister(handler: any): void {
+    this.keys = this.keys.filter((h) => h !== handler);
+  }
+}
+
 export class TextFileView {
   app: any;
   leaf: any;
+  scope: Scope = new Scope();
   file: TFile | null = null;
   data: string = "";
   contentEl: HTMLElement = typeof document !== "undefined" ? document.createElement("div") : createMockElement("div");
@@ -222,7 +241,7 @@ export class Menu {
 export class TAbstractFile {
   path: string = "";
   name: string = "";
-  parent?: any;
+  parent: any = null;
   constructor(path = "", name = "") {
     this.path = path;
     this.name = name || (path ? path.split("/").pop() || "" : "");
@@ -237,6 +256,8 @@ export class TFolder extends TAbstractFile {
 }
 
 export class TFile extends TAbstractFile {
+  stat: any = { ctime: 0, mtime: 0, size: 0 };
+  vault: any = {};
   basename: string = "";
   extension: string = "";
   constructor(path = "", basename = "", extension = "") {
@@ -244,6 +265,16 @@ export class TFile extends TAbstractFile {
     this.basename = basename;
     this.extension = extension;
   }
+}
+
+export function normalizePath(path: string): string {
+  if (!path) return "";
+  return path
+    .replace(/\\/g, "/")
+    .replace(/\/+/g, "/")
+    .replace(/^\.\//, "")
+    .replace(/^\/+/, "")
+    .replace(/\/+$/, "");
 }
 
 export class Vault {}
@@ -266,9 +297,57 @@ export class App {
     _files: new Map<string, any>(),
     on: () => ({}),
     getAbstractFileByPath(path: string) {
-      return this._files?.get(path) ?? null;
+      const normalized = normalizePath(path);
+      return this._files?.get(normalized) ?? this._files?.get(path) ?? null;
     },
-    create: async (_path: string, _data: string) => ({ path: _path }),
+    getFiles() {
+      return Array.from(this._files?.values() ?? []).filter((f: any) => f instanceof TFile);
+    },
+    create: async (path: string, _data: string) => {
+      const normalized = normalizePath(path);
+      const name = normalized.split("/").pop() || "";
+      const dot = name.lastIndexOf(".");
+      const basename = dot !== -1 ? name.substring(0, dot) : name;
+      const extension = dot !== -1 ? name.substring(dot + 1) : "";
+      const file = new TFile(normalized, basename, extension);
+      file.vault = this.vault;
+      this.vault._files.set(normalized, file);
+      this.vault._files.set(path, file);
+      return file;
+    },
+    createFolder: async (path: string) => {
+      const normalized = normalizePath(path);
+      const name = normalized.split("/").pop() || "";
+      const folder = new TFolder(normalized, name);
+      this.vault._files.set(normalized, folder);
+      this.vault._files.set(path, folder);
+      return folder;
+    },
+    createBinary: async (path: string, _data: ArrayBuffer) => {
+      const normalized = normalizePath(path);
+      const name = normalized.split("/").pop() || "";
+      const dot = name.lastIndexOf(".");
+      const basename = dot !== -1 ? name.substring(0, dot) : name;
+      const extension = dot !== -1 ? name.substring(dot + 1) : "";
+      const file = new TFile(normalized, basename, extension);
+      file.vault = this.vault;
+      this.vault._files.set(normalized, file);
+      this.vault._files.set(path, file);
+      return file;
+    },
+    getResourcePath(file: TFile) {
+      return `app://local/${file.path}`;
+    },
+    read: async (_file: TFile) => "",
+    adapter: {
+      exists: async (path: string) => this.vault.getAbstractFileByPath(path) !== null,
+      mkdir: async (path: string) => this.vault.createFolder(path),
+      read: async (_path: string) => "",
+      write: async (_path: string, _contents: string) => {},
+      writeBinary: async (path: string, data: ArrayBuffer) => this.vault.createBinary(path, data),
+      list: async (_path: string) => ({ files: [], folders: [] }),
+      remove: async (_path: string) => {},
+    },
   };
   workspace: any = {
     on: (_name: string, _cb: any) => ({}),

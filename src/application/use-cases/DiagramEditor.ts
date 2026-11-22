@@ -7,10 +7,11 @@ import {
   createDiagramEdge,
 } from "../../domain/entities/DiagramEdge";
 import { Point } from "../../domain/value-objects/Point";
-import { Rect, Size, rect, intersects, contains, center } from "../../domain/value-objects/Rect";
+import { Rect, Size, rect, intersects, contains, center, right, bottom } from "../../domain/value-objects/Rect";
+import { Command } from "../commands/Command";
 import { CommandStack } from "../commands/CommandStack";
 import { Layer, createLayer } from "../../domain/entities/Layer";
-import { Group } from "../../domain/entities/Group";
+import { Group, createGroup } from "../../domain/entities/Group";
 import { Port } from "../../domain/entities/Port";
 import { Compartment } from "../../domain/entities/Compartment";
 import { Label } from "../../domain/entities/Label";
@@ -22,10 +23,13 @@ import {
   AddEdgeCommand,
   DeleteEdgesCommand,
   UpdateNodeLabelCommand,
+  AddGroupCommand,
   GroupSelectionCommand,
   UngroupSelectionCommand,
   RenameGroupCommand,
   computeGroupBounds,
+  isGroupInsideGroup,
+  getDescendantGroups,
   MoveGroupCommand,
   ResizeGroupCommand,
   ToggleGroupCollapseCommand,
@@ -49,6 +53,7 @@ import {
   ReverseEdgeCommand,
   UpdateEdgeKindCommand,
   UpdateEdgeStyleCommand,
+  EnhanceHanddrawnNotesCommand,
   EdgeMove,
   SwitchDiagramTypeCommand,
   AutoResizeNodeCommand,
@@ -56,11 +61,14 @@ import {
   CompoundCommand,
   SetColorCommand,
   SetFontCommand,
+  SetStrokeStyleCommand,
   FontStylePatch,
   UpdateChipNodeCommand,
   PropagateChipInterfaceCommand,
   NodeMove,
   NodeGeometry,
+  UpdateTableCellCommand,
+  UpdateTableStructureCommand,
 } from "../commands/DiagramCommands";
 import { ChipInterfaceDefinition } from "../../domain/entities/ChipInterfaceDefinition";
 import {
@@ -72,12 +80,17 @@ import {
 } from "../../domain/services/CustomChipRegistry";
 import { EdgeRouting, DiagramTypeId, Side } from "../../domain/types";
 import { defaultDiagramTypeRegistry } from "../../domain/services/DiagramTypeRegistry";
+import { pointsToSmoothSvgPath } from "../../domain/services/FreehandSmoother";
 import { lineSegmentIntersectsRect, getRectCenter, getFacingSide } from "../../domain/services/Geometry";
 import { ValidationIssue } from "../../domain/entities/DiagramTypeDefinition";
 import { calculateNodeFitSize } from "../../domain/services/TextMeasurement";
 import { defaultJsonCanvasImporter } from "../../infrastructure/persistence/JsonCanvasImporter";
 import { Stereotype } from "../../domain/value-objects/Stereotype";
-import { Stroke, defaultShapeRecognizer } from "../../domain/services/ShapeRecognizer";
+import { Stroke, RecognitionResult, defaultShapeRecognizer } from "../../domain/services/ShapeRecognizer";
+import {
+  defaultTableDetector,
+} from "../../domain/services/TableDetector";
+import { defaultHanddrawnNoteEnhancer, EnhanceResult } from "../../domain/services/HanddrawnNoteEnhancer";
 import {
   SequenceLayoutOptions,
   SequenceLayoutResult,
@@ -113,6 +126,7 @@ export interface AddNodeOptions {
   labels?: Partial<Label>[];
   customData?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
+  select?: boolean;
 }
 
 export interface CanvasClipboardData {
@@ -121,6 +135,7 @@ export interface CanvasClipboardData {
   diagramType?: string;
   nodes: DiagramNode[];
   edges: DiagramEdge[];
+  groups?: Group[];
 }
 
 export type AlignmentType =
@@ -241,6 +256,16 @@ export class DiagramEditor {
     this.notify();
   }
 
+  selectNodes(ids: string[]): void {
+    this.selectedNodeIdSet.clear();
+    this.selectedEdgeIdSet.clear();
+    this.selectedGroupIdSet.clear();
+    for (const id of ids) {
+      this.selectedNodeIdSet.add(id);
+    }
+    this.notify();
+  }
+
   toggleNodeSelection(id: string): void {
     if (this.selectedNodeIdSet.has(id)) {
       this.selectedNodeIdSet.delete(id);
@@ -340,6 +365,25 @@ export class DiagramEditor {
         }
       }
     }
+
+    for (const group of this.diagram.groups) {
+      if (!group.locked) {
+        const groupBounds = this.getGroupBounds(group);
+        const headerH = group.collapsed ? 34 : 28;
+        const headerRect = rect(groupBounds.position, {
+          width: groupBounds.size.width,
+          height: headerH,
+        });
+        const isFullyContained =
+          area.position.x <= groupBounds.position.x &&
+          right(area) >= right(groupBounds) &&
+          area.position.y <= groupBounds.position.y &&
+          bottom(area) >= bottom(groupBounds);
+        if (isFullyContained || intersects(area, headerRect)) {
+          this.selectedGroupIdSet.add(group.id);
+        }
+      }
+    }
     this.notify();
   }
 
@@ -366,12 +410,111 @@ export class DiagramEditor {
 
   // --- Node CRUD ---
 
+  public getDefaultTitleForKind(kind: string): string {
+    switch (kind) {
+      case "generic.rectangle":
+        return "Node";
+      case "uml.class":
+        return "Class";
+      case "uml.interface":
+        return "Interface";
+      case "uml.abstractClass":
+        return "Abstract Class";
+      case "uml.enumeration":
+        return "Enumeration";
+      case "uml.object":
+        return "Object";
+      case "uml.actor":
+        return "Actor";
+      case "uml.useCase":
+      case "uml.usecase":
+        return "Use Case";
+      case "uml.systemBoundary":
+        return "System Boundary";
+      case "uml.component":
+        return "Component";
+      case "uml.package":
+        return "Package";
+      case "uml.node3d":
+        return "Node";
+      case "uml.device":
+        return "Device";
+      case "uml.executionEnvironment":
+        return "Execution Environment";
+      case "uml.artifact":
+        return "Artifact";
+      case "uml.compositeClassifier":
+        return "Classifier";
+      case "uml.part":
+        return "Part";
+      case "uml.stereotype":
+        return "Stereotype";
+      case "uml.metaclass":
+        return "Metaclass";
+      case "uml.lollipop":
+      case "uml.socket":
+        return "Interface";
+      case "uml.componentPort":
+        return "Port";
+      case "activity.action":
+        return "Action";
+      case "activity.decision":
+        return "Decision";
+      case "activity.swimlane":
+        return "Swimlane";
+      case "activity.initial":
+      case "activity.final":
+        return "";
+      case "state.simple":
+        return "State";
+      case "state.composite":
+        return "Composite State";
+      case "state.initial":
+      case "state.final":
+      case "state.choice":
+        return "";
+      case "sequence.lifeline":
+        return "Lifeline";
+      case "sequence.activation":
+        return "";
+      case "timing.lane":
+        return "Timing Lane";
+      case "timing.stateSegment":
+        return "State";
+      case "schematic.chip":
+        return "Chip";
+      case "generic.note":
+        return "Note";
+      case "generic.stickyNote":
+        return "Sticky Note";
+      case "generic.circle":
+        return "Circle";
+      case "generic.ellipse":
+        return "Ellipse";
+      case "generic.triangle":
+        return "Triangle";
+      case "generic.diamond":
+        return "Diamond";
+      case "generic.text":
+        return "Text";
+      case "generic.table":
+        return "";
+      case "generic.image":
+        return "Image";
+      case "generic.pdf":
+        return "PDF Document";
+      default:
+        return "Node";
+    }
+  }
+
   addNode(options?: AddNodeOptions): DiagramNode {
     const id = options?.id ?? `node-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
     const kind = options?.kind ?? "generic.rectangle";
     const position = options?.position ?? { x: 100, y: 100 };
     const size = options?.size ?? { width: 140, height: 80 };
-    const title = options?.title ?? options?.labels?.[0]?.text ?? "New Node";
+    const defaultTitle = this.getDefaultTitleForKind(kind);
+    const title = options?.title ?? options?.labels?.[0]?.text ?? defaultTitle;
 
     const hasActiveFont =
       this.activeFontStyle.fontSize !== undefined ||
@@ -433,7 +576,9 @@ export class DiagramEditor {
     const cmd = new AddNodeCommand(this.diagram, node);
     this.commandStack.execute(cmd);
 
-    this.selectNode(node.id, false);
+    if (options?.select !== false) {
+      this.selectNode(node.id, false);
+    }
     return node;
   }
 
@@ -536,19 +681,26 @@ export class DiagramEditor {
     const edgeIds = Array.from(this.selectedEdgeIdSet);
     const groupIds = Array.from(this.selectedGroupIdSet);
 
-    if (nodeIds.length > 0 || edgeIds.length > 0) {
-      const cmd = new DeleteNodesAndEdgesCommand(this.diagram, nodeIds, edgeIds);
-      this.commandStack.execute(cmd);
-    }
-
-    if (groupIds.length > 0) {
-      const cmd = new UngroupSelectionCommand(this.diagram, groupIds);
-      this.commandStack.execute(cmd);
-    }
-
     this.selectedNodeIdSet.clear();
     this.selectedEdgeIdSet.clear();
     this.selectedGroupIdSet.clear();
+
+    const commands: Command[] = [];
+    if (nodeIds.length > 0 || edgeIds.length > 0) {
+      commands.push(new DeleteNodesAndEdgesCommand(this.diagram, nodeIds, edgeIds));
+    }
+
+    if (groupIds.length > 0) {
+      commands.push(new UngroupSelectionCommand(this.diagram, groupIds));
+    }
+
+    if (commands.length === 1) {
+      this.commandStack.execute(commands[0]);
+    } else if (commands.length > 1) {
+      this.commandStack.execute(new CompoundCommand(commands, "Delete selection"));
+    }
+
+    this.notify();
   }
 
   // --- Edge CRUD ---
@@ -558,11 +710,43 @@ export class DiagramEditor {
   public defaultMarkerStart?: string;
   public defaultMarkerEnd?: string;
   public defaultLineType?: LinePatternType;
+  public freehandStrokeWidth: number = 2;
+  public freehandStrokeStrength: number = 1.0;
+
+  getFreehandBrushSettings(): { strokeWidth: number; strokeStrength: number } {
+    return {
+      strokeWidth: this.freehandStrokeWidth,
+      strokeStrength: this.freehandStrokeStrength,
+    };
+  }
+
+  setFreehandBrushSettings(options: { strokeWidth?: number; strokeStrength?: number }): void {
+    if (options.strokeWidth !== undefined && options.strokeWidth > 0) {
+      this.freehandStrokeWidth = options.strokeWidth;
+    }
+    if (options.strokeStrength !== undefined && options.strokeStrength > 0) {
+      this.freehandStrokeStrength = Math.min(1.0, Math.max(0.05, options.strokeStrength));
+    }
+
+    const freehandNodes = this.diagram.nodes.filter(
+      (n) => this.selectedNodeIds.includes(n.id) && n.kind === "generic.freehand"
+    );
+
+    if (freehandNodes.length > 0) {
+      const cmd = new SetStrokeStyleCommand(freehandNodes, {
+        strokeWidth: options.strokeWidth,
+        strokeOpacity: options.strokeStrength,
+      });
+      this.commandStack.execute(cmd);
+    } else {
+      this.notify();
+    }
+  }
 
   addEdge(
     fromNodeId: string,
     toNodeId: string,
-    options?: Partial<DiagramEdge>
+    options?: Partial<DiagramEdge> & { select?: boolean }
   ): DiagramEdge {
     const id =
       options?.id ?? `edge-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
@@ -611,6 +795,7 @@ export class DiagramEditor {
       kind,
       fromNodeId,
       toNodeId,
+      toPoint: options?.toPoint,
       fromPortId: options?.fromPortId,
       fromSide: options?.fromSide,
       toPortId: options?.toPortId,
@@ -626,7 +811,9 @@ export class DiagramEditor {
     const cmd = new AddEdgeCommand(this.diagram, edge);
     this.commandStack.execute(cmd);
 
-    this.selectEdge(edge.id, false);
+    if (options?.select !== false) {
+      this.selectEdge(edge.id, false);
+    }
     return edge;
   }
 
@@ -701,21 +888,67 @@ export class DiagramEditor {
     position?: Point;
     size?: Size;
     nodeIds?: string[];
+    groupIds?: string[];
   }): Group {
     const groupId = `group-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
     const name = params?.name ?? "Group";
     const color = params?.color;
     const nodeIds = params?.nodeIds ? [...params.nodeIds] : [];
+    const groupIds = params?.groupIds ? [...params.groupIds] : [];
     const position = params?.position ?? { x: 100, y: 100 };
     const size = params?.size ?? { width: 300, height: 200 };
 
+    const groupRect = rect(position, size);
+
+    // Auto-detect existing child groups inside this new group
+    if (!params?.groupIds) {
+      for (const otherGroup of this.diagram.groups) {
+        if (otherGroup.position && otherGroup.size) {
+          const otherBounds = rect(otherGroup.position, otherGroup.size);
+          if (isGroupInsideGroup(groupRect, otherBounds)) {
+            if (!groupIds.includes(otherGroup.id)) {
+              groupIds.push(otherGroup.id);
+            }
+          }
+        }
+      }
+    }
+
     if (!params?.nodeIds) {
-      const groupRect = rect(position, size);
       for (const node of this.diagram.nodes) {
         const nodeCenter = center(rect(node.position, node.size));
         if (contains(groupRect, nodeCenter) || contains(groupRect, node.position)) {
-          if (!nodeIds.includes(node.id)) {
-            nodeIds.push(node.id);
+          // If node already belongs to a child group inside this group, don't duplicate it into parent nodeIds
+          const insideChildGroup = groupIds.some((cid) => {
+            const cg = this.diagram.groups.find((g) => g.id === cid);
+            return cg && cg.nodeIds.includes(node.id);
+          });
+          if (!insideChildGroup) {
+            const smallerGroup = this.diagram.groups.find(
+              (g) =>
+                g.position &&
+                g.size &&
+                (contains(rect(g.position, g.size), nodeCenter) || contains(rect(g.position, g.size), node.position)) &&
+                g.size.width * g.size.height < size.width * size.height
+            );
+            if (!smallerGroup && !nodeIds.includes(node.id)) {
+              nodeIds.push(node.id);
+            }
+          }
+        }
+      }
+    }
+
+    // If new group is inside an existing group, update parent's groupIds
+    for (const existingGroup of this.diagram.groups) {
+      if (existingGroup.position && existingGroup.size) {
+        const existingBounds = rect(existingGroup.position, existingGroup.size);
+        if (isGroupInsideGroup(existingBounds, groupRect)) {
+          if (!existingGroup.groupIds) {
+            existingGroup.groupIds = [];
+          }
+          if (!existingGroup.groupIds.includes(groupId)) {
+            existingGroup.groupIds.push(groupId);
           }
         }
       }
@@ -728,7 +961,8 @@ export class DiagramEditor {
       nodeIds,
       position,
       size,
-      color
+      color,
+      groupIds
     );
     this.commandStack.execute(cmd);
 
@@ -822,20 +1056,29 @@ export class DiagramEditor {
 
   selectGroupMembers(groupId: string): void {
     const group = this.diagram.groups.find((g) => g.id === groupId);
-    if (!group || group.nodeIds.length === 0) return;
+    if (!group) return;
+    const descendants = getDescendantGroups(this.diagram, group);
+    const allNodeIds = new Set<string>(group.nodeIds);
+    for (const dg of descendants) {
+      for (const nid of dg.nodeIds) {
+        allNodeIds.add(nid);
+      }
+    }
+    if (allNodeIds.size === 0) return;
     this.selectedNodeIdSet.clear();
     this.selectedEdgeIdSet.clear();
     this.selectedGroupIdSet.clear();
-    for (const nid of group.nodeIds) {
+    for (const nid of allNodeIds) {
       this.selectedNodeIdSet.add(nid);
     }
     this.notify();
   }
 
   deleteGroup(groupId: string): void {
+    this.selectedGroupIdSet.delete(groupId);
     const cmd = new UngroupSelectionCommand(this.diagram, [groupId]);
     this.commandStack.execute(cmd);
-    this.selectedGroupIdSet.delete(groupId);
+    this.notify();
   }
 
   createLayer(name: string): Layer {
@@ -1086,18 +1329,19 @@ export class DiagramEditor {
     const s = markerStart.replace(/^uml-marker-/, "");
     const e = markerEnd.replace(/^uml-marker-/, "");
     const isDashed = lineType === "dashed" || lineType === "dotted";
+    const isArrowEnd = e === "open-arrow" || e === "arrow" || e === "arrow-open";
 
-    if (s === "diamond-hollow" && (e === "open-arrow" || e === "arrow")) return "uml.directedAggregation";
-    if (s === "diamond-filled" && (e === "open-arrow" || e === "arrow")) return "uml.directedComposition";
+    if (s === "diamond-hollow" && isArrowEnd) return "uml.directedAggregation";
+    if (s === "diamond-filled" && isArrowEnd) return "uml.directedComposition";
     if (s === "diamond-hollow" && (e === "none" || !e)) return "uml.aggregation";
     if (s === "diamond-filled" && (e === "none" || !e)) return "uml.composition";
     if ((s === "none" || !s) && (e === "triangle-hollow" || e === "triangle") && isDashed) return "uml.realization";
     if ((s === "none" || !s) && (e === "triangle-hollow" || e === "triangle")) return "uml.generalization";
-    if ((s === "none" || !s) && (e === "open-arrow" || e === "arrow") && isDashed) return "uml.dependency";
-    if ((s === "none" || !s) && (e === "open-arrow" || e === "arrow")) return "uml.directedAssociation";
+    if ((s === "none" || !s) && isArrowEnd && isDashed) return "uml.dependency";
+    if ((s === "none" || !s) && isArrowEnd) return "uml.directedAssociation";
     if ((s === "none" || !s) && (e === "none" || !e)) return "uml.association";
     if ((s === "none" || !s) && e === "triangle-filled") return "profile.extension";
-    if ((s === "none" || !s) && e === "arrow-filled") return "sequence.syncMessage";
+    if ((s === "none" || !s) && (e === "arrow-filled" || e === "filled-arrow")) return "sequence.syncMessage";
     return fallbackKind ?? "uml.association";
   }
 
@@ -1138,12 +1382,55 @@ export class DiagramEditor {
   reconnectEdge(
     edgeId: string,
     endpoint: "source" | "target",
-    target: { nodeId: string; portId?: string; side?: Side }
+    target: { nodeId?: string; portId?: string; side?: Side; point?: Point }
   ): void {
-    const targetNode = this.diagram.nodes.find((n) => n.id === target.nodeId);
-    if (!targetNode) return;
+    if (target.nodeId) {
+      const targetNode = this.diagram.nodes.find((n) => n.id === target.nodeId);
+      if (!targetNode) return;
+    } else if (!target.point) {
+      return;
+    }
     const cmd = new ReconnectEdgeCommand(this.diagram, edgeId, endpoint, target);
     this.commandStack.execute(cmd);
+  }
+
+  detectStrokeToEmptySpace(stroke: Stroke): {
+    fromNode: DiagramNode;
+    endPoint: Point;
+    isArrow: boolean;
+  } | null {
+    if (!stroke || !stroke.points || stroke.points.length < 2) return null;
+    const rec = defaultShapeRecognizer.recognize(stroke);
+    const sp = rec.startPoint ?? stroke.points[0];
+    const ep = rec.endPoint ?? stroke.points[stroke.points.length - 1];
+
+    let fromNode: DiagramNode | null = null;
+    let minDist = 80;
+    for (const node of this.diagram.nodes) {
+      if (node.kind === "generic.freehand") continue;
+      const d = this.distanceToNode(sp, node);
+      if (d < minDist) {
+        minDist = d;
+        fromNode = node;
+      }
+    }
+    if (!fromNode) return null;
+
+    // Ensure endPoint is in empty canvas space (not touching another node)
+    for (const node of this.diagram.nodes) {
+      if (node.id === fromNode.id || node.kind === "generic.freehand") continue;
+      const d = this.distanceToNode(ep, node);
+      if (d < 50) return null;
+    }
+
+    const arrowCheck = defaultShapeRecognizer.detectArrowHead(stroke.points);
+    const isArrow = rec.shape === "arrow" || arrowCheck.hasArrowHead;
+
+    return {
+      fromNode,
+      endPoint: ep,
+      isArrow,
+    };
   }
 
   updateEdgeWaypoints(edgeId: string, waypoints?: Point[]): void {
@@ -1564,7 +1851,30 @@ export class DiagramEditor {
 
   // --- Hand-Drawing, Shape Snapping & Freehand Escape Hatch (F-071, F-072, F-073) ---
 
-  addFreehandNode(stroke: Stroke): DiagramNode {
+  addFreehandNode(
+    stroke: Stroke,
+    options?: {
+      select?: boolean;
+      strokeWidth?: number;
+      strokeOpacity?: number;
+      style?: NodeStyle;
+    }
+  ): DiagramNode {
+    const select = options?.select ?? false;
+    const strokeWidth =
+      options?.strokeWidth ?? options?.style?.strokeWidth ?? this.freehandStrokeWidth;
+    const strokeOpacity =
+      options?.strokeOpacity ??
+      options?.style?.strokeOpacity ??
+      options?.style?.opacity ??
+      this.freehandStrokeStrength;
+
+    const effectiveStyle: NodeStyle = {
+      ...(options?.style ?? {}),
+      ...(strokeWidth !== undefined ? { strokeWidth } : {}),
+      ...(strokeOpacity !== undefined ? { strokeOpacity, opacity: strokeOpacity } : {}),
+    };
+
     const points = stroke.points;
     if (!points || points.length === 0) {
       return this.addNode({
@@ -1572,7 +1882,9 @@ export class DiagramEditor {
         position: { x: 0, y: 0 },
         size: { width: 100, height: 60 },
         title: "",
+        style: effectiveStyle,
         customData: { pathData: "", points: [] },
+        select,
       });
     }
 
@@ -1596,26 +1908,590 @@ export class DiagramEditor {
       y: Math.round((p.y - minY) * 10) / 10,
     }));
 
-    const pathData = relPoints.reduce(
-      (acc, p, i) => `${acc}${i === 0 ? "M" : " L"} ${p.x},${p.y}`,
-      ""
-    );
+    if (relPoints.length === 1) {
+      relPoints.push({ ...relPoints[0] });
+    }
+
+    let pathData = pointsToSmoothSvgPath(relPoints);
+    if (
+      pathData.startsWith("M") &&
+      !pathData.includes("L") &&
+      !pathData.includes("l") &&
+      !pathData.includes("Z") &&
+      !pathData.includes("z") &&
+      !pathData.includes("Q") &&
+      !pathData.includes("q") &&
+      !pathData.includes("C") &&
+      !pathData.includes("c")
+    ) {
+      const coords = pathData.substring(1).trim().split(/[ ,]+/);
+      if (coords.length >= 2) {
+        pathData = `${pathData} L ${coords[0]},${coords[1]}`;
+      }
+    }
 
     return this.addNode({
       kind: "generic.freehand",
       position: { x: Math.round(minX), y: Math.round(minY) },
       size: { width: Math.round(width), height: Math.round(height) },
       title: "",
+      style: effectiveStyle,
       customData: {
         pathData,
         points: relPoints,
         originalStrokeId: stroke.id,
       },
+      select,
     });
   }
 
-  keepAsFreehand(stroke: Stroke): DiagramNode {
-    return this.addFreehandNode(stroke);
+  addStroke(
+    stroke: Stroke,
+    options?: {
+      select?: boolean;
+      strokeWidth?: number;
+      strokeOpacity?: number;
+      style?: NodeStyle;
+    }
+  ): DiagramNode {
+    return this.addFreehandNode(stroke, options);
+  }
+
+  keepAsFreehand(
+    stroke: Stroke,
+    options?: {
+      select?: boolean;
+      strokeWidth?: number;
+      strokeOpacity?: number;
+      style?: NodeStyle;
+    }
+  ): DiagramNode {
+    return this.addFreehandNode(stroke, options);
+  }
+
+  enhanceStrokes(
+    strokes: Stroke[],
+    options?: { confidenceThreshold?: number }
+  ): DiagramNode | DiagramEdge | null {
+    if (!strokes || strokes.length === 0) return null;
+
+    const confidenceThreshold = options?.confidenceThreshold ?? 0.65;
+
+    // 1. Check if strokes form a connection between 2 components
+    const conn = this.enhanceConnectionStrokes(strokes, []);
+    if (conn) {
+      return conn;
+    }
+
+    // 2. Check if strokes form a table
+    const tableResult = defaultTableDetector.detect(strokes);
+    if (tableResult.isTable && tableResult.confidence >= confidenceThreshold) {
+      const node = this.addNode({
+        kind: "generic.table",
+        title: "",
+        position: {
+          x: Math.round(tableResult.bounds.position.x),
+          y: Math.round(tableResult.bounds.position.y),
+        },
+        size: {
+          width: Math.max(120, Math.round(tableResult.bounds.size.width)),
+          height: Math.max(80, Math.round(tableResult.bounds.size.height)),
+        },
+        customData: {
+          rows: tableResult.rows,
+          cols: tableResult.cols,
+          cells: tableResult.cells,
+          rowHeights: tableResult.rowHeights,
+          colWidths: tableResult.colWidths,
+        },
+        select: false,
+      });
+      return node;
+    }
+
+    if (strokes.length === 1) {
+      return this.snapStrokeToShape(strokes[0], { confidenceThreshold, select: false });
+    }
+
+    return null;
+  }
+
+  enhanceSelection(): DiagramNode | DiagramNode[] | DiagramEdge | null {
+    if (this.selectedNodeIds.length === 0) return null;
+
+    const freehandNodes = this.diagram.nodes.filter(
+      (n) => this.selectedNodeIds.includes(n.id) && n.kind === "generic.freehand"
+    );
+
+    if (freehandNodes.length === 0) return null;
+
+    const strokes: Stroke[] = freehandNodes.map((n) => {
+      const pts = (n.customData?.points as Point[]) || [];
+      return {
+        id: n.id,
+        points: pts.map((p) => ({
+          x: n.position.x + p.x,
+          y: n.position.y + p.y,
+        })),
+      };
+    });
+
+    // 1. First check if selected strokes form a connection between 2 components
+    const connectionResult = this.enhanceConnectionStrokes(
+      strokes,
+      freehandNodes.map((n) => n.id)
+    );
+    if (connectionResult) {
+      return connectionResult;
+    }
+
+    // 2. Check if selected strokes form a table (rows and columns)
+    const tableResult = defaultTableDetector.detect(strokes);
+    if (tableResult.isTable && tableResult.confidence >= 0.70) {
+      const newNode = createDiagramNode({
+        id: `table-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        kind: "generic.table",
+        title: "",
+        position: {
+          x: Math.round(tableResult.bounds.position.x),
+          y: Math.round(tableResult.bounds.position.y),
+        },
+        size: {
+          width: Math.max(120, Math.round(tableResult.bounds.size.width)),
+          height: Math.max(80, Math.round(tableResult.bounds.size.height)),
+        },
+        labels: [],
+        customData: {
+          rows: tableResult.rows,
+          cols: tableResult.cols,
+          cells: tableResult.cells,
+          rowHeights: tableResult.rowHeights,
+          colWidths: tableResult.colWidths,
+        },
+      });
+
+      const deleteCmd = new DeleteNodesAndEdgesCommand(
+        this.diagram,
+        freehandNodes.map((n) => n.id)
+      );
+      const addCmd = new AddNodeCommand(this.diagram, newNode);
+      const compound = new CompoundCommand([deleteCmd, addCmd], "Enhance strokes to table");
+      this.commandStack.execute(compound);
+
+      this.selectNode(newNode.id, false);
+      this.notify();
+      return newNode;
+    }
+
+    // 3. If single stroke that is a shape
+    if (strokes.length === 1) {
+      const shapeResult = this.snapStrokeToShape(strokes[0]);
+      if (shapeResult) {
+        const deleteCmd = new DeleteNodesAndEdgesCommand(this.diagram, [freehandNodes[0].id]);
+        this.commandStack.execute(deleteCmd);
+        this.notify();
+        return shapeResult;
+      }
+    }
+
+    return null;
+  }
+
+  // --- Table Operations ---
+
+  updateTableCell(nodeId: string, row: number, col: number, text: string): void {
+    const cmd = new UpdateTableCellCommand(this.diagram, nodeId, row, col, text);
+    this.commandStack.execute(cmd);
+  }
+
+  normalizeTableData(node: DiagramNode): { rows: number; cols: number; cells: string[][] } {
+    const rawRows = (node.customData?.rows as number) || (node.customData?.cells as string[][])?.length || 3;
+    const rawCols = (node.customData?.cols as number) || (node.customData?.cells as string[][])?.[0]?.length || 3;
+    const rows = Math.max(1, rawRows);
+    const cols = Math.max(1, rawCols);
+    const rawCells = (node.customData?.cells as string[][]) || [];
+    const cells: string[][] = [];
+    for (let r = 0; r < rows; r++) {
+      const row: string[] = [];
+      for (let c = 0; c < cols; c++) {
+        row.push(rawCells[r]?.[c] ?? "");
+      }
+      cells.push(row);
+    }
+    return { rows, cols, cells };
+  }
+
+  addTableRow(nodeId: string, atIndex?: number): void {
+    const node = this.diagram.nodes.find((n) => n.id === nodeId);
+    if (!node || node.kind !== "generic.table") return;
+    const { rows, cols, cells } = this.normalizeTableData(node);
+    const insertIdx = atIndex !== undefined ? Math.max(0, Math.min(rows, atIndex)) : rows;
+    const newRow = Array.from({ length: cols }, () => "");
+    cells.splice(insertIdx, 0, newRow);
+    const nextCustomData = {
+      ...node.customData,
+      rows: rows + 1,
+      cols,
+      cells,
+    };
+    const rowH = Math.max(28, Math.round(node.size.height / rows));
+    const nextSize = {
+      width: node.size.width,
+      height: node.size.height + rowH,
+    };
+    const cmd = new UpdateTableStructureCommand(this.diagram, nodeId, nextCustomData, nextSize);
+    this.commandStack.execute(cmd);
+  }
+
+  deleteTableRow(nodeId: string, rowIndex?: number): void {
+    const node = this.diagram.nodes.find((n) => n.id === nodeId);
+    if (!node || node.kind !== "generic.table") return;
+    const { rows, cols, cells } = this.normalizeTableData(node);
+    if (rows <= 1) return;
+    const targetIdx = rowIndex !== undefined ? Math.max(0, Math.min(cells.length - 1, rowIndex)) : cells.length - 1;
+    if (targetIdx >= 0 && targetIdx < cells.length) {
+      cells.splice(targetIdx, 1);
+    }
+    const nextCustomData = {
+      ...node.customData,
+      rows: rows - 1,
+      cols,
+      cells,
+    };
+    const rowH = Math.max(28, Math.round(node.size.height / rows));
+    const nextSize = {
+      width: node.size.width,
+      height: Math.max(40, node.size.height - rowH),
+    };
+    const cmd = new UpdateTableStructureCommand(this.diagram, nodeId, nextCustomData, nextSize);
+    this.commandStack.execute(cmd);
+  }
+
+  addTableColumn(nodeId: string, atIndex?: number): void {
+    const node = this.diagram.nodes.find((n) => n.id === nodeId);
+    if (!node || node.kind !== "generic.table") return;
+    const { rows, cols, cells } = this.normalizeTableData(node);
+    const insertIdx = atIndex !== undefined ? Math.max(0, Math.min(cols, atIndex)) : cols;
+    for (let r = 0; r < rows; r++) {
+      cells[r].splice(insertIdx, 0, "");
+    }
+    const nextCustomData = {
+      ...node.customData,
+      rows,
+      cols: cols + 1,
+      cells,
+    };
+    const colW = Math.max(40, Math.round(node.size.width / cols));
+    const nextSize = {
+      width: node.size.width + colW,
+      height: node.size.height,
+    };
+    const cmd = new UpdateTableStructureCommand(this.diagram, nodeId, nextCustomData, nextSize);
+    this.commandStack.execute(cmd);
+  }
+
+  deleteTableColumn(nodeId: string, colIndex?: number): void {
+    const node = this.diagram.nodes.find((n) => n.id === nodeId);
+    if (!node || node.kind !== "generic.table") return;
+    const { rows, cols, cells } = this.normalizeTableData(node);
+    if (cols <= 1) return;
+    const targetIdx = colIndex !== undefined ? Math.max(0, Math.min(cols - 1, colIndex)) : cols - 1;
+    for (let r = 0; r < rows; r++) {
+      if (targetIdx >= 0 && targetIdx < cells[r].length) {
+        cells[r].splice(targetIdx, 1);
+      }
+    }
+    const nextCustomData = {
+      ...node.customData,
+      rows,
+      cols: cols - 1,
+      cells,
+    };
+    const colW = Math.max(40, Math.round(node.size.width / cols));
+    const nextSize = {
+      width: Math.max(60, node.size.width - colW),
+      height: node.size.height,
+    };
+    const cmd = new UpdateTableStructureCommand(this.diagram, nodeId, nextCustomData, nextSize);
+    this.commandStack.execute(cmd);
+  }
+
+  addTableNode(params?: {
+    rows?: number;
+    cols?: number;
+    position?: Point;
+    size?: Size;
+    cells?: string[][];
+  }): DiagramNode {
+    const rows = params?.rows ?? 3;
+    const cols = params?.cols ?? 3;
+    const emptyCells =
+      params?.cells ??
+      Array.from({ length: rows }, () => Array.from({ length: cols }, () => ""));
+    return this.addNode({
+      kind: "generic.table",
+      title: "",
+      position: params?.position ?? { x: 100, y: 100 },
+      size: params?.size ?? { width: 300, height: 180 },
+      customData: {
+        rows,
+        cols,
+        cells: emptyCells,
+      },
+    });
+  }
+
+  private enhanceConnectionStrokes(
+    strokes: Stroke[],
+    freehandNodeIds: string[]
+  ): DiagramEdge | null {
+    if (!strokes || strokes.length === 0) return null;
+
+    const findStandardNode = (pt: Point, excludeId?: string): DiagramNode | null => {
+      let bestNode: DiagramNode | null = null;
+      let minDist = 160;
+      for (const node of this.diagram.nodes) {
+        if (excludeId && node.id === excludeId) continue;
+        if (freehandNodeIds.includes(node.id)) continue;
+        if (node.kind === "generic.freehand") continue;
+
+        const d = this.distanceToNode(pt, node);
+        if (d < minDist) {
+          minDist = d;
+          bestNode = node;
+        }
+      }
+      return bestNode;
+    };
+
+    // Find if any stroke or combination connects 2 standard nodes
+    let bestShaft: Stroke | null = null;
+    let fromNode: DiagramNode | null = null;
+    let toNode: DiagramNode | null = null;
+    let shaftResult: RecognitionResult | null = null;
+
+    // Sort strokes by arc length descending
+    const sortedStrokes = [...strokes].sort((a, b) => {
+      const lenA = (a.points || []).reduce(
+        (acc, p, i) => (i === 0 ? 0 : acc + Math.hypot(p.x - a.points[i - 1].x, p.y - a.points[i - 1].y)),
+        0
+      );
+      const lenB = (b.points || []).reduce(
+        (acc, p, i) => (i === 0 ? 0 : acc + Math.hypot(p.x - b.points[i - 1].x, p.y - b.points[i - 1].y)),
+        0
+      );
+      return lenB - lenA;
+    });
+
+    for (const stroke of sortedStrokes) {
+      if (!stroke.points || stroke.points.length < 2) continue;
+      const rec = defaultShapeRecognizer.recognize(stroke);
+      const sp = rec.startPoint ?? stroke.points[0];
+      const ep = rec.endPoint ?? stroke.points[stroke.points.length - 1];
+
+      const fn = findStandardNode(sp);
+      const tn = findStandardNode(ep, fn?.id);
+
+      if (fn && tn && fn.id !== tn.id) {
+        bestShaft = stroke;
+        fromNode = fn;
+        toNode = tn;
+        shaftResult = rec;
+        break;
+      }
+    }
+
+    if (!bestShaft || !fromNode || !toNode) {
+      return null;
+    }
+
+    // Check if shaft itself is an arrow or if any other stroke is an arrowhead
+    let hasArrowHead = shaftResult?.shape === "arrow";
+    let arrowPointsToTarget = true; // default points to toNode
+
+    // Check the remaining strokes for arrowheads
+    const otherStrokes = strokes.filter((s) => s.id !== bestShaft.id);
+    for (const other of otherStrokes) {
+      if (!other.points || other.points.length < 2) continue;
+      const arrowCheck = defaultShapeRecognizer.detectArrowHead(other.points);
+      const standaloneCheck = defaultShapeRecognizer.detectStandaloneArrowhead(other.points);
+
+      if (arrowCheck.hasArrowHead || standaloneCheck.isArrowHead) {
+        hasArrowHead = true;
+        const tip = standaloneCheck.isArrowHead ? standaloneCheck.tipPoint : arrowCheck.tipPoint;
+        const dToTarget = this.distanceToNode(tip, toNode);
+        const dToSource = this.distanceToNode(tip, fromNode);
+        if (dToTarget <= dToSource) {
+          arrowPointsToTarget = true;
+        } else {
+          arrowPointsToTarget = false;
+        }
+        break;
+      }
+
+      // Check if this other stroke is an arrow barb near the shaft endpoint
+      const shaftSp = shaftResult?.startPoint ?? bestShaft.points[0];
+      const shaftEp = shaftResult?.endPoint ?? bestShaft.points[bestShaft.points.length - 1];
+      const sDx = shaftEp.x - shaftSp.x;
+      const sDy = shaftEp.y - shaftSp.y;
+      const sLen = Math.hypot(sDx, sDy);
+
+      let minOtherDistToEp = Infinity;
+      let minOtherDistToSp = Infinity;
+      for (const pt of other.points) {
+        const dEp = Math.hypot(pt.x - shaftEp.x, pt.y - shaftEp.y);
+        const dSp = Math.hypot(pt.x - shaftSp.x, pt.y - shaftSp.y);
+        if (dEp < minOtherDistToEp) minOtherDistToEp = dEp;
+        if (dSp < minOtherDistToSp) minOtherDistToSp = dSp;
+      }
+
+      const oDx = other.points[other.points.length - 1].x - other.points[0].x;
+      const oDy = other.points[other.points.length - 1].y - other.points[0].y;
+      const oLen = Math.hypot(oDx, oDy);
+
+      if (sLen > 20 && oLen >= 5 && oLen <= 90) {
+        const angS = Math.atan2(sDy, sDx);
+        const angO = Math.atan2(oDy, oDx);
+        let angDiff = Math.abs(angO - angS);
+        if (angDiff > Math.PI) angDiff = 2 * Math.PI - angDiff;
+        const isDiagonalBarb =
+          (angDiff >= Math.PI * 0.08 && angDiff <= Math.PI * 0.48) ||
+          (angDiff >= Math.PI * 0.52 && angDiff <= Math.PI * 0.92);
+
+        if (minOtherDistToEp <= 45 && isDiagonalBarb) {
+          hasArrowHead = true;
+          arrowPointsToTarget = true;
+          break;
+        } else if (minOtherDistToSp <= 45 && isDiagonalBarb) {
+          hasArrowHead = true;
+          arrowPointsToTarget = false;
+          break;
+        }
+      }
+    }
+
+    const sourceNode = arrowPointsToTarget ? fromNode : toNode;
+    const targetNode = arrowPointsToTarget ? toNode : fromNode;
+
+    const dt = this.diagram.diagramType;
+    let edgeKind = "uml.directedAssociation";
+    if (hasArrowHead) {
+      switch (dt) {
+        case "uml.activity":
+        case "uml.interactionOverview":
+          edgeKind = "activity.controlFlow";
+          break;
+        case "uml.stateMachine":
+          edgeKind = "state.transition";
+          break;
+        case "uml.sequence":
+          edgeKind = "sequence.syncMessage";
+          break;
+        case "uml.class":
+        default:
+          edgeKind = "uml.directedAssociation";
+      }
+    } else {
+      edgeKind = this.activeEdgeKind ?? "uml.association";
+    }
+
+    const sourceCenter = {
+      x: sourceNode.position.x + sourceNode.size.width / 2,
+      y: sourceNode.position.y + sourceNode.size.height / 2,
+    };
+    const targetCenter = {
+      x: targetNode.position.x + targetNode.size.width / 2,
+      y: targetNode.position.y + targetNode.size.height / 2,
+    };
+
+    const fromSide = getFacingSide(sourceNode.position, sourceNode.size, targetCenter);
+    const toSide = getFacingSide(targetNode.position, targetNode.size, sourceCenter);
+
+    const fromPort = sourceNode.ports?.find((p) => p.side === fromSide);
+    const toPort = targetNode.ports?.find((p) => p.side === toSide);
+
+    const newEdge = createDiagramEdge({
+      id: `edge-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      kind: edgeKind,
+      fromNodeId: sourceNode.id,
+      toNodeId: targetNode.id,
+      fromSide,
+      toSide,
+      fromPortId: fromPort?.id,
+      toPortId: toPort?.id,
+      routing: this.defaultRouting,
+      style: hasArrowHead
+        ? {
+            markerEnd: "open-arrow",
+            lineType: "solid",
+            dashed: false,
+            strokeDasharray: undefined,
+          }
+        : {
+            markerEnd: "none",
+            markerStart: "none",
+            lineType: "solid",
+            dashed: false,
+            strokeDasharray: undefined,
+          },
+    });
+
+    if (freehandNodeIds.length > 0) {
+      const deleteCmd = new DeleteNodesAndEdgesCommand(this.diagram, freehandNodeIds);
+      const addCmd = new AddEdgeCommand(this.diagram, newEdge);
+      const compound = new CompoundCommand([deleteCmd, addCmd], "Enhance strokes to connector");
+      this.commandStack.execute(compound);
+    } else {
+      const addCmd = new AddEdgeCommand(this.diagram, newEdge);
+      this.commandStack.execute(addCmd);
+    }
+
+    this.selectEdge(newEdge.id, false);
+    this.notify();
+    return newEdge;
+  }
+
+  enhanceHanddrawnSelection(): boolean {
+    const freehandNodes = this.diagram.nodes.filter(
+      (n) =>
+        n.kind === "generic.freehand" &&
+        (this.selectedNodeIds.length === 0 || this.selectedNodeIds.includes(n.id))
+    );
+
+    if (freehandNodes.length === 0) {
+      return false;
+    }
+
+    const result: EnhanceResult = defaultHanddrawnNoteEnhancer.enhance(
+      freehandNodes,
+      this.diagram.nodes,
+      this.diagram.diagramType
+    );
+
+    if (result.nodesToAdd.length === 0 && result.edgesToAdd.length === 0) {
+      return false;
+    }
+
+    const command = new EnhanceHanddrawnNotesCommand(
+      this.diagram,
+      result.nodesToRemove,
+      result.nodesToAdd,
+      result.edgesToAdd
+    );
+
+    this.commandStack.execute(command);
+
+    // Select the newly created nodes
+    this.clearSelection();
+    for (const node of result.nodesToAdd) {
+      this.selectNode(node.id, true);
+    }
+    for (const edge of result.edgesToAdd) {
+      this.selectEdge(edge.id, true);
+    }
+    this.notify();
+
+    return true;
   }
 
   snapStrokeToShape(
@@ -1624,6 +2500,9 @@ export class DiagramEditor {
       confidenceThreshold?: number;
       forceFreehand?: boolean;
       fallbackToFreehand?: boolean;
+      select?: boolean;
+      strokeWidth?: number;
+      strokeOpacity?: number;
     } | number = 0.65
   ): DiagramNode | DiagramEdge | null {
     const opts =
@@ -1631,8 +2510,14 @@ export class DiagramEditor {
         ? { confidenceThreshold: optionsOrThreshold }
         : optionsOrThreshold;
 
+    const select = opts.select ?? false;
+
     if (opts.forceFreehand) {
-      return this.addFreehandNode(stroke);
+      return this.addFreehandNode(stroke, {
+        select: select ?? false,
+        strokeWidth: opts.strokeWidth,
+        strokeOpacity: opts.strokeOpacity,
+      });
     }
 
     const confidenceThreshold = opts.confidenceThreshold ?? 0.65;
@@ -1667,11 +2552,14 @@ export class DiagramEditor {
     // 1. Handdrawn Connection Line between 2 components (Issue #5)
     // If user drew a line or stroke between two components, connect them directly
     if (!isClosedShape && stroke.points && stroke.points.length >= 2) {
-      const fromNode = this.findNearestNode(sp, 140);
-      const toNode = this.findNearestNode(ep, 140, fromNode?.id);
+      const startPt = result.shape === "arrow" && result.startPoint ? result.startPoint : sp;
+      const endPt = result.shape === "arrow" && result.endPoint ? result.endPoint : ep;
+
+      const fromNode = this.findNearestNode(startPt, 150);
+      const toNode = this.findNearestNode(endPt, 150, fromNode?.id);
 
       if (fromNode && toNode && fromNode.id !== toNode.id) {
-        let edgeKind = "uml.association";
+        let edgeKind = "uml.directedAssociation";
         if (result.shape === "arrow") {
           switch (dt) {
             case "uml.activity":
@@ -1681,15 +2569,12 @@ export class DiagramEditor {
             case "uml.stateMachine":
               edgeKind = "state.transition";
               break;
-            case "uml.package":
-              edgeKind = "package.dependency";
-              break;
-            case "uml.profile":
-              edgeKind = "profile.extension";
+            case "uml.sequence":
+              edgeKind = "sequence.syncMessage";
               break;
             case "uml.class":
             default:
-              edgeKind = "uml.dependency";
+              edgeKind = "uml.directedAssociation";
           }
         } else {
           switch (dt) {
@@ -1721,20 +2606,23 @@ export class DiagramEditor {
           y: toNode.position.y + toNode.size.height / 2,
         };
 
-        const distFromCenter = Math.hypot(sp.x - fromCenter.x, sp.y - fromCenter.y);
-        const distToCenter = Math.hypot(ep.x - toCenter.x, ep.y - toCenter.y);
+        const distFromCenter = Math.hypot(startPt.x - fromCenter.x, startPt.y - fromCenter.y);
+        const distToCenter = Math.hypot(endPt.x - toCenter.x, endPt.y - toCenter.y);
 
         const fromSide: Side =
           distFromCenter > 20
-            ? getFacingSide(fromNode.position, fromNode.size, sp)
+            ? getFacingSide(fromNode.position, fromNode.size, startPt)
             : getFacingSide(fromNode.position, fromNode.size, toCenter);
         const toSide: Side =
           distToCenter > 20
-            ? getFacingSide(toNode.position, toNode.size, ep)
+            ? getFacingSide(toNode.position, toNode.size, endPt)
             : getFacingSide(toNode.position, toNode.size, fromCenter);
 
         const fromPort = fromNode.ports?.find((p) => p.side === fromSide);
         const toPort = toNode.ports?.find((p) => p.side === toSide);
+
+        const isArrow = result.shape === "arrow";
+        const isCustomKind = !isArrow && this.activeEdgeKind && this.activeEdgeKind !== "uml.association";
 
         return this.addEdge(fromNode.id, toNode.id, {
           kind: edgeKind,
@@ -1742,13 +2630,42 @@ export class DiagramEditor {
           toSide,
           fromPortId: fromPort?.id,
           toPortId: toPort?.id,
+          select,
+          style: isArrow
+            ? {
+                markerEnd: "open-arrow",
+                lineType: "solid",
+                dashed: false,
+                strokeDasharray: undefined,
+              }
+            : isCustomKind
+            ? undefined
+            : {
+                markerEnd: "none",
+                markerStart: "none",
+                lineType: "solid",
+                dashed: false,
+                strokeDasharray: undefined,
+              },
         });
+      }
+    }
+
+    // 1b. Check if user drew an arrowhead attached to an existing edge
+    if (!isClosedShape && stroke.points && stroke.points.length >= 2) {
+      const attachedEdge = this.attachArrowHeadToExistingEdge(stroke, { select });
+      if (attachedEdge) {
+        return attachedEdge;
       }
     }
 
     if (result.confidence < confidenceThreshold || result.shape === "none") {
       if (opts.fallbackToFreehand) {
-        return this.addFreehandNode(stroke);
+        return this.addFreehandNode(stroke, {
+          select: select ?? false,
+          strokeWidth: opts.strokeWidth,
+          strokeOpacity: opts.strokeOpacity,
+        });
       }
       return null;
     }
@@ -1871,14 +2788,121 @@ export class DiagramEditor {
           height,
         },
         title,
+        select,
       });
     }
 
     if (opts.fallbackToFreehand) {
-      return this.addFreehandNode(stroke);
+      return this.addFreehandNode(stroke, {
+        select: select ?? false,
+        strokeWidth: opts.strokeWidth,
+        strokeOpacity: opts.strokeOpacity,
+      });
     }
 
     return null;
+  }
+
+  attachArrowHeadToExistingEdge(
+    stroke: Stroke,
+    options?: { select?: boolean }
+  ): DiagramEdge | null {
+    if (!stroke.points || stroke.points.length < 2) return null;
+
+    const arrowCheck = defaultShapeRecognizer.detectArrowHead(stroke.points);
+    const standaloneCheck = defaultShapeRecognizer.detectStandaloneArrowhead(stroke.points);
+
+    let isBarb = false;
+    let tip: Point;
+
+    if (standaloneCheck.isArrowHead) {
+      tip = standaloneCheck.tipPoint;
+    } else if (arrowCheck.hasArrowHead) {
+      tip = arrowCheck.tipPoint;
+    } else {
+      const pStart = stroke.points[0];
+      const pEnd = stroke.points[stroke.points.length - 1];
+      const strokeLen = Math.hypot(pEnd.x - pStart.x, pEnd.y - pStart.y);
+      if (strokeLen >= 6 && strokeLen <= 85) {
+        isBarb = true;
+        tip = pEnd;
+      } else {
+        return null;
+      }
+    }
+
+    let bestEdge: DiagramEdge | null = null;
+    let bestDist = 120;
+    let targetEnd = true; // true = markerEnd, false = markerStart
+
+    for (const edge of this.diagram.edges) {
+      const fromNode = this.diagram.nodes.find((n) => n.id === edge.fromNodeId);
+      const toNode = this.diagram.nodes.find((n) => n.id === edge.toNodeId);
+      if (!fromNode || !toNode) continue;
+
+      const fromCenter = {
+        x: fromNode.position.x + fromNode.size.width / 2,
+        y: fromNode.position.y + fromNode.size.height / 2,
+      };
+      const toCenter = {
+        x: toNode.position.x + toNode.size.width / 2,
+        y: toNode.position.y + toNode.size.height / 2,
+      };
+
+      let checkPt = tip;
+      if (isBarb) {
+        // For a barb, pick the stroke point closest to the node center
+        const p1 = stroke.points[0];
+        const p2 = stroke.points[stroke.points.length - 1];
+        const d1 = Math.min(Math.hypot(p1.x - toCenter.x, p1.y - toCenter.y), Math.hypot(p1.x - fromCenter.x, p1.y - fromCenter.y));
+        const d2 = Math.min(Math.hypot(p2.x - toCenter.x, p2.y - toCenter.y), Math.hypot(p2.x - fromCenter.x, p2.y - fromCenter.y));
+        checkPt = d1 < d2 ? p1 : p2;
+      }
+
+      const dToCenter = Math.hypot(checkPt.x - toCenter.x, checkPt.y - toCenter.y);
+      const dFromCenter = Math.hypot(checkPt.x - fromCenter.x, checkPt.y - fromCenter.y);
+      const dToNode = this.distanceToNode(checkPt, toNode);
+      const dFromNode = this.distanceToNode(checkPt, fromNode);
+
+      const effectiveDistTo = Math.min(dToCenter, dToNode);
+      const effectiveDistFrom = Math.min(dFromCenter, dFromNode);
+
+      if (effectiveDistTo < bestDist && effectiveDistTo <= effectiveDistFrom) {
+        bestDist = effectiveDistTo;
+        bestEdge = edge;
+        targetEnd = true;
+      } else if (effectiveDistFrom < bestDist) {
+        bestDist = effectiveDistFrom;
+        bestEdge = edge;
+        targetEnd = false;
+      }
+    }
+
+    if (!bestEdge) return null;
+
+    const newKind =
+      bestEdge.kind === "uml.association" || bestEdge.kind === "uml.dependency"
+        ? "uml.directedAssociation"
+        : bestEdge.kind;
+
+    const styleUpdates: Partial<EdgeStyle> = {
+      lineType: "solid",
+      dashed: false,
+      strokeDasharray: undefined,
+    };
+
+    if (targetEnd) {
+      styleUpdates.markerEnd = "open-arrow";
+    } else {
+      styleUpdates.markerStart = "open-arrow";
+    }
+
+    this.updateEdgeStyle(bestEdge.id, styleUpdates, newKind);
+    if (options?.select === true) {
+      this.selectEdge(bestEdge.id, false);
+    }
+    this.notify();
+    return bestEdge;
   }
 
   private distanceToNode(pt: Point, node: DiagramNode): number {
@@ -1936,10 +2960,34 @@ export class DiagramEditor {
   // --- Copy / Paste (F-012) ---
 
   private static globalClipboard: CanvasClipboardData | null = null;
+  public static lastCopyTimestamp = 0;
+
+  get canPaste(): boolean {
+    const data = DiagramEditor.globalClipboard;
+    return Boolean(
+      data &&
+        ((data.nodes && data.nodes.length > 0) ||
+          (data.edges && data.edges.length > 0) ||
+          (data.groups && data.groups.length > 0))
+    );
+  }
 
   copySelection(): CanvasClipboardData {
-    const selectedNodes = this.diagram.nodes.filter((n) =>
-      this.selectedNodeIdSet.has(n.id)
+    const groupMemberNodeIds = new Set<string>();
+    const selectedGroups: Group[] = [];
+    if (this.diagram.groups) {
+      for (const group of this.diagram.groups) {
+        if (this.selectedGroupIdSet.has(group.id)) {
+          selectedGroups.push(JSON.parse(JSON.stringify(group)) as Group);
+          for (const nid of group.nodeIds || []) {
+            groupMemberNodeIds.add(nid);
+          }
+        }
+      }
+    }
+
+    const selectedNodes = this.diagram.nodes.filter(
+      (n) => this.selectedNodeIdSet.has(n.id) || groupMemberNodeIds.has(n.id)
     );
     const selectedNodeIds = new Set(selectedNodes.map((n) => n.id));
 
@@ -1955,30 +3003,105 @@ export class DiagramEditor {
       diagramType: this.diagram.diagramType,
       nodes: JSON.parse(JSON.stringify(selectedNodes)) as DiagramNode[],
       edges: JSON.parse(JSON.stringify(selectedEdges)) as DiagramEdge[],
+      groups: selectedGroups.length > 0 ? selectedGroups : undefined,
     };
 
     DiagramEditor.globalClipboard = payload;
+    DiagramEditor.lastCopyTimestamp = Date.now();
+
+    if (
+      typeof navigator !== "undefined" &&
+      navigator.clipboard &&
+      typeof navigator.clipboard.writeText === "function"
+    ) {
+      try {
+        void navigator.clipboard.writeText(JSON.stringify(payload));
+      } catch {
+        // Ignore clipboard write failures (e.g. headless or unfocused context)
+      }
+    }
+
     return payload;
   }
 
-  paste(
-    offset: Point = { x: 20, y: 20 },
+  pasteAt(
+    position: Point,
     sourceData?: CanvasClipboardData
-  ): { nodes: DiagramNode[]; edges: DiagramEdge[] } {
+  ): { nodes: DiagramNode[]; edges: DiagramEdge[]; groups: Group[] } {
+    return this.paste(position, sourceData, { isPosition: true });
+  }
+
+  paste(
+    targetOrOffset: Point = { x: 20, y: 20 },
+    sourceData?: CanvasClipboardData,
+    options?: { isPosition?: boolean }
+  ): { nodes: DiagramNode[]; edges: DiagramEdge[]; groups: Group[] } {
     const data = sourceData ?? DiagramEditor.globalClipboard;
     if (
       !data ||
       ((!data.nodes || data.nodes.length === 0) &&
-        (!data.edges || data.edges.length === 0))
+        (!data.edges || data.edges.length === 0) &&
+        (!data.groups || data.groups.length === 0))
     ) {
-      return { nodes: [], edges: [] };
+      return { nodes: [], edges: [], groups: [] };
+    }
+
+    let offset: Point = { x: targetOrOffset.x, y: targetOrOffset.y };
+
+    if (options?.isPosition) {
+      const allX: number[] = [];
+      const allY: number[] = [];
+
+      for (const node of data.nodes || []) {
+        allX.push(node.position.x);
+        allY.push(node.position.y);
+      }
+
+      for (const group of data.groups || []) {
+        if (group.position) {
+          allX.push(group.position.x);
+          allY.push(group.position.y);
+        }
+      }
+
+      if (allX.length > 0 && allY.length > 0) {
+        const minX = Math.min(...allX);
+        const minY = Math.min(...allY);
+        let dx = targetOrOffset.x - minX;
+        let dy = targetOrOffset.y - minY;
+
+        // If target coordinate matches the copied selection origin exactly,
+        // offset slightly so pasted elements do not completely overlap
+        if (dx === 0 && dy === 0) {
+          dx = 20;
+          dy = 20;
+        }
+
+        offset = { x: dx, y: dy };
+      } else if (data.edges && data.edges.length > 0) {
+        const waypoints = data.edges.flatMap((e) => e.waypoints || []);
+        if (waypoints.length > 0) {
+          const minX = Math.min(...waypoints.map((p) => p.x));
+          const minY = Math.min(...waypoints.map((p) => p.y));
+          let dx = targetOrOffset.x - minX;
+          let dy = targetOrOffset.y - minY;
+          if (dx === 0 && dy === 0) {
+            dx = 20;
+            dy = 20;
+          }
+          offset = { x: dx, y: dy };
+        } else {
+          offset = { x: 20, y: 20 };
+        }
+      }
     }
 
     const nodeIdMap = new Map<string, string>();
     const portIdMap = new Map<string, string>();
     const newNodes: DiagramNode[] = [];
     const newEdges: DiagramEdge[] = [];
-    const commands: (AddNodeCommand | AddEdgeCommand)[] = [];
+    const newGroups: Group[] = [];
+    const commands: (AddNodeCommand | AddEdgeCommand | AddGroupCommand)[] = [];
 
     // Remap nodes
     for (const node of data.nodes || []) {
@@ -2017,10 +3140,42 @@ export class DiagramEditor {
         labels: clonedLabels,
         childDiagramId: node.childDiagramId,
         metadata: node.metadata ? { ...node.metadata } : {},
+        style: node.style ? { ...node.style } : undefined,
+        customData: node.customData
+          ? (JSON.parse(JSON.stringify(node.customData)) as Record<string, unknown>)
+          : undefined,
       });
 
       newNodes.push(clonedNode);
       commands.push(new AddNodeCommand(this.diagram, clonedNode));
+    }
+
+    // Remap groups
+    for (const group of data.groups || []) {
+      const newGroupId = `group-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      const newNodeIds = (group.nodeIds || [])
+        .map((id) => nodeIdMap.get(id))
+        .filter((id): id is string => typeof id === "string");
+
+      const clonedGroup = createGroup({
+        id: newGroupId,
+        name: group.name ? `${group.name} (Copy)` : "Group",
+        nodeIds: newNodeIds,
+        collapsed: group.collapsed,
+        color: group.color,
+        position: group.position
+          ? { x: group.position.x + offset.x, y: group.position.y + offset.y }
+          : undefined,
+        size: group.size ? { ...group.size } : undefined,
+        locked: false,
+        fontSize: group.fontSize,
+        bold: group.bold,
+        italic: group.italic,
+        fontFamily: group.fontFamily,
+      });
+
+      newGroups.push(clonedGroup);
+      commands.push(new AddGroupCommand(this.diagram, clonedGroup));
     }
 
     // Remap edges connecting copied nodes, or duplicate selected edges connecting existing nodes
@@ -2085,25 +3240,29 @@ export class DiagramEditor {
 
       this.selectedNodeIdSet.clear();
       this.selectedEdgeIdSet.clear();
+      this.selectedGroupIdSet.clear();
       for (const n of newNodes) this.selectedNodeIdSet.add(n.id);
       for (const e of newEdges) this.selectedEdgeIdSet.add(e.id);
+      for (const g of newGroups) this.selectedGroupIdSet.add(g.id);
       this.notify();
     }
 
-    return { nodes: newNodes, edges: newEdges };
+    return { nodes: newNodes, edges: newEdges, groups: newGroups };
   }
 
   duplicateSelection(
     offset: Point = { x: 30, y: 30 }
-  ): { nodes: DiagramNode[]; edges: DiagramEdge[] } {
+  ): { nodes: DiagramNode[]; edges: DiagramEdge[]; groups: Group[] } {
     const clipboardData = this.copySelection();
     if (
       !clipboardData ||
-      (clipboardData.nodes.length === 0 && clipboardData.edges.length === 0)
+      ((!clipboardData.nodes || clipboardData.nodes.length === 0) &&
+        (!clipboardData.edges || clipboardData.edges.length === 0) &&
+        (!clipboardData.groups || clipboardData.groups.length === 0))
     ) {
-      return { nodes: [], edges: [] };
+      return { nodes: [], edges: [], groups: [] };
     }
-    return this.paste(offset, clipboardData);
+    return this.paste(offset, clipboardData, { isPosition: false });
   }
 
   alignNodes(type: AlignmentType): boolean {
@@ -2245,7 +3404,6 @@ export class DiagramEditor {
 
     if (commands.length === 0) return false;
     this.commandStack.execute(new CompoundCommand(commands, "Match node sizes"));
-    this.notify();
     return true;
   }
 

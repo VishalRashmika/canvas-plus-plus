@@ -12,6 +12,8 @@ import { FileDiagramRepository } from "./infrastructure/persistence/FileDiagramR
 import { ApplyExternalPatch } from "./application/use-cases/ApplyExternalPatch";
 import { FileWatcherBridge } from "./infrastructure/cli-bridge/FileWatcherBridge";
 import { ExportForRAG } from "./application/use-cases/ExportForRAG";
+import { defaultWorkerPool } from "./infrastructure/concurrency/WorkerPool";
+import { defaultConcurrencyManager } from "./infrastructure/concurrency/ConcurrencyManager";
 
 /**
  * Composition root — see docs/01-ARCHITECTURE.md.
@@ -169,6 +171,21 @@ export default class CanvasPlusPlusPlugin extends Plugin {
       },
     });
 
+    this.addCommand({
+      id: "insert-pdf-document",
+      name: "Insert PDF document",
+      checkCallback: (checking: boolean) => {
+        const activeView = this.app.workspace.getActiveViewOfType(UmlCanvasView);
+        if (activeView && activeView.diagramEditor) {
+          if (!checking) {
+            activeView.openPdfPickerModal();
+          }
+          return true;
+        }
+        return false;
+      },
+    });
+
     // F-084: Register command palette entry to export active diagram for RAG
     this.addCommand({
       id: "export-diagram-for-rag",
@@ -200,6 +217,27 @@ export default class CanvasPlusPlusPlugin extends Plugin {
         this.settings.theme = nextTheme;
         await this.saveSettings();
         new Notice(`Canvas++ theme set to ${nextTheme === "light" ? "Pastel Light" : "Dark"}`);
+      },
+    });
+
+    // Enhance handdrawn notes command
+    this.addCommand({
+      id: "enhance-handdrawn-note",
+      name: "Enhance handdrawn notes into standard note",
+      checkCallback: (checking: boolean) => {
+        const activeView = this.app.workspace.getActiveViewOfType(UmlCanvasView);
+        if (activeView && activeView.diagramEditor) {
+          if (!checking) {
+            const enhanced = activeView.diagramEditor.enhanceHanddrawnSelection();
+            if (enhanced) {
+              new Notice("Handdrawn notes enhanced into standard components");
+            } else {
+              new Notice("No handdrawn strokes found to enhance");
+            }
+          }
+          return true;
+        }
+        return false;
       },
     });
 
@@ -655,6 +693,18 @@ export default class CanvasPlusPlusPlugin extends Plugin {
         console.warn("[Canvas++] Error stopping fileWatcherBridge:", err);
       }
       this.fileWatcherBridge = null;
+    }
+
+    try {
+      defaultWorkerPool.terminate();
+    } catch (err) {
+      console.warn("[Canvas++] Error terminating worker pool:", err);
+    }
+
+    try {
+      defaultConcurrencyManager.dispose();
+    } catch (err) {
+      console.warn("[Canvas++] Error disposing concurrency manager:", err);
     }
   }
 }

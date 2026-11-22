@@ -1,4 +1,4 @@
-import { TextFileView, WorkspaceLeaf, Menu, TFile, MarkdownRenderer, Platform, App } from "obsidian";
+import { TextFileView, WorkspaceLeaf, Menu, TFile, MarkdownRenderer, Platform, App, Scope } from "obsidian";
 
 declare module "obsidian" {
   interface MenuItem {
@@ -17,7 +17,7 @@ import { DiagramEdge } from "../../domain/entities/DiagramEdge";
 import { Group } from "../../domain/entities/Group";
 import { Point } from "../../domain/value-objects/Point";
 import { Size } from "../../domain/value-objects/Rect";
-import { DiagramEditor } from "../../application/use-cases/DiagramEditor";
+import { DiagramEditor, CanvasClipboardData } from "../../application/use-cases/DiagramEditor";
 import { AutosaveCoordinator } from "../../application/use-cases/AutosaveCoordinator";
 import { JsonCanvasSerializer } from "../../infrastructure/persistence/JsonCanvasSerializer";
 import { defaultJsonCanvasImporter } from "../../infrastructure/persistence/JsonCanvasImporter";
@@ -27,19 +27,22 @@ import { PalettePanel } from "./PalettePanel";
 import { MinimapView } from "./MinimapView";
 import { NoteSuggestModal } from "./NoteSuggestModal";
 import { ImageSuggestModal, isImageFile } from "./ImageSuggestModal";
+import { PdfSuggestModal, isPdfFile } from "./PdfSuggestModal";
+import { PdfPageModal } from "./PdfPageModal";
 import { ChipDefinitionModal } from "./ChipDefinitionModal";
 import { ChipInterfaceDefinition } from "../../domain/entities/ChipInterfaceDefinition";
 import { defaultCustomChipRegistry } from "../../domain/services/CustomChipRegistry";
 import { Stroke } from "../../domain/services/ShapeRecognizer";
 import { wrapTextToLines } from "../../domain/services/TextMeasurement";
 import { UmlCanvasSettings } from "../../infrastructure/obsidian/PluginSettings";
+import { CanvasAttachmentService } from "../../infrastructure/obsidian/CanvasAttachmentService";
 import { CANVAS_COLOR_PRESETS } from "../../domain/value-objects/CanvasColor";
 import { FONT_SIZE_PRESETS } from "../theme/Typography";
 
 interface AppWithDragManager extends App {
   dragManager?: {
-    draggable?: { file?: unknown };
-    dragData?: { file?: unknown };
+    draggable?: { file?: unknown; files?: unknown[] };
+    dragData?: { file?: unknown; files?: unknown[] };
   };
 }
 
@@ -54,6 +57,26 @@ export class UmlCanvasView extends TextFileView {
   private rootEl: HTMLElement | null = null;
   private escapeHatchEl: HTMLElement | null = null;
   private escapeHatchTimer: number | null = null;
+  private _canvasAttachmentService: CanvasAttachmentService | null = null;
+  private _attachmentServiceApp: App | null = null;
+  private lastMouseCanvasPos: Point | null = null;
+  private cachedRootElRect: DOMRect | null = null;
+
+  public get canvasAttachmentService(): CanvasAttachmentService {
+    if (
+      !this._canvasAttachmentService ||
+      this._attachmentServiceApp !== this.app
+    ) {
+      this._canvasAttachmentService = new CanvasAttachmentService(this.app);
+      this._attachmentServiceApp = this.app;
+    }
+    return this._canvasAttachmentService;
+  }
+
+  public set canvasAttachmentService(service: CanvasAttachmentService) {
+    this._canvasAttachmentService = service;
+    this._attachmentServiceApp = this.app;
+  }
 
   constructor(leaf: WorkspaceLeaf, private readonly plugin: CanvasPlusPlusPlugin) {
     super(leaf);
@@ -242,10 +265,15 @@ export class UmlCanvasView extends TextFileView {
     this.contentEl.empty();
 
     this.rootEl = this.contentEl.createDiv({ cls: "umlcanvas-view-container" });
+    this.rootEl.setAttribute("tabindex", "-1");
     this.applyTheme();
     const svgContainer = this.rootEl.createDiv({ cls: "umlcanvas-svg-container" });
+    svgContainer.setAttribute("tabindex", "-1");
 
     this.editor = new DiagramEditor(diagram);
+
+    // Resolve resource paths for vault PDFs and images before initial render
+    this.resolveVaultResourcePaths();
 
     const settings = this.plugin?.settings;
 
@@ -253,17 +281,32 @@ export class UmlCanvasView extends TextFileView {
     this.autosaveCoordinator = new AutosaveCoordinator(
       this.editor,
       async () => {
-        this.requestSave();
+        if (typeof this.requestSave === "function") {
+          this.requestSave();
+        }
       },
       settings?.autosaveDelayMs ?? 1000
     );
+
+    const initialBrushWidth = settings?.freehandBrushWidth ?? 2;
+    const initialBrushStrength = settings?.freehandBrushStrength ?? 1.0;
+    this.editor.freehandStrokeWidth = initialBrushWidth;
+    this.editor.freehandStrokeStrength = initialBrushStrength;
 
     // Setup SVG Renderer
     this.renderer = new SvgSceneRenderer(svgContainer, this.editor, {
       showGrid: settings?.showGrid ?? true,
       enableFreehand: settings?.enableFreehand ?? true,
-      autoShapeDetection: settings?.autoShapeDetection ?? true,
-      onModeChange: () => {
+      autoShapeDetection: settings?.autoShapeDetection ?? false,
+      freehandBrushWidth: initialBrushWidth,
+      freehandBrushStrength: initialBrushStrength,
+      onModeChange: (mode) => {
+        if (this.rootEl) {
+          this.rootEl.classList.toggle(
+            "umlcanvas-freehand-mode",
+            mode === "draw"
+          );
+        }
         if (this.toolbar) {
           this.toolbar.updateToolMode();
         }
@@ -273,21 +316,52 @@ export class UmlCanvasView extends TextFileView {
           this.toolbar.updateZoomLabel(t);
         }
         if (this.minimap) {
-          this.minimap.update();
+          this.minimap.updateViewport();
         }
       },
       onStrokeComplete: (stroke, strokeOpts) => {
         if (!this.editor) return;
-        const autoDetect = strokeOpts?.autoDetect ?? this.renderer?.isAutoShapeDetection ?? true;
+
+        const strokeWidth = strokeOpts?.strokeWidth ?? this.renderer?.brushWidth ?? 2;
+        const strokeOpacity = strokeOpts?.strokeOpacity ?? this.renderer?.brushStrength ?? 1.0;
+
+        const autoDetect = strokeOpts?.autoDetect ?? this.renderer?.isAutoShapeDetection ?? false;
         if (autoDetect) {
-          const result = this.editor.snapStrokeToShape(stroke);
+          const emptyConn = this.editor.detectStrokeToEmptySpace(stroke);
+          if (emptyConn && this.renderer) {
+            const startPt = emptyConn.fromNode.position;
+            const clientPoint = this.renderer.canvasToScreenPoint(emptyConn.endPoint);
+            this.renderer.openArrowAttachmentPopup({
+              fromNodeId: emptyConn.fromNode.id,
+              dropCanvasPoint: emptyConn.endPoint,
+              dropClientPoint: clientPoint,
+              startPoint: startPt,
+            });
+            return;
+          }
+
+          const result = this.editor.snapStrokeToShape(stroke, {
+            select: false,
+            fallbackToFreehand: true,
+            strokeWidth,
+            strokeOpacity,
+          });
           if (result) {
-            this.showFreehandEscapeHatch(stroke);
+            const isFreehand = (result as DiagramNode).kind === "generic.freehand";
+            if (!isFreehand) {
+              this.showFreehandEscapeHatch(
+                stroke,
+                "Shape recognized"
+              );
+            }
           } else {
-            this.editor.keepAsFreehand(stroke);
+            this.editor.keepAsFreehand(stroke, { select: false, strokeWidth, strokeOpacity });
           }
         } else {
-          this.editor.keepAsFreehand(stroke);
+          this.editor.keepAsFreehand(stroke, { select: false, strokeWidth, strokeOpacity });
+        }
+        if (this.editor.hasSelection) {
+          this.editor.clearSelection();
         }
       },
       onContextMenu: (e, canvasPoint, node, edge, group) => {
@@ -307,71 +381,36 @@ export class UmlCanvasView extends TextFileView {
       onChipEdit: (node) => {
         this.openChipDefinitionModal({ existingNode: node });
       },
-      onExternalDrop: async (e: DragEvent, canvasPoint: Point) => {
-        // 1. Check Obsidian dragManager
-        const appWithDrag = this.app as unknown as AppWithDragManager;
-        const dragManager = appWithDrag.dragManager;
-        let file: TFile | null = null;
-        if (dragManager?.draggable?.file instanceof TFile) {
-          file = dragManager.draggable.file;
-        } else if (dragManager?.dragData?.file instanceof TFile) {
-          file = dragManager.dragData.file;
-        }
-
-        // 2. Check dataTransfer text for wikilink or path
-        if (!file && e.dataTransfer) {
-          const text = e.dataTransfer.getData("text/plain") || "";
-          const match = text.match(/^\[\[(.*?)\]\]$/);
-          const linkPath = match ? match[1].split("|")[0].split("#")[0] : text.trim();
-          if (linkPath) {
-            const dest = this.app.metadataCache.getFirstLinkpathDest(linkPath, this.file?.path ?? "");
-            if (dest instanceof TFile) {
-              file = dest;
-            } else {
-              const byPath = this.app.vault.getAbstractFileByPath(linkPath);
-              if (byPath instanceof TFile) {
-                file = byPath;
-              } else {
-                const byPathMd = this.app.vault.getAbstractFileByPath(linkPath + ".md");
-                if (byPathMd instanceof TFile) {
-                  file = byPathMd;
-                }
+      onPdfPick: (node) => {
+        this.openPdfPickerModal(node.position, node.id);
+      },
+      onPdfChangePage: (node) => {
+        this.promptChangePdfPage(node);
+      },
+      onExternalDrop: (e: DragEvent, canvasPoint: Point) => this.handleExternalDrop(e, canvasPoint),
+      onPasteRequested: (canvasPoint?: Point) => void this.pasteFromClipboardOrEditor(canvasPoint),
+      onOpenVaultNote: (cb) => {
+        new NoteSuggestModal(this.app, (file: TFile) => {
+          cb(file);
+        }).open();
+      },
+      onOpenVaultImage: (cb) => {
+        const vaultImages = this.app.vault.getFiles().filter((f: TFile) => isImageFile(f));
+        if (vaultImages.length > 0) {
+          new ImageSuggestModal(this.app, (file: TFile) => {
+            let src = file.path;
+            try {
+              if (typeof this.app.vault.getResourcePath === "function") {
+                src = this.app.vault.getResourcePath(file);
               }
+            } catch {
+              src = file.path;
             }
-          }
+            cb({ path: file.path, src });
+          }).open();
+        } else {
+          cb({ path: "", src: "" });
         }
-
-        if (file) {
-          if (isImageFile(file)) {
-            await this.addImageToCanvas({ file, canvasPoint });
-          } else {
-            await this.addNoteToCanvas(file, canvasPoint);
-          }
-          return true;
-        }
-
-        // 3. Check dataTransfer files from OS file manager
-        if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
-          for (let i = 0; i < e.dataTransfer.files.length; i++) {
-            const osFile = e.dataTransfer.files[i];
-            if (osFile.type.startsWith("image/") || isImageFile(osFile.name)) {
-              if (typeof FileReader !== "undefined") {
-                const reader = new FileReader();
-                reader.onload = () => {
-                  const dataUrl = reader.result as string;
-                  void this.addImageToCanvas({
-                    src: dataUrl,
-                    title: osFile.name.replace(/\.[^/.]+$/, ""),
-                    canvasPoint,
-                  });
-                };
-                reader.readAsDataURL(osFile);
-              }
-              return true;
-            }
-          }
-        }
-        return false;
       },
     });
 
@@ -418,17 +457,55 @@ export class UmlCanvasView extends TextFileView {
       },
       () => {
         this.openImagePickerModal();
+      },
+      () => {
+        this.openPdfPickerModal();
+      },
+      () => {
+        void this.pasteFromClipboardOrEditor();
+      },
+      (width, strength) => {
+        if (this.plugin?.settings) {
+          this.plugin.settings.freehandBrushWidth = width;
+          this.plugin.settings.freehandBrushStrength = strength;
+          void this.plugin.saveSettings?.();
+        }
       }
     );
 
+    // Track cursor canvas position for accurate pasting (#5)
+    const updateCursorPos = (e: MouseEvent) => {
+      const pos = this.renderer?.lastMouseCanvasPosition;
+      if (pos) {
+        this.lastMouseCanvasPos = pos;
+        return;
+      }
+      if (this.rootEl && typeof this.rootEl.getBoundingClientRect === "function") {
+        const rect = this.rootEl.getBoundingClientRect();
+        const clientX = e.clientX - rect.left;
+        const clientY = e.clientY - rect.top;
+        const transform = this.renderer?.currentTransform ?? { panX: 0, panY: 0, zoom: 1 };
+        this.lastMouseCanvasPos = {
+          x: Math.round((clientX - transform.panX) / transform.zoom),
+          y: Math.round((clientY - transform.panY) / transform.zoom),
+        };
+      }
+    };
+    this.rootEl.addEventListener("mousemove", updateCursorPos);
+    this.rootEl.addEventListener("mousedown", updateCursorPos);
+    this.rootEl.addEventListener("contextmenu", updateCursorPos);
+
     // Deselect currently selected component(s) when clicking empty canvas space (#9)
     this.rootEl.addEventListener("mousedown", (e: MouseEvent) => {
+      if (typeof this.rootEl?.focus === "function") {
+        this.rootEl.focus();
+      }
       if ((e as HandledEvent)._umlHandled) return;
       const target = e.target as HTMLElement | null;
       if (!target) return;
       if (
         target.closest(
-          ".umlcanvas-toolbar, .umlcanvas-main-toolbar, .umlcanvas-floating-bottom-toolbar, .umlcanvas-menu-dropdown, .umlcanvas-palette-panel, .umlcanvas-minimap, .umlcanvas-color-palette-popover, .umlcanvas-align-popover, .umlcanvas-font-size-popover, .umlcanvas-font-size-dropdown, .umlcanvas-font-family-dropdown, .umlcanvas-connector-popover, .umlcanvas-line-popover, .umlcanvas-breadcrumbs, .umlcanvas-inline-editor, .modal, .menu, [class*='popover'], [class*='dropdown']"
+          ".umlcanvas-toolbar, .umlcanvas-main-toolbar, .umlcanvas-floating-bottom-toolbar, .umlcanvas-menu-dropdown, .umlcanvas-palette-panel, .umlcanvas-palette-toggle-tab, .umlcanvas-minimap, .umlcanvas-color-palette-popover, .umlcanvas-align-popover, .umlcanvas-font-size-popover, .umlcanvas-font-size-dropdown, .umlcanvas-font-family-dropdown, .umlcanvas-connector-popover, .umlcanvas-line-popover, .umlcanvas-breadcrumbs, .umlcanvas-inline-editor, .modal, .menu, [class*='popover'], [class*='dropdown']"
         )
       ) {
         return;
@@ -439,19 +516,71 @@ export class UmlCanvasView extends TextFileView {
       }
     });
 
+    // Register hotkeys on view's scope so Obsidian keymap delegates Delete / Backspace directly to canvas
+    if (!this.scope && typeof Scope !== "undefined") {
+      this.scope = new Scope((this.app as any)?.scope);
+    }
+    if (this.scope) {
+      this.scope.register([], "Delete", (evt: KeyboardEvent) => {
+        const target = evt?.target as HTMLElement | null;
+        const isInput =
+          target &&
+          (target.tagName === "INPUT" ||
+            target.tagName === "TEXTAREA" ||
+            target.isContentEditable ||
+            Boolean(target.closest(".umlcanvas-inline-editor")));
+        if (!isInput && this.editor?.hasSelection) {
+          this.editor.deleteSelection();
+          return false;
+        }
+      });
+      this.scope.register([], "Backspace", (evt: KeyboardEvent) => {
+        const target = evt?.target as HTMLElement | null;
+        const isInput =
+          target &&
+          (target.tagName === "INPUT" ||
+            target.tagName === "TEXTAREA" ||
+            target.isContentEditable ||
+            Boolean(target.closest(".umlcanvas-inline-editor")));
+        if (!isInput && this.editor?.hasSelection) {
+          this.editor.deleteSelection();
+          return false;
+        }
+      });
+    }
+
     // Setup Copy / Paste (F-012) and Minimap (F-011) shortcuts
     this.rootEl.addEventListener("keydown", (e: KeyboardEvent) => {
+      if (this.toolbar && this.toolbar.handleKeyDown(e)) {
+        return;
+      }
+
       const isMac = Platform.isMacOS;
       const mod = isMac ? e.metaKey : e.ctrlKey;
       const target = e.target as HTMLElement | null;
       const isInput = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable || Boolean(target.closest(".umlcanvas-inline-editor")));
+
+      if (e.key === "Escape") {
+        if (this.palette?.isOpen) {
+          e.preventDefault();
+          e.stopPropagation();
+          this.palette.close();
+          return;
+        }
+      }
+
+      if ((e.key === "Delete" || e.key === "Backspace") && !isInput) {
+        e.preventDefault();
+        this.editor?.deleteSelection();
+        return;
+      }
 
       if (mod && e.key.toLowerCase() === "c" && !isInput) {
         e.preventDefault();
         this.editor?.copySelection();
       } else if (mod && e.key.toLowerCase() === "v" && !isInput) {
         e.preventDefault();
-        this.editor?.paste();
+        void this.pasteFromClipboardOrEditor(this.getCursorCanvasPosition());
       } else if (mod && e.key.toLowerCase() === "b" && !isInput) {
         e.preventDefault();
         this.editor?.toggleBoldForSelection();
@@ -464,43 +593,37 @@ export class UmlCanvasView extends TextFileView {
       } else if (mod && e.key === "]" && !isInput) {
         e.preventDefault();
         this.editor?.adjustFontSizeForSelection(2);
+      } else if (!mod && (e.key === "[" || e.key === "]") && !isInput && this.renderer?.freehandMode) {
+        e.preventDefault();
+        const delta = e.key === "]" ? 1 : -1;
+        const curW = this.renderer?.brushWidth ?? 2;
+        const newW = Math.max(1, Math.min(50, curW + delta));
+        this.renderer.setFreehandBrushWidth(newW);
+        this.editor?.setFreehandBrushSettings({ strokeWidth: newW });
+        this.toolbar?.setBrushWidth(newW);
+        if (this.plugin?.settings) {
+          this.plugin.settings.freehandBrushWidth = newW;
+          void this.plugin.saveSettings?.();
+        }
       } else if (!mod && (e.key === "m" || e.key === "M") && !isInput) {
         e.preventDefault();
         this.minimap?.toggle();
+      } else if (e.shiftKey && (e.key === "E" || e.key === "e") && !isInput) {
+        e.preventDefault();
+        this.editor?.enhanceSelection();
       }
     });
 
-    // Setup Image Paste listener
-    this.rootEl.addEventListener("paste", (e: ClipboardEvent) => {
-      const items = e.clipboardData?.items;
-      if (items) {
-        for (let i = 0; i < items.length; i++) {
-          const item = items[i];
-          if (item.type.startsWith("image/")) {
-            e.preventDefault();
-            const blob = item.getAsFile();
-            if (blob && typeof FileReader !== "undefined") {
-              const reader = new FileReader();
-              reader.onload = () => {
-                const dataUrl = reader.result as string;
-                void this.addImageToCanvas({
-                  src: dataUrl,
-                  title: "Pasted Photo",
-                });
-              };
-              reader.readAsDataURL(blob);
-              return;
-            }
-          }
-        }
-      }
-    });
+    // Setup Image & PDF Paste listener
+    this.rootEl.addEventListener("paste", (e: ClipboardEvent) => this.handlePaste(e));
 
     // Load full note content from vault for embedded note cards
     void this.loadVaultNotesContent();
+    // Resolve resource paths for vault PDFs and images
+    this.resolveVaultResourcePaths();
   }
 
-  showFreehandEscapeHatch(stroke: Stroke): void {
+  showFreehandEscapeHatch(stroke: Stroke, message = "Shape recognized"): void {
     if (this.escapeHatchEl) {
       this.escapeHatchEl.remove();
       this.escapeHatchEl = null;
@@ -513,7 +636,7 @@ export class UmlCanvasView extends TextFileView {
     if (!this.rootEl) return;
 
     const toast = this.rootEl.createDiv({ cls: "umlcanvas-escape-hatch-toast" });
-    toast.createSpan({ text: "Shape recognized" });
+    toast.createSpan({ text: message });
     const btn = toast.createEl("button", {
       cls: "umlcanvas-escape-hatch-btn",
       text: "Keep as freehand",
@@ -523,7 +646,12 @@ export class UmlCanvasView extends TextFileView {
       e.stopPropagation();
       if (this.editor) {
         this.editor.undo();
-        this.editor.keepAsFreehand(stroke);
+        const strokeWidth = this.renderer?.brushWidth ?? 2;
+        const strokeOpacity = this.renderer?.brushStrength ?? 1.0;
+        this.editor.keepAsFreehand(stroke, { select: false, strokeWidth, strokeOpacity });
+        if (this.editor.hasSelection) {
+          this.editor.clearSelection();
+        }
       }
       toast.remove();
       this.escapeHatchEl = null;
@@ -560,13 +688,40 @@ export class UmlCanvasView extends TextFileView {
 
   updateSettings(settings: UmlCanvasSettings): void {
     this.applyTheme();
+    const enableFreehand =
+      settings?.enableFreehand ?? this.plugin?.settings?.enableFreehand ?? true;
+    const showGrid =
+      settings?.showGrid ?? this.plugin?.settings?.showGrid ?? true;
+
     if (this.renderer) {
-      this.renderer.setEnableFreehand(settings.enableFreehand);
-      this.renderer.setAutoShapeDetection(settings.autoShapeDetection ?? true);
-      this.renderer.setGridVisible(settings.showGrid);
+      this.renderer.setEnableFreehand(enableFreehand);
+      if (!this.renderer.freehandMode && settings?.autoShapeDetection !== undefined) {
+        this.renderer.setAutoShapeDetection(settings.autoShapeDetection);
+      }
+      this.renderer.setGridVisible(showGrid);
+      if (settings?.freehandBrushWidth !== undefined) {
+        this.renderer.setFreehandBrushWidth(settings.freehandBrushWidth);
+      }
+      if (settings?.freehandBrushStrength !== undefined) {
+        this.renderer.setFreehandBrushStrength(settings.freehandBrushStrength);
+      }
+    }
+    if (this.editor) {
+      if (settings?.freehandBrushWidth !== undefined) {
+        this.editor.freehandStrokeWidth = settings.freehandBrushWidth;
+      }
+      if (settings?.freehandBrushStrength !== undefined) {
+        this.editor.freehandStrokeStrength = settings.freehandBrushStrength;
+      }
     }
     if (this.toolbar) {
-      this.toolbar.setFreehandEnabled(settings.enableFreehand);
+      this.toolbar.setFreehandEnabled(enableFreehand);
+      if (settings?.freehandBrushWidth !== undefined) {
+        this.toolbar.setBrushWidth(settings.freehandBrushWidth);
+      }
+      if (settings?.freehandBrushStrength !== undefined) {
+        this.toolbar.setBrushStrength(settings.freehandBrushStrength);
+      }
       this.toolbar.updateToolMode();
     }
   }
@@ -594,6 +749,13 @@ export class UmlCanvasView extends TextFileView {
     } else {
       this.rootEl.classList.remove("umlcanvas-theme-light", "theme-light");
       this.rootEl.classList.add("umlcanvas-theme-dark", "theme-dark");
+    }
+
+    if (this.toolbar) {
+      this.toolbar.updateToolMode();
+    }
+    if (this.renderer) {
+      this.renderer.render();
     }
   }
 
@@ -737,6 +899,24 @@ export class UmlCanvasView extends TextFileView {
         this.editor?.selectNode(node.id, false);
       }
 
+      if (
+        node.kind === "generic.freehand" ||
+        this.editor?.selectedNodeIds.some((id) => {
+          const n = this.editor?.diagram.nodes.find((item) => item.id === id);
+          return n?.kind === "generic.freehand";
+        })
+      ) {
+        menu.addItem((item) => {
+          item
+            .setTitle("Enhance handdrawn note")
+            .setIcon("wand-2")
+            .onClick(() => {
+              this.editor?.enhanceHanddrawnSelection();
+            });
+        });
+        menu.addSeparator();
+      }
+
       if (node.kind === "schematic.chip") {
         menu.addItem((item) => {
           item
@@ -748,14 +928,113 @@ export class UmlCanvasView extends TextFileView {
         });
       }
 
-      menu.addItem((item) => {
-        item
-          .setTitle("Edit text")
-          .setIcon("edit")
-          .onClick(() => {
-            this.renderer?.startInlineEditor(node);
+      if (node.kind === "generic.table") {
+        const rows = Math.max(1, (node.customData?.rows as number) || 3);
+        const cols = Math.max(1, (node.customData?.cols as number) || 3);
+        const relX = canvasPoint.x - node.position.x;
+        const relY = canvasPoint.y - node.position.y;
+        const colW = node.size.width / cols;
+        const rowH = node.size.height / rows;
+        const clickR = Math.max(0, Math.min(rows - 1, Math.floor(relY / rowH)));
+        const clickC = Math.max(0, Math.min(cols - 1, Math.floor(relX / colW)));
+
+        menu.addItem((item) => {
+          item
+            .setTitle(`Edit cell (${clickR + 1}, ${clickC + 1})`)
+            .setIcon("edit")
+            .onClick(() => {
+              if (this.renderer?.activeInlineEditor) {
+                this.renderer.commitInlineEditor();
+              }
+              this.renderer?.startInlineEditor(node, { row: clickR, col: clickC });
+            });
+        });
+
+        menu.addItem((item) => {
+          item
+            .setTitle("Add row above")
+            .setIcon("arrow-up")
+            .onClick(() => {
+              if (this.renderer?.activeInlineEditor) {
+                this.renderer.commitInlineEditor();
+              }
+              this.editor?.addTableRow(node.id, clickR);
+            });
+        });
+
+        menu.addItem((item) => {
+          item
+            .setTitle("Add row below")
+            .setIcon("arrow-down")
+            .onClick(() => {
+              if (this.renderer?.activeInlineEditor) {
+                this.renderer.commitInlineEditor();
+              }
+              this.editor?.addTableRow(node.id, clickR + 1);
+            });
+        });
+
+        if (rows > 1) {
+          menu.addItem((item) => {
+            item
+              .setTitle(`Delete row (${clickR + 1})`)
+              .setIcon("trash")
+              .onClick(() => {
+                if (this.renderer?.activeInlineEditor) {
+                  this.renderer.commitInlineEditor();
+                }
+                this.editor?.deleteTableRow(node.id, clickR);
+              });
           });
-      });
+        }
+
+        menu.addItem((item) => {
+          item
+            .setTitle("Add column left")
+            .setIcon("arrow-left")
+            .onClick(() => {
+              if (this.renderer?.activeInlineEditor) {
+                this.renderer.commitInlineEditor();
+              }
+              this.editor?.addTableColumn(node.id, clickC);
+            });
+        });
+
+        menu.addItem((item) => {
+          item
+            .setTitle("Add column right")
+            .setIcon("arrow-right")
+            .onClick(() => {
+              if (this.renderer?.activeInlineEditor) {
+                this.renderer.commitInlineEditor();
+              }
+              this.editor?.addTableColumn(node.id, clickC + 1);
+            });
+        });
+
+        if (cols > 1) {
+          menu.addItem((item) => {
+            item
+              .setTitle(`Delete column (${clickC + 1})`)
+              .setIcon("trash")
+              .onClick(() => {
+                if (this.renderer?.activeInlineEditor) {
+                  this.renderer.commitInlineEditor();
+                }
+                this.editor?.deleteTableColumn(node.id, clickC);
+              });
+          });
+        }
+      } else {
+        menu.addItem((item) => {
+          item
+            .setTitle("Edit text")
+            .setIcon("edit")
+            .onClick(() => {
+              this.renderer?.startInlineEditor(node);
+            });
+        });
+      }
 
       menu.addItem((item) => {
         item
@@ -776,13 +1055,57 @@ export class UmlCanvasView extends TextFileView {
           });
       });
 
+      const hasFreehand =
+        node.kind === "generic.freehand" ||
+        (this.editor?.selectedNodeIds.some(
+          (id) => this.editor?.diagram.nodes.find((n) => n.id === id)?.kind === "generic.freehand"
+        ) ?? false);
+
+      if (hasFreehand) {
+        menu.addItem((item) => {
+          item
+            .setTitle("Enhance to shape (Sparkles)")
+            .setIcon("sparkles")
+            .onClick(() => {
+              this.editor?.enhanceSelection();
+            });
+        });
+      }
+
       if (node.kind === "generic.image") {
         menu.addItem((item) => {
           item
             .setTitle("Change image...")
             .setIcon("image")
             .onClick(() => {
-              this.openImagePickerModal(node.position);
+              this.openImagePickerModal(node.position, node.id);
+            });
+        });
+      }
+
+      if (node.kind === "generic.pdf") {
+        menu.addItem((item) => {
+          item
+            .setTitle("Change PDF document...")
+            .setIcon("file-text")
+            .onClick(() => {
+              this.openPdfPickerModal(node.position, node.id);
+            });
+        });
+        menu.addItem((item) => {
+          item
+            .setTitle("Set target page (subpath)...")
+            .setIcon("file-text")
+            .onClick(() => {
+              this.promptChangePdfPage(node);
+            });
+        });
+        menu.addItem((item) => {
+          item
+            .setTitle("Edit title...")
+            .setIcon("pencil")
+            .onClick(() => {
+              this.renderer?.startInlineEditor(node);
             });
         });
       }
@@ -791,14 +1114,29 @@ export class UmlCanvasView extends TextFileView {
         (node.metadata?.filePath as string) ||
         (node.customData?.filePath as string);
       if (filePath) {
+        const subpath =
+          (node.metadata?.subpath as string) ||
+          (node.customData?.subpath as string) ||
+          "";
+        const fullTarget = filePath + (subpath ? (subpath.startsWith("#") ? subpath : "#" + subpath) : "");
         menu.addItem((item) => {
           item
-            .setTitle("Open note in Obsidian")
+            .setTitle(node.kind === "generic.pdf" ? "Open PDF in Obsidian" : "Open note in Obsidian")
             .setIcon("external-link")
             .onClick(() => {
-              void this.app.workspace.openLinkText(filePath, "", false);
+              void this.app.workspace.openLinkText(fullTarget, "", false);
             });
         });
+        if (node.kind === "generic.pdf") {
+          menu.addItem((item) => {
+            item
+              .setTitle("Open PDF in new tab")
+              .setIcon("external-link")
+              .onClick(() => {
+                void this.app.workspace.openLinkText(fullTarget, "", true);
+              });
+          });
+        }
       }
 
       if (node.kind === "obsidian.note") {
@@ -1271,11 +1609,16 @@ export class UmlCanvasView extends TextFileView {
       });
 
       menu.addItem((item) => {
+        const selectedCount = this.editor?.selectedGroupIds.length ?? 1;
         item
-          .setTitle("Delete group")
+          .setTitle(selectedCount > 1 ? `Delete ${selectedCount} groups` : "Delete group")
           .setIcon("trash")
           .onClick(() => {
-            this.editor?.deleteGroup(group.id);
+            if (this.editor && this.editor.selectedGroupIds.includes(group.id) && this.editor.selectedGroupIds.length > 1) {
+              this.editor.deleteSelection();
+            } else {
+              this.editor?.deleteGroup(group.id);
+            }
           });
       });
     } else {
@@ -1289,7 +1632,7 @@ export class UmlCanvasView extends TextFileView {
                 x: Math.round(canvasPoint.x - 70),
                 y: Math.round(canvasPoint.y - 40),
               },
-              title: "New Node",
+              title: "Node",
             });
           });
       });
@@ -1305,7 +1648,7 @@ export class UmlCanvasView extends TextFileView {
                 y: Math.round(canvasPoint.y - 100),
               },
               size: { width: 300, height: 200 },
-              name: "New Group",
+              name: "Group",
             });
           });
       });
@@ -1348,10 +1691,19 @@ export class UmlCanvasView extends TextFileView {
 
       menu.addItem((item) => {
         item
+          .setTitle("Insert PDF document...")
+          .setIcon("file-text")
+          .onClick(() => {
+            this.openPdfPickerModal(canvasPoint);
+          });
+      });
+
+      menu.addItem((item) => {
+        item
           .setTitle("Paste")
           .setIcon("clipboard")
           .onClick(() => {
-            this.editor?.paste();
+            void this.pasteFromClipboardOrEditor(canvasPoint);
           });
       });
 
@@ -1398,18 +1750,35 @@ export class UmlCanvasView extends TextFileView {
     }).open();
   }
 
-  public openImagePickerModal(canvasPoint?: Point): void {
+  public openImagePickerModal(canvasPoint?: Point, targetNodeId?: string): void {
     const vaultImages = this.app.vault.getFiles().filter((f: TFile) => isImageFile(f));
     if (vaultImages.length > 0) {
       new ImageSuggestModal(this.app, (file: TFile) => {
-        void this.addImageToCanvas({ file, canvasPoint });
+        if (targetNodeId && this.editor) {
+          let src = file.path;
+          try {
+            if (typeof this.app.vault.getResourcePath === "function") {
+              src = this.app.vault.getResourcePath(file);
+            }
+          } catch {
+            src = file.path;
+          }
+          const existing = this.editor.diagram.nodes.find((n) => n.id === targetNodeId);
+          this.editor.updateNode(targetNodeId, {
+            title: file.basename,
+            metadata: { ...existing?.metadata, filePath: file.path, src },
+            customData: { ...existing?.customData, filePath: file.path, src },
+          });
+        } else {
+          void this.addImageToCanvas({ file, canvasPoint });
+        }
       }).open();
     } else {
-      this.openLocalImageFileDialog(canvasPoint);
+      this.openLocalImageFileDialog(canvasPoint, targetNodeId);
     }
   }
 
-  public openLocalImageFileDialog(canvasPoint?: Point): void {
+  public openLocalImageFileDialog(canvasPoint?: Point, targetNodeId?: string): void {
     if (typeof document === "undefined") return;
     const input = createEl("input", {
       type: "file",
@@ -1422,11 +1791,20 @@ export class UmlCanvasView extends TextFileView {
         const reader = new FileReader();
         reader.onload = () => {
           const dataUrl = reader.result as string;
-          void this.addImageToCanvas({
-            src: dataUrl,
-            title: file.name.replace(/\.[^/.]+$/, ""),
-            canvasPoint,
-          });
+          if (targetNodeId && this.editor) {
+            const existing = this.editor.diagram.nodes.find((n) => n.id === targetNodeId);
+            this.editor.updateNode(targetNodeId, {
+              title: file.name.replace(/\.[^/.]+$/, ""),
+              metadata: { ...existing?.metadata, filePath: file.name, src: dataUrl },
+              customData: { ...existing?.customData, filePath: file.name, src: dataUrl },
+            });
+          } else {
+            void this.addImageToCanvas({
+              src: dataUrl,
+              title: file.name.replace(/\.[^/.]+$/, ""),
+              canvasPoint,
+            });
+          }
         };
         reader.readAsDataURL(file);
       }
@@ -1466,12 +1844,13 @@ export class UmlCanvasView extends TextFileView {
     if (options.file) {
       try {
         if (typeof this.app.vault.getResourcePath === "function") {
-          src = this.app.vault.getResourcePath(options.file);
-        } else {
+          const resPath = this.app.vault.getResourcePath(options.file);
+          if (resPath) src = resPath;
+        } else if (!src) {
           src = options.file.path;
         }
       } catch {
-        src = options.file.path;
+        if (!src) src = options.file.path;
       }
     }
 
@@ -1492,6 +1871,670 @@ export class UmlCanvasView extends TextFileView {
 
     this.editor.selectNode(imageNode.id, false);
     return imageNode;
+  }
+
+  public openPdfPickerModal(canvasPoint?: Point, targetNodeId?: string): void {
+    const vaultPdfs = this.app.vault.getFiles().filter((f: TFile) => isPdfFile(f));
+    if (vaultPdfs.length > 0) {
+      new PdfSuggestModal(this.app, (file: TFile) => {
+        if (targetNodeId) {
+          void this.updatePdfNodeWithFile(targetNodeId, file);
+        } else {
+          void this.addPdfToCanvas({ file, canvasPoint });
+        }
+      }).open();
+    } else {
+      this.openLocalPdfFileDialog(canvasPoint, targetNodeId);
+    }
+  }
+
+  public openLocalPdfFileDialog(canvasPoint?: Point, targetNodeId?: string): void {
+    if (typeof document === "undefined") return;
+    const input = createEl("input", {
+      type: "file",
+      cls: "umlcanvas-file-input-hidden",
+    });
+    input.accept = "application/pdf,.pdf";
+    input.addEventListener("change", () => {
+      const file = input.files?.[0];
+      if (file) {
+        void (async () => {
+          try {
+            const saved = await this.canvasAttachmentService.savePastedPdf(file, {
+              file: this.file,
+              diagramTitle: this.editor?.diagram?.title,
+              preferredName: file.name,
+            });
+            if (targetNodeId && this.editor) {
+              const existing = this.editor.diagram.nodes.find((n) => n.id === targetNodeId);
+              this.editor.updateNode(targetNodeId, {
+                title: saved.title,
+                metadata: {
+                  ...existing?.metadata,
+                  filePath: saved.filePath,
+                  src: saved.src,
+                },
+                customData: {
+                  ...existing?.customData,
+                  filePath: saved.filePath,
+                  src: saved.src,
+                },
+              });
+            } else {
+              await this.addPdfToCanvas({
+                file: saved.file ?? undefined,
+                filePath: saved.filePath,
+                src: saved.src,
+                title: saved.title,
+                canvasPoint,
+              });
+            }
+          } catch {
+            if (typeof FileReader !== "undefined") {
+              const reader = new FileReader();
+              reader.onload = () => {
+                const dataUrl = reader.result as string;
+                if (targetNodeId && this.editor) {
+                  const existing = this.editor.diagram.nodes.find((n) => n.id === targetNodeId);
+                  this.editor.updateNode(targetNodeId, {
+                    title: file.name.replace(/\.[^/.]+$/, ""),
+                    metadata: {
+                      ...existing?.metadata,
+                      filePath: file.name,
+                      src: dataUrl,
+                    },
+                    customData: {
+                      ...existing?.customData,
+                      filePath: file.name,
+                      src: dataUrl,
+                    },
+                  });
+                } else {
+                  void this.addPdfToCanvas({
+                    src: dataUrl,
+                    title: file.name.replace(/\.[^/.]+$/, ""),
+                    canvasPoint,
+                  });
+                }
+              };
+              reader.readAsDataURL(file);
+            }
+          }
+        })();
+      }
+      input.remove();
+    });
+    document.body.appendChild(input);
+    input.click();
+  }
+
+  public async updatePdfNodeWithFile(nodeId: string, file: TFile): Promise<void> {
+    if (!this.editor) return;
+    const existing = this.editor.diagram.nodes.find((n) => n.id === nodeId);
+    if (!existing) return;
+
+    let src = file.path;
+    try {
+      if (typeof this.app.vault.getResourcePath === "function") {
+        src = this.app.vault.getResourcePath(file);
+      }
+    } catch {
+      src = file.path;
+    }
+
+    const newLabels = existing.labels && existing.labels.length > 0
+      ? [{ ...existing.labels[0], text: file.basename }]
+      : [{ id: `${nodeId}-label-0`, text: file.basename, anchor: "node" as const, position: { x: 0, y: 0 } }];
+
+    this.editor.updateNode(nodeId, {
+      labels: newLabels,
+      metadata: {
+        ...existing.metadata,
+        filePath: file.path,
+        src,
+      },
+      customData: {
+        ...existing.customData,
+        filePath: file.path,
+        src,
+      },
+    });
+  }
+
+  public promptChangePdfPage(node: DiagramNode, directSubpath?: string): void {
+    if (!this.editor) return;
+    const currentSubpath =
+      (node.metadata?.subpath as string) ||
+      (node.customData?.subpath as string) ||
+      "";
+
+    const applyPage = (subpath: string) => {
+      if (!this.editor) return;
+      const trimmed = subpath.trim();
+      let cleanSubpath = "";
+      if (trimmed) {
+        cleanSubpath = /^\d+$/.test(trimmed)
+          ? `#page=${trimmed}`
+          : (trimmed.startsWith("#") ? trimmed : `#${trimmed}`);
+      }
+      const src = (node.customData?.src as string) || (node.metadata?.src as string) || "";
+      const cleanSrc = src ? src.split("#")[0] : "";
+      const newSrc = cleanSrc ? (cleanSubpath ? `${cleanSrc}${cleanSubpath}` : cleanSrc) : src;
+
+      this.editor.updateNode(node.id, {
+        metadata: { ...node.metadata, subpath: cleanSubpath, ...(newSrc ? { src: newSrc } : {}) },
+        customData: { ...node.customData, subpath: cleanSubpath, ...(newSrc ? { src: newSrc } : {}) },
+      });
+    };
+
+    if (directSubpath !== undefined) {
+      applyPage(directSubpath);
+      return;
+    }
+
+    const win = typeof window !== "undefined" ? (window as unknown as { prompt?: (msg?: string, def?: string) => string | null }) : null;
+    if (win && typeof win.prompt === "function") {
+      const match = currentSubpath.match(/page=(\d+)/i);
+      const currentPage = match ? match[1] : (currentSubpath ? currentSubpath.replace(/^#/, "") : "1");
+      const pageStr = win.prompt("Enter target page number (e.g. 5) or subpath (e.g. #page=5):", currentPage);
+      if (pageStr === null) return;
+      applyPage(pageStr.trim());
+      return;
+    }
+
+    try {
+      new PdfPageModal(this.app, currentSubpath, (newSubpath) => {
+        applyPage(newSubpath);
+      }).open();
+    } catch {
+      applyPage("");
+    }
+  }
+
+  public async addPdfToCanvas(options: {
+    file?: TFile;
+    filePath?: string;
+    src?: string;
+    title?: string;
+    subpath?: string;
+    canvasPoint?: Point;
+    size?: Size;
+  }): Promise<DiagramNode | null> {
+    if (!this.editor) return null;
+
+    let targetPoint = options.canvasPoint;
+    if (!targetPoint) {
+      const transform = this.renderer?.currentTransform ?? { panX: 0, panY: 0, zoom: 1 };
+      const centerScreen = {
+        x: (this.rootEl?.clientWidth ?? 800) / 2,
+        y: (this.rootEl?.clientHeight ?? 600) / 2,
+      };
+      targetPoint = {
+        x: Math.round((centerScreen.x - transform.panX) / transform.zoom - 170),
+        y: Math.round((centerScreen.y - transform.panY) / transform.zoom - 220),
+      };
+    }
+
+    let filePath = options.filePath || (options.file ? options.file.path : "");
+    let title = options.title || (options.file ? options.file.basename : (filePath ? filePath.split(/[?#]/)[0].split("/").pop()?.replace(/\.pdf$/i, "") : "Document"));
+    const subpath = options.subpath || "";
+    let src = options.src || "";
+
+    // Resolve file if filePath provided without file
+    let targetFile = options.file;
+    if (!targetFile && filePath && !filePath.startsWith("data:") && !filePath.startsWith("http")) {
+      const cleanPath = filePath.split(/[?#]/)[0];
+      const byPath = this.app.vault.getAbstractFileByPath(cleanPath);
+      if (byPath instanceof TFile) {
+        targetFile = byPath;
+        filePath = byPath.path;
+      } else {
+        const dest = this.app.metadataCache?.getFirstLinkpathDest?.(cleanPath, this.file?.path ?? "");
+        if (dest instanceof TFile) {
+          targetFile = dest;
+          filePath = dest.path;
+        }
+      }
+    }
+
+    if (targetFile) {
+      try {
+        if (typeof this.app.vault.getResourcePath === "function") {
+          src = this.app.vault.getResourcePath(targetFile);
+        } else {
+          src = targetFile.path;
+        }
+      } catch {
+        src = targetFile.path;
+      }
+      if (!options.title) {
+        title = targetFile.basename;
+      }
+    }
+
+    const pdfNode = this.editor.addNode({
+      kind: "generic.pdf",
+      title,
+      position: targetPoint,
+      size: options.size ?? { width: 340, height: 440 },
+      metadata: {
+        filePath,
+        src,
+        subpath,
+      },
+      customData: {
+        filePath,
+        src,
+        subpath,
+      },
+    });
+
+    this.editor.selectNode(pdfNode.id, false);
+    return pdfNode;
+  }
+
+  public async handleExternalDrop(e: DragEvent, canvasPoint: Point): Promise<boolean> {
+    // 1. Check Obsidian dragManager
+    const appWithDrag = this.app as unknown as AppWithDragManager;
+    const dragManager = appWithDrag.dragManager;
+    let file: TFile | null = null;
+    if (dragManager?.draggable?.file instanceof TFile) {
+      file = dragManager.draggable.file;
+    } else if (dragManager?.dragData?.file instanceof TFile) {
+      file = dragManager.dragData.file;
+    } else if (Array.isArray(dragManager?.draggable?.files) && dragManager.draggable.files[0] instanceof TFile) {
+      file = dragManager.draggable.files[0];
+    } else if (Array.isArray(dragManager?.dragData?.files) && dragManager.dragData.files[0] instanceof TFile) {
+      file = dragManager.dragData.files[0];
+    }
+
+    // 2. Check dataTransfer text for wikilink or path
+    let subpath: string | undefined = undefined;
+    if (!file && e.dataTransfer) {
+      const text = e.dataTransfer.getData("text/plain") || "";
+      const match = text.trim().match(/^!?\[\[(.*?)\]\]$/);
+      const rawMatch = match ? match[1] : text.trim();
+      const subpathMatch = rawMatch.match(/(#[^|]+)/);
+      if (subpathMatch) {
+        subpath = subpathMatch[1];
+      }
+      const linkPath = rawMatch.split("|")[0].split("#")[0].trim();
+      if (linkPath) {
+        const dest = this.app.metadataCache.getFirstLinkpathDest(linkPath, this.file?.path ?? "");
+        if (dest instanceof TFile) {
+          file = dest;
+        } else {
+          const byPath = this.app.vault.getAbstractFileByPath(linkPath);
+          if (byPath instanceof TFile) {
+            file = byPath;
+          } else {
+            const byPathMd = this.app.vault.getAbstractFileByPath(linkPath + ".md");
+            if (byPathMd instanceof TFile) {
+              file = byPathMd;
+            } else {
+              const byPathPdf = this.app.vault.getAbstractFileByPath(
+                linkPath.toLowerCase().endsWith(".pdf") ? linkPath : linkPath + ".pdf"
+              );
+              if (byPathPdf instanceof TFile) {
+                file = byPathPdf;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    if (file) {
+      if (isImageFile(file)) {
+        await this.addImageToCanvas({ file, canvasPoint });
+      } else if (isPdfFile(file)) {
+        await this.addPdfToCanvas({ file, canvasPoint, subpath });
+      } else {
+        await this.addNoteToCanvas(file, canvasPoint);
+      }
+      return true;
+    }
+
+    // 3. Check dataTransfer files from OS file manager
+    if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
+      for (let i = 0; i < e.dataTransfer.files.length; i++) {
+        const osFile = e.dataTransfer.files[i];
+        if (osFile.type.startsWith("image/") || isImageFile(osFile.name)) {
+          void this.handlePastedImageBlob(osFile, canvasPoint);
+          return true;
+        } else if (osFile.type === "application/pdf" || isPdfFile(osFile.name)) {
+          void (async () => {
+            try {
+              const saved = await this.canvasAttachmentService.savePastedPdf(osFile, {
+                file: this.file,
+                diagramTitle: this.editor?.diagram?.title,
+                preferredName: osFile.name,
+              });
+              await this.addPdfToCanvas({
+                file: saved.file ?? undefined,
+                filePath: saved.filePath,
+                src: saved.src,
+                title: saved.title,
+                canvasPoint,
+              });
+            } catch {
+              if (typeof FileReader !== "undefined") {
+                const reader = new FileReader();
+                reader.onload = () => {
+                  const dataUrl = reader.result as string;
+                  void this.addPdfToCanvas({
+                    src: dataUrl,
+                    title: osFile.name.replace(/\.[^/.]+$/, ""),
+                    canvasPoint,
+                  });
+                };
+                reader.readAsDataURL(osFile);
+              }
+            }
+          })();
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Automatically saves a pasted image blob to the canvas document's dedicated directory
+   * inside its working directory and links the resulting image node onto the canvas (#5).
+   */
+  public async handlePastedImageBlob(
+    blob: Blob,
+    canvasPoint?: Point
+  ): Promise<DiagramNode | null> {
+    const rawBlobName =
+      "name" in blob && typeof (blob as { name: unknown }).name === "string"
+        ? (blob as { name: string }).name
+        : undefined;
+    try {
+      const saved = await this.canvasAttachmentService.savePastedImage(blob, {
+        file: this.file,
+        diagramTitle: this.editor?.diagram?.title,
+        preferredName: rawBlobName,
+      });
+
+      return await this.addImageToCanvas({
+        file: saved.file ?? undefined,
+        filePath: saved.filePath,
+        src: saved.src,
+        title: saved.title,
+        canvasPoint,
+        size: saved.size,
+      });
+    } catch (err) {
+      console.warn(
+        "[Canvas++] Failed to save pasted image into canvas directory, falling back to data URL:",
+        err
+      );
+      if (typeof FileReader !== "undefined") {
+        return new Promise<DiagramNode | null>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const dataUrl = reader.result as string;
+            void this.addImageToCanvas({
+              src: dataUrl,
+              title: rawBlobName?.replace(/\.[^/.]+$/, "") || "Image",
+              canvasPoint,
+            }).then(resolve);
+          };
+          reader.onerror = () => resolve(null);
+          reader.readAsDataURL(blob);
+        });
+      }
+      return null;
+    }
+  }
+
+  public getCursorCanvasPosition(): Point {
+    const rendererPos = this.renderer?.lastMouseCanvasPosition;
+    if (rendererPos) {
+      this.lastMouseCanvasPos = rendererPos;
+      return rendererPos;
+    }
+    if (this.lastMouseCanvasPos) {
+      return { ...this.lastMouseCanvasPos };
+    }
+    const transform = this.renderer?.currentTransform ?? { panX: 0, panY: 0, zoom: 1 };
+    const centerScreen = {
+      x: (this.rootEl?.clientWidth ?? 800) / 2,
+      y: (this.rootEl?.clientHeight ?? 600) / 2,
+    };
+    return {
+      x: Math.round((centerScreen.x - transform.panX) / transform.zoom),
+      y: Math.round((centerScreen.y - transform.panY) / transform.zoom),
+    };
+  }
+
+  /**
+   * Reads from system clipboard (images, files) or falls back to canvas editor selection paste.
+   */
+  public async pasteFromClipboardOrEditor(canvasPoint?: Point): Promise<void> {
+    const targetPoint = canvasPoint ?? this.getCursorCanvasPosition();
+
+    // 1. If internal canvas copy was performed recently, prioritize it over stale system clipboard images
+    const lastCopyTime = DiagramEditor.lastCopyTimestamp;
+    const isInternalCopyRecent = lastCopyTime > 0 && Date.now() - lastCopyTime < 1000 * 60 * 60;
+
+    // Check system clipboard if navigator.clipboard is available (for external images)
+    if (
+      (!this.editor?.canPaste || !isInternalCopyRecent) &&
+      typeof navigator !== "undefined" &&
+      navigator.clipboard &&
+      typeof navigator.clipboard.read === "function"
+    ) {
+      try {
+        const items = await navigator.clipboard.read();
+        for (const item of items) {
+          const imageType = item.types.find((t) => t.startsWith("image/"));
+          if (imageType) {
+            const blob = await item.getType(imageType);
+            if (blob) {
+              await this.handlePastedImageBlob(blob, targetPoint);
+              return;
+            }
+          }
+        }
+      } catch {
+        // Permission denied or clipboard format not accessible, proceed to internal paste
+      }
+    }
+
+    // 2. Diagram selection paste at cursor position
+    if (this.editor?.canPaste) {
+      this.editor.pasteAt(targetPoint);
+    }
+  }
+
+  public handlePaste(e: ClipboardEvent): void {
+    const basePoint = this.getCursorCanvasPosition();
+
+    // 1. Check binary items (blobs from clipboard)
+    const imageBlobs: Blob[] = [];
+    const pdfBlobs: Blob[] = [];
+
+    const items = e.clipboardData?.items;
+    if (items && items.length > 0) {
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.type.startsWith("image/")) {
+          const blob = item.getAsFile();
+          if (blob) imageBlobs.push(blob);
+        } else if (item.type === "application/pdf") {
+          const blob = item.getAsFile();
+          if (blob) pdfBlobs.push(blob);
+        }
+      }
+    }
+
+    // Also check clipboardData.files if items was empty
+    if (
+      imageBlobs.length === 0 &&
+      pdfBlobs.length === 0 &&
+      e.clipboardData?.files &&
+      e.clipboardData.files.length > 0
+    ) {
+      for (let i = 0; i < e.clipboardData.files.length; i++) {
+        const file = e.clipboardData.files[i];
+        if (file.type.startsWith("image/") || isImageFile(file.name)) {
+          imageBlobs.push(file);
+        } else if (file.type === "application/pdf" || isPdfFile(file.name)) {
+          pdfBlobs.push(file);
+        }
+      }
+    }
+
+    if (imageBlobs.length > 0) {
+      e.preventDefault();
+      void (async () => {
+        let offset = 0;
+        for (const blob of imageBlobs) {
+          const pt = { x: basePoint.x + offset, y: basePoint.y + offset };
+          await this.handlePastedImageBlob(blob, pt);
+          offset += 40;
+        }
+      })();
+      return;
+    }
+
+    if (pdfBlobs.length > 0) {
+      e.preventDefault();
+      let offset = 0;
+      for (const blob of pdfBlobs) {
+        const pt = { x: basePoint.x + offset, y: basePoint.y + offset };
+        const rawPdfName =
+          "name" in blob && typeof (blob as { name: unknown }).name === "string"
+            ? (blob as { name: string }).name
+            : undefined;
+        void (async () => {
+          try {
+            const saved = await this.canvasAttachmentService.savePastedPdf(blob, {
+              file: this.file,
+              diagramTitle: this.editor?.diagram?.title,
+              preferredName: rawPdfName,
+            });
+            await this.addPdfToCanvas({
+              file: saved.file ?? undefined,
+              filePath: saved.filePath,
+              src: saved.src,
+              title: saved.title,
+              canvasPoint: pt,
+            });
+          } catch {
+            if (typeof FileReader !== "undefined") {
+              const reader = new FileReader();
+              reader.onload = () => {
+                const dataUrl = reader.result as string;
+                void this.addPdfToCanvas({
+                  src: dataUrl,
+                  title: rawPdfName?.replace(/\.[^/.]+$/, "") || "Document",
+                  canvasPoint: pt,
+                });
+              };
+              reader.readAsDataURL(blob);
+            }
+          }
+        })();
+        offset += 40;
+      }
+      return;
+    }
+
+    // 2. Check text from clipboard for base64 data URL, PDF or image link/path
+    const text = e.clipboardData?.getData("text/plain")?.trim();
+    if (text) {
+      if (text.startsWith("{") && text.includes('"format":"canvas-plus-plus"')) {
+        try {
+          const parsed = JSON.parse(text) as CanvasClipboardData;
+          if (
+            parsed &&
+            ((parsed.nodes && parsed.nodes.length > 0) ||
+              (parsed.edges && parsed.edges.length > 0) ||
+              (parsed.groups && parsed.groups.length > 0))
+          ) {
+            e.preventDefault();
+            this.editor?.pasteAt(basePoint, parsed);
+            return;
+          }
+        } catch {
+          // not json, continue
+        }
+      }
+
+      if (text.startsWith("data:image/")) {
+        e.preventDefault();
+        const blob = this.canvasAttachmentService.dataUrlToBlob(text);
+        if (blob) {
+          void this.handlePastedImageBlob(blob, basePoint);
+          return;
+        }
+      }
+
+      const match = text.match(/^!?\[\[(.*?)\]\]$/);
+      const rawContent = match ? match[1] : text;
+      const subpathMatch = rawContent.match(/(#[^|]+)/);
+      const subpath = subpathMatch ? subpathMatch[1] : undefined;
+      const linkPath = rawContent.split("|")[0].split("#")[0].trim();
+
+      if (isPdfFile(linkPath)) {
+        e.preventDefault();
+        let file = this.app.metadataCache?.getFirstLinkpathDest(linkPath, this.file?.path ?? "");
+        if (!(file instanceof TFile)) {
+          const byPath = this.app.vault.getAbstractFileByPath(linkPath);
+          if (byPath instanceof TFile) file = byPath;
+        }
+        if (file instanceof TFile) {
+          void this.addPdfToCanvas({ file, subpath, canvasPoint: basePoint });
+        } else if (
+          linkPath.startsWith("http://") ||
+          linkPath.startsWith("https://") ||
+          linkPath.startsWith("data:")
+        ) {
+          void this.addPdfToCanvas({
+            src: linkPath,
+            subpath,
+            title: linkPath.split("/").pop()?.replace(/\.pdf$/i, ""),
+            canvasPoint: basePoint,
+          });
+        } else {
+          void this.addPdfToCanvas({ filePath: linkPath, subpath, canvasPoint: basePoint });
+        }
+        return;
+      } else if (isImageFile(linkPath)) {
+        e.preventDefault();
+        let file = this.app.metadataCache?.getFirstLinkpathDest(linkPath, this.file?.path ?? "");
+        if (!(file instanceof TFile)) {
+          const byPath = this.app.vault.getAbstractFileByPath(linkPath);
+          if (byPath instanceof TFile) file = byPath;
+        }
+        if (file instanceof TFile) {
+          void this.addImageToCanvas({ file, canvasPoint: basePoint });
+        } else if (
+          linkPath.startsWith("http://") ||
+          linkPath.startsWith("https://") ||
+          linkPath.startsWith("data:")
+        ) {
+          void this.addImageToCanvas({
+            src: linkPath,
+            title: linkPath.split("/").pop()?.replace(/\.[^/.]+$/, ""),
+            canvasPoint: basePoint,
+          });
+        } else {
+          void this.addImageToCanvas({ filePath: linkPath, canvasPoint: basePoint });
+        }
+        return;
+      }
+    }
+
+    // 3. Fallback: if user copied internal nodes in canvas editor, paste them
+    if (this.editor?.canPaste) {
+      e.preventDefault();
+      this.editor.pasteAt(basePoint);
+    }
   }
 
   public addStickyNoteToCanvas(options?: {
@@ -1590,10 +2633,73 @@ export class UmlCanvasView extends TextFileView {
     return noteNode;
   }
 
+  private resolveVaultResourcePaths(): void {
+    if (!this.editor) return;
+    const resourceNodes = this.editor.diagram.nodes.filter(
+      (n) =>
+        (n.kind === "generic.pdf" || n.kind === "generic.image") &&
+        Boolean(n.metadata?.filePath || n.customData?.filePath)
+    );
+    for (const node of resourceNodes) {
+      const rawPath =
+        (node.metadata?.filePath as string) ||
+        (node.customData?.filePath as string);
+      if (!rawPath) continue;
+
+      const cleanPath = rawPath.split(/[?#]/)[0];
+      let file = this.app.vault.getAbstractFileByPath(cleanPath);
+      if (!(file instanceof TFile)) {
+        const normalized = cleanPath.replace(/\\/g, "/").replace(/^\.\//, "");
+        file = this.app.vault.getAbstractFileByPath(normalized);
+      }
+      if (!(file instanceof TFile) && this.app.metadataCache?.getFirstLinkpathDest) {
+        file = this.app.metadataCache.getFirstLinkpathDest(cleanPath, this.file?.path ?? "");
+      }
+      if (!(file instanceof TFile) && typeof this.app.vault.getFiles === "function") {
+        const files = this.app.vault.getFiles();
+        file = files.find((f: TFile) => f.path === cleanPath || f.name === cleanPath || f.basename === cleanPath.replace(/\.[^/.]+$/, "")) ?? null;
+      }
+
+      if (file instanceof TFile) {
+        let src = "";
+        try {
+          if (typeof this.app.vault.getResourcePath === "function") {
+            src = this.app.vault.getResourcePath(file);
+          } else {
+            src = file.path;
+          }
+        } catch {
+          src = file.path;
+        }
+
+        if (src && (node.customData?.src !== src || node.metadata?.src !== src)) {
+          const currentTitle = node.labels[0]?.text ?? "";
+          const newTitle = (!currentTitle || currentTitle === "Document" || currentTitle === "Photo") ? file.basename : currentTitle;
+          this.editor.updateNode(node.id, {
+            title: newTitle,
+            metadata: {
+              ...node.metadata,
+              filePath: file.path,
+              src,
+            },
+            customData: {
+              ...node.customData,
+              filePath: file.path,
+              src,
+            },
+          });
+        }
+      }
+    }
+  }
+
   private async loadVaultNotesContent(): Promise<void> {
     if (!this.editor) return;
     const noteNodes = this.editor.diagram.nodes.filter(
-      (n) => n.kind === "obsidian.note" || Boolean(n.metadata?.filePath)
+      (n) =>
+        (n.kind === "obsidian.note" || Boolean(n.metadata?.filePath)) &&
+        n.kind !== "generic.pdf" &&
+        n.kind !== "generic.image"
     );
     if (noteNodes.length === 0) return;
 
@@ -1675,19 +2781,29 @@ export class UmlCanvasView extends TextFileView {
     );
     if (matchingNodes.length === 0) return;
 
-    const oldBasename = oldPath.split("/").pop()?.replace(/\.md$/, "") ?? "";
+    const oldBasename = oldPath.split("/").pop()?.replace(/\.[^/.]+$/, "") ?? "";
     for (const node of matchingNodes) {
       const newLabels = node.labels.map((l) =>
         l.text === oldBasename ? { ...l, text: file.basename } : l
       );
+      let newSrc = node.customData?.src;
+      if (typeof this.app.vault.getResourcePath === "function") {
+        try {
+          newSrc = this.app.vault.getResourcePath(file);
+        } catch (err) {
+          void err;
+        }
+      }
       this.editor.updateNode(node.id, {
         metadata: {
           ...node.metadata,
           filePath: file.path,
+          ...(newSrc ? { src: newSrc } : {}),
         },
         customData: {
           ...node.customData,
           filePath: file.path,
+          ...(newSrc ? { src: newSrc } : {}),
         },
         labels: newLabels,
       });

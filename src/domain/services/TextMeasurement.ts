@@ -120,12 +120,46 @@ export function calculateNodeFitSize(node: DiagramNode): Size {
     };
   }
 
+  if (kind === "generic.table") {
+    const rows = Math.max(1, (node.customData?.rows as number) || 3);
+    const cols = Math.max(1, (node.customData?.cols as number) || 3);
+    const cells = (node.customData?.cells as string[][]) || [];
+
+    let maxColWidth = 60;
+    let maxRowHeight = 32;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const text = cells[r]?.[c] ?? "";
+        if (text) {
+          const lines = text.split(/\r?\n/);
+          const maxLineChars = lines.reduce((m, l) => Math.max(m, l.length), 0);
+          const cellNeededW = Math.ceil(maxLineChars * 8 * scale * boldMult + 24);
+          maxColWidth = Math.max(maxColWidth, cellNeededW);
+          const cellNeededH = Math.ceil(lines.length * Math.round(baseSize * 1.35) + 16);
+          maxRowHeight = Math.max(maxRowHeight, cellNeededH);
+        }
+      }
+    }
+    const neededW = Math.max(node.size.width, cols * maxColWidth);
+    const neededH = Math.max(node.size.height, rows * maxRowHeight);
+    return { width: neededW, height: neededH };
+  }
+
   if (kind === "generic.image") {
     const titleText = node.labels[0]?.text ?? "";
     const minW = Math.max(160, titleText.length * 8.5 * scale * boldMult + 32);
     return {
       width: Math.max(node.size.width, minW),
       height: node.size.height,
+    };
+  }
+
+  if (kind === "generic.pdf") {
+    const titleText = node.labels[0]?.text ?? "";
+    const minW = Math.max(200, titleText.length * 8.5 * scale * boldMult + 40);
+    return {
+      width: Math.max(node.size.width, minW),
+      height: Math.max(node.size.height, 200),
     };
   }
 
@@ -151,6 +185,17 @@ export function calculateNodeFitSize(node: DiagramNode): Size {
       width: contentW,
       height: contentH,
     };
+  }
+
+  if (kind === "generic.text") {
+    const text = node.labels[0]?.text ?? node.title ?? "";
+    const lines = text.split(/\r?\n/);
+    const maxChars = lines.reduce((m, l) => Math.max(m, l.length), 0);
+    const charW = Math.max(5, baseSize * 0.58 * scale * boldMult);
+    const lineSpacing = Math.round(baseSize * 1.35);
+    const width = Math.max(40, Math.ceil(maxChars * charW + 16));
+    const height = Math.max(24, Math.ceil(lines.length * lineSpacing + 12));
+    return { width, height };
   }
 
   // Box shapes: uml.class, uml.object, generic.rectangle, generic.note

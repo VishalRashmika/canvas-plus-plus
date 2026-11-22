@@ -52,6 +52,7 @@ export interface DiagramEdge {
   toNodeId: Id;
   toPortId?: Id;
   toSide?: Side;
+  toPoint?: Point;
   routing: EdgeRouting;
   /** User-adjusted manual routing overrides; absent means "let the router decide". */
   waypoints?: Point[];
@@ -68,7 +69,8 @@ export function createDiagramEdge(params: {
   id: Id;
   kind?: ShapeKind;
   fromNodeId: Id;
-  toNodeId: Id;
+  toNodeId?: Id;
+  toPoint?: Point;
   fromPortId?: Id;
   fromSide?: Side;
   toPortId?: Id;
@@ -87,15 +89,16 @@ export function createDiagramEdge(params: {
     fromNodeId: params.fromNodeId,
     fromPortId: params.fromPortId,
     fromSide: params.fromSide,
-    toNodeId: params.toNodeId,
+    toNodeId: params.toNodeId ?? "",
+    toPoint: params.toPoint ? { ...params.toPoint } : undefined,
     toPortId: params.toPortId,
     toSide: params.toSide,
     routing: params.routing ?? "straight",
-    waypoints: params.waypoints,
+    waypoints: params.waypoints ? params.waypoints.map((p) => ({ ...p })) : undefined,
     labels: params.labels ?? [],
     sequenceOrder: params.sequenceOrder,
     multiplicitySource: params.multiplicitySource,
     multiplicityTarget: params.multiplicityTarget,
-    style: params.style,
+    style: params.style ? { ...params.style } : undefined,
   };
 }

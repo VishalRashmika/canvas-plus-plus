@@ -184,6 +184,7 @@
         "fromPortId": { "type": "string" },
         "fromSide": { "$ref": "#/definitions/Side" },
         "toNodeId": { "type": "string" },
+        "toPoint": { "$ref": "#/definitions/Point" },
         "toPortId": { "type": "string" },
         "toSide": { "$ref": "#/definitions/Side" },
         "routing": { "type": "string", "enum": ["straight", "orthogonal", "curved"] },
@@ -224,6 +225,10 @@
         "id": { "type": "string" },
         "title": { "type": "string" },
         "nodeIds": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "groupIds": {
           "type": "array",
           "items": { "type": "string" }
         },

@@ -20,6 +20,7 @@ export interface AppendMultilineTextOptions {
   className?: string;
   textAnchor?: "middle" | "start" | "end";
   dominantBaseline?: string;
+  maxWidth?: number;
 }
 
 export function appendMultilineText(
@@ -39,13 +40,24 @@ export function appendMultilineText(
   text.setAttribute("class", options?.className ?? "umlcanvas-node-title");
   applyFontToSvgElement(text, nodeFont);
 
-  const lines = (title ?? "").split(/\r?\n/);
+  const baseFontSize = nodeFont.fontSize ?? 13;
+  const boldMultiplier = nodeFont.bold ? 1.1 : 1.0;
+  const charWidth = Math.max(4.5, baseFontSize * 0.58 * boldMultiplier);
+
+  let maxWidth = options?.maxWidth;
+  if (maxWidth === undefined && anchor === "middle" && cx > 20) {
+    maxWidth = Math.max(20, cx * 2 - 16);
+  }
+
+  const lines = maxWidth
+    ? wrapTextToLines(title ?? "", maxWidth, charWidth)
+    : (title ?? "").split(/\r?\n/);
+
   if (lines.length <= 1) {
     text.setAttribute("dominant-baseline", options?.dominantBaseline ?? "central");
-    text.textContent = title ?? "";
+    text.textContent = lines[0] ?? "";
   } else {
     text.setAttribute("dominant-baseline", options?.dominantBaseline ?? "central");
-    const baseFontSize = nodeFont.fontSize ?? 13;
     const lineHeight = Math.round(baseFontSize * 1.35);
     const startY = cy - ((lines.length - 1) * lineHeight) / 2;
     lines.forEach((lineText, idx) => {
@@ -72,6 +84,7 @@ export interface RenderContext {
 export interface ShapeDefinition {
   kind: string;
   displayName: string;
+  defaultTitle?: string;
   defaultSize: Size;
   getPorts(node: DiagramNode): Port[];
   getBoundaryPoint(node: DiagramNode, targetPoint: Point): Point;
@@ -114,6 +127,7 @@ export class ShapeRegistry {
     this.register(this.createGenericNoteShape());
     this.register(this.createGenericStickyNoteShape());
     this.register(this.createGenericImageShape());
+    this.register(this.createGenericPdfShape());
     this.register(this.createObsidianNoteShape());
 
     // --- Phase 3 Behavioral Shapes ---
@@ -194,11 +208,19 @@ export class ShapeRegistry {
     // Freehand Stroke (F-073)
     this.register(this.createGenericFreehandShape());
 
+    // Text Shape (Handwriting & Typography)
+    this.register(this.createGenericTextShape());
+
+    // Table Shape (Tables & Grids)
+    this.register(this.createGenericTableShape());
+
     // Common Shapes (General-purpose)
     this.register(this.createGenericCircleShape());
     this.register(this.createGenericEllipseShape());
     this.register(this.createGenericTriangleShape());
     this.register(this.createDiamondShape("generic.diamond", "Diamond"));
+    this.register(this.createGenericTextShape());
+    this.register(this.createGenericTableShape());
   }
 
   register(shape: ShapeDefinition): void {
@@ -221,6 +243,7 @@ export class ShapeRegistry {
     return {
       kind: "generic.rectangle",
       displayName: "Rectangle",
+      defaultTitle: "Node",
       defaultSize: { width: 140, height: 80 },
       getPorts(node: DiagramNode): Port[] {
         if (node.ports && node.ports.length > 0) {
@@ -275,7 +298,7 @@ export class ShapeRegistry {
         group.appendChild(rect);
 
         // Label
-        const title = node.labels[0]?.text ?? "";
+        const title = node.labels?.[0]?.text ?? node.title ?? "";
         if (title) {
           appendMultilineText(
             group,
@@ -283,7 +306,8 @@ export class ShapeRegistry {
             node.size.width / 2,
             node.size.height / 2,
             getNodeFontStyle(node),
-            svgNS
+            svgNS,
+            { maxWidth: Math.max(20, node.size.width - 16) }
           );
         }
 
@@ -296,12 +320,15 @@ export class ShapeRegistry {
     kind?: string;
     displayName?: string;
     defaultStereotype?: string;
+    defaultTitle?: string;
   }): ShapeDefinition {
     const kind = options?.kind ?? "uml.class";
     const displayName = options?.displayName ?? "Class";
+    const defaultTitle = options?.defaultTitle ?? displayName;
     return {
       kind,
       displayName,
+      defaultTitle,
       defaultSize: { width: 160, height: 100 },
       getPorts(node: DiagramNode): Port[] {
         if (node.ports && node.ports.length > 0) {
@@ -389,10 +416,13 @@ export class ShapeRegistry {
         }
 
         // Class Name
-        const title = node.labels[0]?.text ?? "";
+        const title = node.labels?.[0]?.text ?? node.title ?? "";
         const baseFontSize = nodeFont.fontSize ?? 13;
         const lineHeight = Math.round(baseFontSize * 1.35);
-        const lines = title.split(/\r?\n/);
+        const availableW = Math.max(20, node.size.width - 16);
+        const boldMultiplier = nodeFont.bold ? 1.1 : 1.0;
+        const charWidth = Math.max(4.5, baseFontSize * 0.58 * boldMultiplier);
+        const lines = wrapTextToLines(title, availableW, charWidth);
         const titleBlockHeight = Math.max(1, lines.length) * lineHeight;
         let actualHeaderHeight = hasStereo || hasTagged ? 46 : 32;
         if (lines.length > 1 || baseFontSize > 14) {
@@ -413,6 +443,7 @@ export class ShapeRegistry {
                 node.stereotype === "interface" || node.stereotype === "abstract"
                   ? "umlcanvas-node-title umlcanvas-class-title umlcanvas-italic"
                   : "umlcanvas-node-title umlcanvas-class-title",
+              maxWidth: availableW,
             }
           );
         }
@@ -527,7 +558,10 @@ export class ShapeRegistry {
         const nodeFont = getNodeFontStyle(node);
         const baseFontSize = nodeFont.fontSize ?? 13;
         const lineHeight = Math.round(baseFontSize * 1.35);
-        const lines = titleText.split(/\r?\n/);
+        const availableW = Math.max(20, node.size.width - 16);
+        const boldMultiplier = nodeFont.bold ? 1.1 : 1.0;
+        const charWidth = Math.max(4.5, baseFontSize * 0.58 * boldMultiplier);
+        const lines = wrapTextToLines(titleText, availableW, charWidth);
         const titleBlockHeight = Math.max(1, lines.length) * lineHeight;
         const actualHeaderHeight = lines.length > 1 || baseFontSize > 14
           ? Math.max(32, headerY + titleBlockHeight + 6)
@@ -543,6 +577,7 @@ export class ShapeRegistry {
           svgNS,
           {
             className: "umlcanvas-node-title umlcanvas-object-title",
+            maxWidth: availableW,
           }
         );
 
@@ -743,6 +778,7 @@ export class ShapeRegistry {
           svgNS,
           {
             className: "umlcanvas-node-title umlcanvas-usecase-title",
+            maxWidth: Math.max(20, Math.round(node.size.width * 0.8 - 8)),
           }
         );
 
@@ -1039,6 +1075,7 @@ export class ShapeRegistry {
     return {
       kind: "generic.image",
       displayName: "Photo Frame Image",
+      defaultTitle: "Image",
       defaultSize: { width: 220, height: 260 },
       getPorts(node: DiagramNode): Port[] {
         if (node.ports && node.ports.length > 0) return node.ports;
@@ -1168,7 +1205,7 @@ export class ShapeRegistry {
         }
 
         // 4. Title inside the frame (Polaroid / photo-frame caption style)
-        const title = node.labels[0]?.text ?? "";
+        const title = node.labels?.[0]?.text ?? node.title ?? "";
         const titleY = h - titleAreaH / 2 + 5;
         appendMultilineText(
           group,
@@ -1183,6 +1220,245 @@ export class ShapeRegistry {
               (!title ? " umlcanvas-placeholder-text" : ""),
           }
         );
+
+        return group;
+      },
+    };
+  }
+
+  private createGenericPdfShape(): ShapeDefinition {
+    return {
+      kind: "generic.pdf",
+      displayName: "PDF Document",
+      defaultTitle: "PDF Document",
+      defaultSize: { width: 340, height: 440 },
+      getPorts(node: DiagramNode): Port[] {
+        if (node.ports && node.ports.length > 0) return node.ports;
+        const sides: Side[] = ["top", "right", "bottom", "left"];
+        return sides.map((side) => ({
+          id: `${node.id}-port-${side}`,
+          ownerNodeId: node.id,
+          name: side,
+          side,
+          offset: 0.5,
+          direction: "inout",
+        }));
+      },
+      getBoundaryPoint(node: DiagramNode, targetPoint: Point): Point {
+        return getRectPerimeterIntersection(
+          { position: node.position, size: node.size },
+          targetPoint
+        );
+      },
+      renderSvg(node: DiagramNode, context: RenderContext): SVGElement {
+        const svgNS = "http://www.w3.org/2000/svg";
+        const group = document.createElementNS(svgNS, "g");
+        group.setAttribute("class", "umlcanvas-shape-pdf");
+
+        const w = node.size.width;
+        const h = node.size.height;
+        const r = 8;
+        const headerH = 32;
+        const bodyH = Math.max(10, h - headerH);
+
+        // 1. Card container / background rect
+        const bgRect = document.createElementNS(svgNS, "rect");
+        bgRect.setAttribute("x", "0");
+        bgRect.setAttribute("y", "0");
+        bgRect.setAttribute("width", String(w));
+        bgRect.setAttribute("height", String(h));
+        bgRect.setAttribute("rx", String(r));
+        bgRect.setAttribute("ry", String(r));
+        bgRect.setAttribute(
+          "class",
+          context.isSelected
+            ? "umlcanvas-pdf-card umlcanvas-node-selected"
+            : "umlcanvas-pdf-card"
+        );
+        if (node.style?.fillColor) {
+          bgRect.setAttribute("fill", node.style.fillColor);
+        }
+        if (node.style?.strokeColor) {
+          bgRect.setAttribute("stroke", node.style.strokeColor);
+        }
+        group.appendChild(bgRect);
+
+        // 2. Header background rect
+        const headerRect = document.createElementNS(svgNS, "path");
+        headerRect.setAttribute(
+          "d",
+          `M 0 ${r} A ${r} ${r} 0 0 1 ${r} 0 L ${w - r} 0 A ${r} ${r} 0 0 1 ${w} ${r} L ${w} ${headerH} L 0 ${headerH} Z`
+        );
+        headerRect.setAttribute("class", "umlcanvas-pdf-header-bg");
+        group.appendChild(headerRect);
+
+        // 3. Header separator line
+        const sepLine = document.createElementNS(svgNS, "line");
+        sepLine.setAttribute("x1", "0");
+        sepLine.setAttribute("y1", String(headerH));
+        sepLine.setAttribute("x2", String(w));
+        sepLine.setAttribute("y2", String(headerH));
+        sepLine.setAttribute("class", "umlcanvas-pdf-header-sep");
+        group.appendChild(sepLine);
+
+        // 4. PDF Document Icon with distinctive PDF styling
+        const iconGroup = document.createElementNS(svgNS, "g");
+        iconGroup.setAttribute("class", "umlcanvas-pdf-icon");
+        iconGroup.setAttribute("transform", "translate(10, 8)");
+
+        const iconPath = document.createElementNS(svgNS, "path");
+        iconPath.setAttribute(
+          "d",
+          "M9 2H3.5A1.5 1.5 0 0 0 2 3.5v11A1.5 1.5 0 0 0 3.5 16h7a1.5 1.5 0 0 0 1.5-1.5V5L9 2z"
+        );
+        iconPath.setAttribute("fill", "none");
+        iconPath.setAttribute("stroke", "currentColor");
+        iconPath.setAttribute("stroke-width", "1.2");
+        iconPath.setAttribute("stroke-linejoin", "round");
+        iconGroup.appendChild(iconPath);
+
+        const iconFold = document.createElementNS(svgNS, "polyline");
+        iconFold.setAttribute("points", "8.5 2 8.5 5.5 12 5.5");
+        iconFold.setAttribute("fill", "none");
+        iconFold.setAttribute("stroke", "currentColor");
+        iconFold.setAttribute("stroke-width", "1.2");
+        iconFold.setAttribute("stroke-linejoin", "round");
+        iconGroup.appendChild(iconFold);
+
+        const pdfBadgeText = document.createElementNS(svgNS, "text");
+        pdfBadgeText.setAttribute("x", "7");
+        pdfBadgeText.setAttribute("y", "12");
+        pdfBadgeText.setAttribute("text-anchor", "middle");
+        pdfBadgeText.setAttribute("font-size", "5");
+        pdfBadgeText.setAttribute("font-weight", "bold");
+        pdfBadgeText.setAttribute("class", "umlcanvas-pdf-badge");
+        pdfBadgeText.textContent = "PDF";
+        iconGroup.appendChild(pdfBadgeText);
+
+        group.appendChild(iconGroup);
+
+        // 5. Title Text
+        const titleText = document.createElementNS(svgNS, "text");
+        titleText.setAttribute("x", "30");
+        titleText.setAttribute("y", "21");
+        titleText.setAttribute("class", "umlcanvas-pdf-title");
+        const rawTitle = node.labels[0]?.text || (node.metadata?.filePath as string) || "PDF Document";
+        const title = rawTitle.replace(/\.pdf$/i, "");
+        const subpath =
+          (node.metadata?.subpath as string) || (node.customData?.subpath as string) || "";
+        const rightMargin = subpath ? (w >= 240 ? 80 : 35) : 30;
+        const maxChars = Math.max(8, Math.floor((w - rightMargin) / 7.5));
+        titleText.textContent = title.length > maxChars ? `${title.slice(0, maxChars - 2)}…` : title;
+        titleText.setAttribute("title", rawTitle);
+        applyFontToSvgElement(titleText, getNodeFontStyle(node));
+        group.appendChild(titleText);
+
+        // 6a. Subpath / Page badge in header if specified
+        if (subpath && w >= 220) {
+          const pageBadge = document.createElementNS(svgNS, "text");
+          pageBadge.setAttribute("x", String(w - 38));
+          pageBadge.setAttribute("y", "21");
+          pageBadge.setAttribute("class", "umlcanvas-pdf-page-badge");
+          const pageMatch = subpath.match(/page=(\d+)/i);
+          const badgeText = pageMatch ? `p. ${pageMatch[1]}` : subpath.replace(/^#/, "");
+          pageBadge.textContent = badgeText;
+          pageBadge.setAttribute("title", `Target: ${subpath}`);
+          group.appendChild(pageBadge);
+        }
+
+        // 6b. Clickable Open Icon in Header (↗)
+        const openIcon = document.createElementNS(svgNS, "text");
+        openIcon.setAttribute("x", String(w - 20));
+        openIcon.setAttribute("y", "21");
+        openIcon.setAttribute("class", "umlcanvas-pdf-open-btn");
+        const pdfFilePath =
+          (node.metadata?.filePath as string) || (node.customData?.filePath as string) || "";
+        const targetPathWithSubpath = subpath
+          ? `${pdfFilePath}${subpath.startsWith("#") ? subpath : "#" + subpath}`
+          : pdfFilePath;
+        openIcon.setAttribute("data-file-path", targetPathWithSubpath);
+        openIcon.textContent = "↗";
+        openIcon.setAttribute("title", "Open PDF in Obsidian");
+        group.appendChild(openIcon);
+
+        // 7. Rich HTML PDF Body via foreignObject (loads PDF via iframe or embed)
+        const foreign = document.createElementNS(svgNS, "foreignObject");
+        foreign.setAttribute("x", "0");
+        foreign.setAttribute("y", String(headerH));
+        foreign.setAttribute("width", String(w));
+        foreign.setAttribute("height", String(bodyH));
+        foreign.setAttribute("class", "umlcanvas-pdf-foreign");
+
+        const containerDiv = safeCreateDiv({
+          cls: "umlcanvas-pdf-container",
+        });
+
+        const src =
+          (node.customData?.src as string) ||
+          (node.metadata?.src as string) ||
+          (node.customData?.filePath as string) ||
+          (node.metadata?.filePath as string) ||
+          "";
+
+        let fullSrc = src;
+        if (src && subpath) {
+          if (src.includes("#")) {
+            fullSrc = `${src.split("#")[0]}${subpath.startsWith("#") ? subpath : "#" + subpath}`;
+          } else {
+            fullSrc = `${src}${subpath.startsWith("#") ? subpath : "#" + subpath}`;
+          }
+        }
+
+        if (fullSrc) {
+          const iframe = safeCreateEl("iframe", {
+            cls: "umlcanvas-pdf-frame",
+            attr: {
+              src: fullSrc,
+              type: "application/pdf",
+              frameborder: "0",
+              title: title || "PDF Document",
+              "data-pdf-src": fullSrc,
+            },
+          });
+          containerDiv.appendChild(iframe);
+        } else {
+          const placeholder = safeCreateDiv({
+            cls: "umlcanvas-pdf-placeholder",
+            text: "PDF Document (drop or select file)",
+          });
+          containerDiv.appendChild(placeholder);
+        }
+
+        foreign.appendChild(containerDiv);
+        group.appendChild(foreign);
+
+        // 8. SVG Fallback elements (for headless Jest tests and SVG-only exporters)
+        const fallbackGroup = document.createElementNS(svgNS, "g");
+        fallbackGroup.setAttribute("class", "umlcanvas-pdf-svg-fallback");
+
+        const pageW = Math.round(w * 0.72);
+        const pageH = Math.round(bodyH * 0.78);
+        const pageX = Math.round((w - pageW) / 2);
+        const pageY = Math.round(headerH + (bodyH - pageH) / 2);
+
+        const pageRect = document.createElementNS(svgNS, "rect");
+        pageRect.setAttribute("x", String(pageX));
+        pageRect.setAttribute("y", String(pageY));
+        pageRect.setAttribute("width", String(pageW));
+        pageRect.setAttribute("height", String(pageH));
+        pageRect.setAttribute("rx", "4");
+        pageRect.setAttribute("class", "umlcanvas-pdf-fallback-page");
+        fallbackGroup.appendChild(pageRect);
+
+        const fallbackTitle = document.createElementNS(svgNS, "text");
+        fallbackTitle.setAttribute("x", String(w / 2));
+        fallbackTitle.setAttribute("y", String(pageY + pageH / 2));
+        fallbackTitle.setAttribute("text-anchor", "middle");
+        fallbackTitle.setAttribute("class", "umlcanvas-pdf-fallback-text");
+        fallbackTitle.textContent = `${title}.pdf`;
+        fallbackGroup.appendChild(fallbackTitle);
+
+        group.appendChild(fallbackGroup);
 
         return group;
       },
@@ -1682,7 +1958,7 @@ export class ShapeRegistry {
         );
         group.appendChild(poly);
 
-        const title = node.labels[0]?.text ?? "";
+        const title = node.labels?.[0]?.text ?? node.title ?? "";
         if (title) {
           appendMultilineText(
             group,
@@ -1690,7 +1966,8 @@ export class ShapeRegistry {
             w / 2,
             h / 2,
             getNodeFontStyle(node),
-            svgNS
+            svgNS,
+            { maxWidth: Math.max(20, Math.round(w * 0.7 - 8)) }
           );
         }
 
@@ -1894,7 +2171,10 @@ export class ShapeRegistry {
         const nodeFont = getNodeFontStyle(node);
         const baseFontSize = nodeFont.fontSize ?? 13;
         const lineHeight = Math.round(baseFontSize * 1.35);
-        const lines = title.split(/\r?\n/);
+        const availableW = Math.max(20, node.size.width - 16);
+        const boldMultiplier = nodeFont.bold ? 1.1 : 1.0;
+        const charWidth = Math.max(4.5, baseFontSize * 0.58 * boldMultiplier);
+        const lines = wrapTextToLines(title, availableW, charWidth);
         const titleBlockHeight = Math.max(1, lines.length) * lineHeight;
         const actualHeaderHeight = lines.length > 1 || baseFontSize > 14
           ? Math.max(32, 20 + titleBlockHeight + 6)
@@ -1910,6 +2190,7 @@ export class ShapeRegistry {
           svgNS,
           {
             className: "umlcanvas-node-title",
+            maxWidth: availableW,
           }
         );
 
@@ -2253,6 +2534,7 @@ export class ShapeRegistry {
     return {
       kind: "uml.lollipop",
       displayName: "Interface (Provided)",
+      defaultTitle: "Interface",
       defaultSize: { width: 28, height: 28 },
       getPorts(node: DiagramNode): Port[] {
         if (node.ports && node.ports.length > 0) return node.ports;
@@ -2317,6 +2599,7 @@ export class ShapeRegistry {
     return {
       kind: "uml.socket",
       displayName: "Interface (Required)",
+      defaultTitle: "Interface",
       defaultSize: { width: 28, height: 28 },
       getPorts(node: DiagramNode): Port[] {
         if (node.ports && node.ports.length > 0) return node.ports;
@@ -2383,6 +2666,7 @@ export class ShapeRegistry {
     return {
       kind: "uml.componentPort",
       displayName: "Port",
+      defaultTitle: "Port",
       defaultSize: { width: 16, height: 16 },
       getPorts(node: DiagramNode): Port[] {
         if (node.ports && node.ports.length > 0) return node.ports;
@@ -2438,14 +2722,17 @@ export class ShapeRegistry {
     kind?: string;
     displayName?: string;
     defaultStereotype?: string;
+    defaultTitle?: string;
   }): ShapeDefinition {
     const kind = options?.kind ?? "uml.node3d";
     const displayName = options?.displayName ?? "Node (3D Box)";
+    const defaultTitle = options?.defaultTitle ?? (kind === "uml.node3d" ? "Node" : displayName);
     const defStereotype = options?.defaultStereotype ?? "device";
 
     return {
       kind,
       displayName,
+      defaultTitle,
       defaultSize: { width: 160, height: 110 },
       getPorts(node: DiagramNode): Port[] {
         if (node.ports && node.ports.length > 0) return node.ports;
@@ -3050,6 +3337,7 @@ export class ShapeRegistry {
     return {
       kind: "uml.compositeClassifier",
       displayName: "Composite Classifier",
+      defaultTitle: "Classifier",
       defaultSize: { width: 280, height: 180 },
       getPorts: (node: DiagramNode): Port[] => this.getDefaultPorts(node),
       getBoundaryPoint: (node: DiagramNode, targetPoint: Point): Point =>
@@ -3160,6 +3448,7 @@ export class ShapeRegistry {
     return {
       kind: "interaction.frame",
       displayName: "Interaction Frame",
+      defaultTitle: "Frame",
       defaultSize: { width: 240, height: 160 },
       getPorts: (node: DiagramNode): Port[] => this.getDefaultPorts(node),
       getBoundaryPoint: (node: DiagramNode, targetPoint: Point): Point =>
@@ -3258,6 +3547,7 @@ export class ShapeRegistry {
     return {
       kind: "interaction.occurrence",
       displayName: "Interaction Occurrence",
+      defaultTitle: "Occurrence",
       defaultSize: { width: 140, height: 70 },
       getPorts: (node: DiagramNode): Port[] => this.getDefaultPorts(node),
       getBoundaryPoint: (node: DiagramNode, targetPoint: Point): Point =>
@@ -3549,14 +3839,33 @@ export class ShapeRegistry {
         const group = document.createElementNS(svgNS, "g");
         group.setAttribute("class", "umlcanvas-shape-freehand");
 
-        const pathData = (node.customData?.pathData as string) || "";
+        let pathData = (node.customData?.pathData as string) || "";
+        if (
+          pathData.startsWith("M") &&
+          !pathData.includes("L") &&
+          !pathData.includes("l") &&
+          !pathData.includes("Z") &&
+          !pathData.includes("z") &&
+          !pathData.includes("Q") &&
+          !pathData.includes("q") &&
+          !pathData.includes("C") &&
+          !pathData.includes("c")
+        ) {
+          const coords = pathData.substring(1).trim().split(/[ ,]+/);
+          if (coords.length >= 2) {
+            pathData = `${pathData} L ${coords[0]},${coords[1]}`;
+          }
+        }
+
+        const strokeWidth = node.style?.strokeWidth ?? 2;
+        const strokeOpacity = node.style?.strokeOpacity ?? node.style?.opacity ?? 1.0;
 
         // Generous stroke hitbox along the path for easy selecting and moving without blocking empty canvas inside bounding box
         const hitbox = document.createElementNS(svgNS, "path");
         hitbox.setAttribute("d", pathData);
         hitbox.setAttribute("fill", "none");
         hitbox.setAttribute("stroke", "transparent");
-        hitbox.setAttribute("stroke-width", "16");
+        hitbox.setAttribute("stroke-width", String(Math.max(16, strokeWidth + 12)));
         hitbox.setAttribute("stroke-linecap", "round");
         hitbox.setAttribute("stroke-linejoin", "round");
         hitbox.setAttribute("class", "umlcanvas-freehand-hitbox");
@@ -3573,7 +3882,12 @@ export class ShapeRegistry {
         path.setAttribute("fill", "none");
         const strokeColor = node.style?.strokeColor || node.style?.color || "currentColor";
         path.setAttribute("stroke", strokeColor);
-        path.setAttribute("stroke-width", String(node.style?.strokeWidth || 2));
+        path.setAttribute("stroke-width", String(strokeWidth));
+        path.style.strokeWidth = `${strokeWidth}px`;
+        if (strokeOpacity < 1.0) {
+          path.setAttribute("stroke-opacity", String(strokeOpacity));
+          path.style.strokeOpacity = String(strokeOpacity);
+        }
         path.setAttribute("stroke-linecap", "round");
         path.setAttribute("stroke-linejoin", "round");
         group.appendChild(path);
@@ -3630,7 +3944,7 @@ export class ShapeRegistry {
         if (node.style?.strokeWidth) circle.setAttribute("stroke-width", String(node.style.strokeWidth));
         group.appendChild(circle);
 
-        const title = node.labels[0]?.text ?? "";
+        const title = node.labels?.[0]?.text ?? node.title ?? "";
         if (title) {
           appendMultilineText(
             group,
@@ -3638,7 +3952,8 @@ export class ShapeRegistry {
             cx,
             cy,
             getNodeFontStyle(node),
-            svgNS
+            svgNS,
+            { maxWidth: Math.max(20, Math.round(node.size.width * 0.8 - 8)) }
           );
         }
 
@@ -3694,7 +4009,7 @@ export class ShapeRegistry {
         if (node.style?.strokeWidth) ellipse.setAttribute("stroke-width", String(node.style.strokeWidth));
         group.appendChild(ellipse);
 
-        const title = node.labels[0]?.text ?? "";
+        const title = node.labels?.[0]?.text ?? node.title ?? "";
         if (title) {
           appendMultilineText(
             group,
@@ -3702,7 +4017,8 @@ export class ShapeRegistry {
             rx,
             ry,
             getNodeFontStyle(node),
-            svgNS
+            svgNS,
+            { maxWidth: Math.max(20, Math.round(node.size.width * 0.8 - 8)) }
           );
         }
 
@@ -3756,7 +4072,7 @@ export class ShapeRegistry {
         if (node.style?.strokeWidth) poly.setAttribute("stroke-width", String(node.style.strokeWidth));
         group.appendChild(poly);
 
-        const title = node.labels[0]?.text ?? "";
+        const title = node.labels?.[0]?.text ?? node.title ?? "";
         if (title) {
           appendMultilineText(
             group,
@@ -3764,7 +4080,8 @@ export class ShapeRegistry {
             w / 2,
             (h * 2) / 3,
             getNodeFontStyle(node),
-            svgNS
+            svgNS,
+            { maxWidth: Math.max(20, Math.round(w * 0.7 - 8)) }
           );
         }
 
@@ -3772,6 +4089,346 @@ export class ShapeRegistry {
       },
     };
   }
+
+  private createGenericTextShape(): ShapeDefinition {
+    return {
+      kind: "generic.text",
+      displayName: "Text",
+      defaultSize: { width: 140, height: 40 },
+      getPorts(node: DiagramNode): Port[] {
+        if (node.ports && node.ports.length > 0) return node.ports;
+        const sides: Side[] = ["top", "right", "bottom", "left"];
+        return sides.map((side) => ({
+          id: `${node.id}-port-${side}`,
+          ownerNodeId: node.id,
+          name: side,
+          side,
+          offset: 0.5,
+          direction: "inout",
+        }));
+      },
+      getBoundaryPoint(node: DiagramNode, targetPoint: Point): Point {
+        return getRectPerimeterIntersection(
+          { position: node.position, size: node.size },
+          targetPoint
+        );
+      },
+      renderSvg(node: DiagramNode, context: RenderContext): SVGElement {
+        const svgNS = "http://www.w3.org/2000/svg";
+        const group = document.createElementNS(svgNS, "g");
+        group.setAttribute("class", "umlcanvas-shape-text");
+
+        const w = node.size.width;
+        const h = node.size.height;
+
+        // Transparent background rectangle / hitbox
+        const hitbox = document.createElementNS(svgNS, "rect");
+        hitbox.setAttribute("x", "0");
+        hitbox.setAttribute("y", "0");
+        hitbox.setAttribute("width", String(w));
+        hitbox.setAttribute("height", String(h));
+        hitbox.setAttribute("fill", "transparent");
+        hitbox.setAttribute(
+          "class",
+          context.isSelected
+            ? "umlcanvas-text-hitbox umlcanvas-node-selected"
+            : "umlcanvas-text-hitbox"
+        );
+        if (context.isSelected) {
+          hitbox.setAttribute("stroke", "var(--interactive-accent, #3b82f6)");
+          hitbox.setAttribute("stroke-width", "1.5");
+          hitbox.setAttribute("stroke-dasharray", "4 3");
+        } else {
+          hitbox.setAttribute("stroke", "none");
+        }
+        group.appendChild(hitbox);
+
+        // Render text
+        const textContent = node.labels?.[0]?.text ?? node.title ?? "";
+        const displayText = textContent || (context.isSelected ? "" : "Text");
+        if (displayText) {
+          const nodeFont = getNodeFontStyle(node);
+          const fontSize = nodeFont.fontSize ?? 16;
+          const lineSpacing = Math.round(fontSize * 1.35);
+          const lines = displayText.split(/\r?\n/);
+
+          const textEl = document.createElementNS(svgNS, "text");
+          textEl.setAttribute("x", "4");
+          textEl.setAttribute("y", String(Math.max(fontSize, Math.round(fontSize * 1.05))));
+          textEl.setAttribute("class", "umlcanvas-text-body umlcanvas-node-title umlcanvas-text-content");
+          const strokeColor = node.style?.strokeColor || node.style?.color || "currentColor";
+          textEl.setAttribute("fill", strokeColor);
+          applyFontToSvgElement(textEl, nodeFont);
+
+          lines.forEach((lineStr, idx) => {
+            const tspan = document.createElementNS(svgNS, "tspan");
+            tspan.setAttribute("x", "4");
+            tspan.setAttribute("y", String(Math.max(fontSize, Math.round(fontSize * 1.05)) + idx * lineSpacing));
+            tspan.textContent = lineStr || " ";
+            textEl.appendChild(tspan);
+          });
+          group.appendChild(textEl);
+        }
+
+        return group;
+      },
+    };
+  }
+
+  private createGenericTableShape(): ShapeDefinition {
+    return {
+      kind: "generic.table",
+      displayName: "Table",
+      defaultTitle: "",
+      defaultSize: { width: 300, height: 180 },
+      getPorts(node: DiagramNode): Port[] {
+        if (node.ports && node.ports.length > 0) return node.ports;
+        const sides: Side[] = ["top", "right", "bottom", "left"];
+        return sides.map((side) => ({
+          id: `${node.id}-port-${side}`,
+          ownerNodeId: node.id,
+          name: side,
+          side,
+          offset: 0.5,
+          direction: "inout",
+        }));
+      },
+      getBoundaryPoint(node: DiagramNode, targetPoint: Point): Point {
+        return getRectPerimeterIntersection(
+          { position: node.position, size: node.size },
+          targetPoint
+        );
+      },
+      renderSvg(node: DiagramNode, context: RenderContext): SVGElement {
+        const svgNS = "http://www.w3.org/2000/svg";
+        const group = document.createElementNS(svgNS, "g");
+        group.setAttribute("class", "umlcanvas-shape-table");
+
+        const width = node.size.width;
+        const height = node.size.height;
+        const tableData = getTableDataFromNode(node);
+        const rows = Math.max(1, tableData.rows || 3);
+        const cols = Math.max(1, tableData.cols || 3);
+        const cells = tableData.cells || [];
+        const hasHeader = tableData.hasHeaderRow !== false;
+
+        const rowHeight = height / rows;
+        const colWidth = width / cols;
+
+        // Outer background rectangle
+        const bgRect = document.createElementNS(svgNS, "rect");
+        bgRect.setAttribute("x", "0");
+        bgRect.setAttribute("y", "0");
+        bgRect.setAttribute("width", String(width));
+        bgRect.setAttribute("height", String(height));
+        bgRect.setAttribute("rx", "3");
+        bgRect.setAttribute("ry", "3");
+        bgRect.setAttribute(
+          "class",
+          context.isSelected
+            ? "umlcanvas-node-body umlcanvas-table-bg umlcanvas-node-selected"
+            : "umlcanvas-node-body umlcanvas-table-bg"
+        );
+        if (node.style?.fillColor) bgRect.setAttribute("fill", node.style.fillColor);
+        if (node.style?.strokeColor) bgRect.setAttribute("stroke", node.style.strokeColor);
+        if (node.style?.strokeWidth) bgRect.setAttribute("stroke-width", String(node.style.strokeWidth));
+        group.appendChild(bgRect);
+
+        // Header row accent fill if hasHeader
+        if (hasHeader && rows > 1) {
+          const headerBg = document.createElementNS(svgNS, "rect");
+          headerBg.setAttribute("x", "0");
+          headerBg.setAttribute("y", "0");
+          headerBg.setAttribute("width", String(width));
+          headerBg.setAttribute("height", String(rowHeight));
+          headerBg.setAttribute("class", "umlcanvas-table-header-bg");
+          headerBg.setAttribute("fill", "var(--background-modifier-hover, rgba(125, 125, 125, 0.08))");
+          group.appendChild(headerBg);
+        }
+
+        // Horizontal grid lines
+        for (let r = 1; r < rows; r++) {
+          const y = Math.round(r * rowHeight);
+          const line = document.createElementNS(svgNS, "line");
+          line.setAttribute("x1", "0");
+          line.setAttribute("y1", String(y));
+          line.setAttribute("x2", String(width));
+          line.setAttribute("y2", String(y));
+          line.setAttribute("class", "umlcanvas-table-grid-line");
+          line.setAttribute("stroke", "var(--canvas-stroke-border, var(--background-modifier-border, #404654))");
+          line.setAttribute("stroke-width", r === 1 && hasHeader ? "1.5" : "1");
+          group.appendChild(line);
+        }
+
+        // Vertical grid lines
+        for (let c = 1; c < cols; c++) {
+          const x = Math.round(c * colWidth);
+          const line = document.createElementNS(svgNS, "line");
+          line.setAttribute("x1", String(x));
+          line.setAttribute("y1", "0");
+          line.setAttribute("x2", String(x));
+          line.setAttribute("y2", String(height));
+          line.setAttribute("class", "umlcanvas-table-grid-line");
+          line.setAttribute("stroke", "var(--canvas-stroke-border, var(--background-modifier-border, #404654))");
+          line.setAttribute("stroke-width", "1");
+          group.appendChild(line);
+        }
+
+        // Render cell contents
+        const nodeFont = getNodeFontStyle(node);
+        const fontSize = Math.max(10, (nodeFont.fontSize ?? 12) - (rows > 4 ? 2 : 0));
+
+        for (let r = 0; r < rows; r++) {
+          for (let c = 0; c < cols; c++) {
+            const cellX = c * colWidth;
+            const cellY = r * rowHeight;
+            let cellText = cells[r]?.[c] ?? "";
+            if (!cellText && r === 0 && tableData.headers?.[c]) {
+              cellText = tableData.headers[c];
+            }
+
+            const cellG = document.createElementNS(svgNS, "g");
+            cellG.setAttribute("class", "umlcanvas-table-cell");
+            cellG.setAttribute("data-row", String(r));
+            cellG.setAttribute("data-col", String(c));
+
+            // Transparent cell hitbox for clicking
+            const cellHitbox = document.createElementNS(svgNS, "rect");
+            cellHitbox.setAttribute("x", String(cellX));
+            cellHitbox.setAttribute("y", String(cellY));
+            cellHitbox.setAttribute("width", String(colWidth));
+            cellHitbox.setAttribute("height", String(rowHeight));
+            cellHitbox.setAttribute("class", "umlcanvas-table-cell-hitbox");
+            cellHitbox.setAttribute("fill", "transparent");
+            cellHitbox.setAttribute("pointer-events", "all");
+            cellG.appendChild(cellHitbox);
+
+            if (cellText) {
+              const isHeaderCell = r === 0 && hasHeader;
+              const textEl = document.createElementNS(svgNS, "text");
+              textEl.setAttribute("x", String(cellX + colWidth / 2));
+              textEl.setAttribute("y", String(cellY + rowHeight / 2));
+              textEl.setAttribute("text-anchor", "middle");
+              textEl.setAttribute("dominant-baseline", "central");
+              textEl.setAttribute(
+                "class",
+                isHeaderCell
+                  ? "umlcanvas-table-cell-header umlcanvas-table-cell-text"
+                  : "umlcanvas-table-cell-text"
+              );
+              textEl.setAttribute("pointer-events", "none");
+              applyFontToSvgElement(textEl, {
+                ...nodeFont,
+                bold: isHeaderCell ? true : nodeFont.bold,
+                fontSize,
+              });
+
+              const cellPaddingX = 8;
+              const availableCellW = Math.max(16, colWidth - cellPaddingX * 2);
+              const boldMultiplier = (nodeFont.bold || isHeaderCell) ? 1.1 : 1.0;
+              const charWidth = Math.max(4.5, fontSize * 0.58 * boldMultiplier);
+              const lines = wrapTextToLines(cellText, availableCellW, charWidth);
+
+              if (lines.length > 1) {
+                const lineH = Math.round(fontSize * 1.35);
+                const totalTextH = (lines.length - 1) * lineH;
+                const startY = Math.max(cellY + lineH / 2 + 2, cellY + rowHeight / 2 - totalTextH / 2);
+                lines.forEach((lineStr, idx) => {
+                  const lineY = Math.round(startY + idx * lineH);
+                  if (lineY > cellY + rowHeight - 2 && idx > 0) return;
+                  const tspan = document.createElementNS(svgNS, "tspan");
+                  tspan.setAttribute("x", String(cellX + colWidth / 2));
+                  tspan.setAttribute("y", String(lineY));
+                  tspan.setAttribute("text-anchor", "middle");
+                  tspan.setAttribute("dominant-baseline", "central");
+                  tspan.textContent = lineStr || " ";
+                  textEl.appendChild(tspan);
+                });
+              } else {
+                textEl.textContent = lines[0] ?? "";
+              }
+              cellG.appendChild(textEl);
+            }
+
+            group.appendChild(cellG);
+          }
+        }
+
+        return group;
+      },
+    };
+  }
+}
+
+export interface TableCustomData {
+  rows: number;
+  cols: number;
+  cells: string[][];
+  headers?: string[];
+  colWidths?: number[];
+  rowHeights?: number[];
+  hasHeaderRow?: boolean;
+}
+
+interface RawTableData {
+  rows?: unknown;
+  cols?: unknown;
+  cells?: unknown;
+  headers?: unknown;
+  colWidths?: unknown;
+  rowHeights?: unknown;
+  hasHeaderRow?: unknown;
+}
+
+export function getTableDataFromNode(node: DiagramNode): TableCustomData {
+  const custom = node.customData;
+  const cd: RawTableData | undefined =
+    custom && typeof custom.tableData === "object" && custom.tableData !== null
+      ? custom.tableData
+      : custom;
+
+  if (cd && typeof cd.rows === "number" && typeof cd.cols === "number") {
+    return {
+      rows: Math.max(1, cd.rows),
+      cols: Math.max(1, cd.cols),
+      cells: Array.isArray(cd.cells) ? (cd.cells as string[][]) : [],
+      headers: Array.isArray(cd.headers) ? (cd.headers as string[]) : undefined,
+      colWidths: Array.isArray(cd.colWidths) ? (cd.colWidths as number[]) : undefined,
+      rowHeights: Array.isArray(cd.rowHeights) ? (cd.rowHeights as number[]) : undefined,
+      hasHeaderRow: cd.hasHeaderRow !== false,
+    };
+  }
+
+  // Parse markdown table format from label if present
+  const rawText = node.labels?.[0]?.text ?? "";
+  if (rawText.includes("|")) {
+    const lines = rawText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const cellRows: string[][] = [];
+    for (const line of lines) {
+      if (/^\|?\s*[-:]+[-| :]*\s*\|?$/.test(line)) continue; // ignore |---|---|
+      const trimmed = line.replace(/^\|/, "").replace(/\|$/, "");
+      const rowCells = trimmed.split("|").map((c) => c.trim());
+      if (rowCells.length > 0) {
+        cellRows.push(rowCells);
+      }
+    }
+    if (cellRows.length > 0) {
+      const rows = cellRows.length;
+      const cols = Math.max(...cellRows.map((r) => r.length));
+      return { rows, cols, cells: cellRows, hasHeaderRow: true };
+    }
+  }
+
+  return {
+    rows: 3,
+    cols: 3,
+    cells: [
+      ["Header 1", "Header 2", "Header 3"],
+      ["Row 1, Col 1", "Row 1, Col 2", "Row 1, Col 3"],
+      ["Row 2, Col 1", "Row 2, Col 2", "Row 2, Col 3"],
+    ],
+    hasHeaderRow: true,
+  };
 }
 
 export const defaultShapeRegistry = new ShapeRegistry();
@@ -3966,7 +4623,7 @@ export function calculateNoteContentScale(
   };
 }
 
-function safeCreateDiv(options?: { cls?: string; text?: string; attr?: Record<string, string | number | boolean> }): HTMLDivElement {
+export function safeCreateDiv(options?: { cls?: string; text?: string; attr?: Record<string, string | number | boolean> }): HTMLDivElement {
   if (typeof createDiv === "function") {
     return createDiv(options);
   }
@@ -3994,4 +4651,32 @@ function safeCreateDiv(options?: { cls?: string; text?: string; attr?: Record<st
     createDiv: (childOpts?: unknown) => safeCreateDiv(childOpts as { cls?: string; text?: string }),
     createEl: () => ({} as HTMLElement),
   } as unknown as HTMLDivElement;
+}
+
+export function safeCreateEl(tag: string, options?: { cls?: string; attr?: Record<string, string> }): HTMLElement {
+  if (typeof document !== "undefined") {
+    const el = document.createElement(tag);
+    if (options?.cls) {
+      el.className = options.cls;
+      if (el.classList && typeof el.classList.add === "function") {
+        el.classList.add(...options.cls.split(" ").filter(Boolean));
+      }
+    }
+    if (options?.attr) {
+      for (const [k, v] of Object.entries(options.attr)) {
+        el.setAttribute(k, v);
+      }
+    }
+    return el;
+  }
+  const mockAttrs: Record<string, string> = { ...(options?.attr || {}) };
+  return {
+    tagName: tag.toUpperCase(),
+    className: options?.cls || "",
+    attributes: mockAttrs,
+    style: {} as CSSStyleDeclaration,
+    setAttribute(k: string, v: string) { mockAttrs[k] = v; },
+    getAttribute(k: string) { return mockAttrs[k] ?? null; },
+    appendChild: (child: Node) => child,
+  } as unknown as HTMLElement;
 }

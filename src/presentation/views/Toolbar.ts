@@ -1,5 +1,6 @@
 import { setIcon } from "obsidian";
 import { DiagramEditor } from "../../application/use-cases/DiagramEditor";
+import { DiagramNode } from "../../domain/entities/DiagramNode";
 import { SvgSceneRenderer } from "../renderer/SvgSceneRenderer";
 import { ViewportTransform } from "../renderer/ViewportMath";
 import { EdgeRouting } from "../../domain/types";
@@ -57,18 +58,26 @@ export class Toolbar {
   private diamondBtn!: HTMLButtonElement;
   private triangleBtn!: HTMLButtonElement;
   private noteBtn!: HTMLButtonElement;
+  private textBtn!: HTMLButtonElement;
   private vaultNoteBtn?: HTMLButtonElement;
   private imageBtn?: HTMLButtonElement;
+  private pdfBtn?: HTMLButtonElement;
   private groupBoxBtn!: HTMLButtonElement;
+  private tableBtn!: HTMLButtonElement;
   private lineBtn!: HTMLButtonElement;
 
   // Context-sensitive Component Controls
   private contextGroup!: HTMLElement;
   private selectionBadgeEl!: HTMLElement;
+  private enhanceBtn!: HTMLButtonElement;
   private colorBtn!: HTMLButtonElement;
   private colorIndicatorEl!: HTMLElement;
   private labelBtn!: HTMLButtonElement;
   private autoFitBtn!: HTMLButtonElement;
+  private addTableRowBtn!: HTMLButtonElement;
+  private deleteTableRowBtn!: HTMLButtonElement;
+  private addTableColBtn!: HTMLButtonElement;
+  private deleteTableColBtn!: HTMLButtonElement;
   private alignBtn!: HTMLButtonElement;
   private groupBtn!: HTMLButtonElement;
   private ungroupBtn!: HTMLButtonElement;
@@ -131,8 +140,19 @@ export class Toolbar {
   private contextItalicBtn!: HTMLButtonElement;
   private contextFontFamilyBtn!: HTMLButtonElement;
 
+  // Brush Settings Popover & Controls
+  private brushGroup!: HTMLElement;
+  private brushBtn!: HTMLButtonElement;
+  private contextBrushBtn!: HTMLButtonElement;
+  private brushPopoverEl: HTMLElement | null = null;
+  private brushWinClickBound: ((e: MouseEvent) => void) | null = null;
+  private currentBrushWidth = 2;
+  private currentBrushStrength = 1.0;
+  private updateBrushPopoverElements: (() => void) | null = null;
+
   private freehandEnabled = true;
   private unsubscribe: (() => void) | null = null;
+  private onKeyDownBound: ((e: KeyboardEvent) => void) | null = null;
 
   constructor(
     private readonly container: HTMLElement,
@@ -147,9 +167,14 @@ export class Toolbar {
     private readonly onToggleMinimap?: () => void,
     private readonly onAddNoteRequested?: () => void,
     private readonly onToggleTheme?: () => void,
-    private readonly onAddImageRequested?: () => void
+    private readonly onAddImageRequested?: () => void,
+    private readonly onAddPdfRequested?: () => void,
+    private readonly onPasteRequested?: () => void,
+    private readonly onBrushSettingsChange?: (width: number, strength: number) => void
   ) {
-    this.freehandEnabled = this.renderer.isFreehandEnabled;
+    this.freehandEnabled = this.renderer?.isFreehandEnabled ?? true;
+    this.currentBrushWidth = this.renderer.brushWidth ?? 2;
+    this.currentBrushStrength = this.renderer.brushStrength ?? 1.0;
 
     this.breadcrumbsEl = createDiv({ cls: "umlcanvas-breadcrumbs" });
     this.container.prepend(this.breadcrumbsEl);
@@ -180,6 +205,13 @@ export class Toolbar {
       this.updateState();
     });
 
+    this.onKeyDownBound = (e: KeyboardEvent) => {
+      this.handleKeyDown(e);
+    };
+    if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+      window.addEventListener("keydown", this.onKeyDownBound);
+    }
+
     this.updateState();
   }
 
@@ -204,13 +236,24 @@ export class Toolbar {
     offsetY = 6,
     defaultWidth = 240
   ): void {
-    const btnRect = anchorEl ? anchorEl.getBoundingClientRect() : { left: 10, bottom: 10 };
+    const btnRect = anchorEl ? anchorEl.getBoundingClientRect() : { left: 10, top: 10, right: 10, bottom: 10 };
     const containerRect = this.container.getBoundingClientRect();
     const popoverWidth = popover.offsetWidth || defaultWidth;
     const maxLeft = Math.max(10, containerRect.width - popoverWidth - 10);
     const left = Math.min(Math.max(10, btnRect.left - containerRect.left), maxLeft);
-    const top = btnRect.bottom - containerRect.top + offsetY;
-    popover.setCssStyles({ left: `${left}px`, top: `${top}px` });
+    const isBottomToolbar =
+      anchorEl &&
+      this.bottomToolbarEl &&
+      typeof this.bottomToolbarEl.contains === "function" &&
+      this.bottomToolbarEl.contains(anchorEl);
+
+    if (isBottomToolbar) {
+      const bottom = containerRect.bottom - btnRect.top + offsetY;
+      popover.setCssStyles({ left: `${left}px`, bottom: `${bottom}px` });
+    } else {
+      const top = btnRect.bottom - containerRect.top + offsetY;
+      popover.setCssStyles({ left: `${left}px`, top: `${top}px` });
+    }
   }
 
   private createButton(
@@ -218,7 +261,8 @@ export class Toolbar {
     text: string,
     onClick: () => void,
     iconId?: string,
-    extraClass?: string
+    extraClass?: string,
+    shortcutKey?: string
   ): HTMLButtonElement {
     const btn = createEl("button", {
       cls: "umlcanvas-toolbar-btn clickable-icon",
@@ -244,9 +288,18 @@ export class Toolbar {
       btn.createSpan({ cls: "umlcanvas-btn-text", text });
     }
 
+    if (shortcutKey) {
+      btn.createSpan({
+        cls: "umlcanvas-btn-shortcut",
+        text: shortcutKey,
+        attr: { "aria-hidden": "true" },
+      });
+    }
+
     btn.addEventListener("mousedown", (e) => {
       markEventHandled(e);
       e.stopPropagation();
+      e.preventDefault();
     });
 
     btn.addEventListener("click", (e) => {
@@ -326,7 +379,44 @@ export class Toolbar {
     }
   }
 
-  public addImageAtCenter(src = "", title = "Photo Title"): void {
+  public addTextAtCenter(initialText = "Text"): DiagramNode {
+    const transform = this.renderer.currentTransform;
+    const centerScreen = {
+      x: this.container.clientWidth / 2,
+      y: this.container.clientHeight / 2,
+    };
+    const canvasX = (centerScreen.x - transform.panX) / transform.zoom;
+    const canvasY = (centerScreen.y - transform.panY) / transform.zoom;
+
+    const size = { width: 140, height: 40 };
+    const node = this.editor.addNode({
+      kind: "generic.text",
+      title: initialText,
+      position: {
+        x: Math.round(canvasX - size.width / 2),
+        y: Math.round(canvasY - size.height / 2),
+      },
+      size,
+    });
+
+    if (this.renderer.grabMode && typeof this.renderer.setGrabMode === "function") {
+      this.renderer.setGrabMode(false);
+      this.updateToolMode();
+    }
+    if (this.renderer.freehandMode) {
+      this.renderer.setFreehandMode(false);
+      this.updateToolMode();
+    }
+
+    this.editor.clearSelection();
+    this.editor.selectNode(node.id);
+    if (node && typeof this.renderer.startInlineEditor === "function") {
+      this.renderer.startInlineEditor(node);
+    }
+    return node;
+  }
+
+  public addImageAtCenter(src = "", title = "Image"): void {
     const transform = this.renderer.currentTransform;
     const centerScreen = {
       x: this.container.clientWidth / 2,
@@ -346,6 +436,39 @@ export class Toolbar {
       size,
       metadata: { src },
       customData: { src },
+    });
+
+    if (this.renderer.grabMode && typeof this.renderer.setGrabMode === "function") {
+      this.renderer.setGrabMode(false);
+      this.updateToolMode();
+    }
+    if (this.renderer.freehandMode) {
+      this.renderer.setFreehandMode(false);
+      this.updateToolMode();
+    }
+  }
+
+  public addPdfAtCenter(src = "", title = "Document"): void {
+    const transform = this.renderer.currentTransform;
+    const centerScreen = {
+      x: this.container.clientWidth / 2,
+      y: this.container.clientHeight / 2,
+    };
+    const canvasX = (centerScreen.x - transform.panX) / transform.zoom;
+    const canvasY = (centerScreen.y - transform.panY) / transform.zoom;
+
+    const size = { width: 340, height: 440 };
+    const filePath = src && !src.startsWith("data:") && !src.startsWith("http") ? src : "";
+    this.editor.addNode({
+      kind: "generic.pdf",
+      title,
+      position: {
+        x: Math.round(canvasX - size.width / 2),
+        y: Math.round(canvasY - size.height / 2),
+      },
+      size,
+      metadata: { src, ...(filePath ? { filePath } : {}) },
+      customData: { src, ...(filePath ? { filePath } : {}) },
     });
 
     if (this.renderer.grabMode && typeof this.renderer.setGrabMode === "function") {
@@ -387,6 +510,59 @@ export class Toolbar {
       this.updateToolMode();
     }
     return group;
+  }
+
+  public addTableAtCenter(rows = 3, cols = 3): DiagramNode {
+    const transform = this.renderer.currentTransform;
+    const centerScreen = {
+      x: this.container.clientWidth / 2,
+      y: this.container.clientHeight / 2,
+    };
+    const canvasX = (centerScreen.x - transform.panX) / transform.zoom;
+    const canvasY = (centerScreen.y - transform.panY) / transform.zoom;
+    const width = 300;
+    const height = 180;
+    const emptyCells = Array.from({ length: rows }, () =>
+      Array.from({ length: cols }, () => "")
+    );
+    const node = this.editor.addNode({
+      kind: "generic.table",
+      title: "",
+      position: {
+        x: Math.round(canvasX - width / 2),
+        y: Math.round(canvasY - height / 2),
+      },
+      size: { width, height },
+      customData: {
+        rows,
+        cols,
+        cells: emptyCells,
+      },
+    });
+    this.editor.selectNode(node.id, false);
+
+    if (this.renderer.grabMode && typeof this.renderer.setGrabMode === "function") {
+      this.renderer.setGrabMode(false);
+      this.updateToolMode();
+    }
+    if (this.renderer.freehandMode) {
+      this.renderer.setFreehandMode(false);
+      this.updateToolMode();
+    }
+    if (node && typeof this.renderer.startInlineEditor === "function") {
+      this.renderer.startInlineEditor(node, { row: 0, col: 0 });
+      if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+        window.requestAnimationFrame(() => {
+          if (this.renderer.activeInlineEditor) {
+            this.renderer.activeInlineEditor.focus();
+            if (typeof this.renderer.activeInlineEditor.select === "function") {
+              this.renderer.activeInlineEditor.select();
+            }
+          }
+        });
+      }
+    }
+    return node;
   }
 
   private handleLineButtonClick(): void {
@@ -450,7 +626,13 @@ export class Toolbar {
     this.pasteBtn = this.createButton(
       "Paste Selection (Ctrl+V)",
       "",
-      () => this.editor.paste(),
+      () => {
+        if (this.onPasteRequested) {
+          this.onPasteRequested();
+        } else {
+          this.editor.paste();
+        }
+      },
       "clipboard"
     );
     editGroup.appendChild(this.pasteBtn);
@@ -623,6 +805,24 @@ export class Toolbar {
     this.typographyGroup.appendChild(this.fontFamilyBtn);
 
     // ----------------------------------------
+    // Group 4b: Brush Settings (visible only when Draw tool is chosen)
+    // ----------------------------------------
+    this.brushGroup = this.createGroup(
+      this.mainToolbarEl,
+      "umlcanvas-brush-group is-hidden"
+    );
+    this.brushBtn = this.createButton(
+      "Brush Settings (Width & Strength)",
+      "Brush",
+      () => {
+        this.toggleBrushMenu(this.brushBtn);
+      },
+      "sliders-horizontal",
+      "umlcanvas-brush-btn is-hidden"
+    );
+    this.brushGroup.appendChild(this.brushBtn);
+
+    // ----------------------------------------
     // Group 5: Context-Sensitive Selection Inspector
     // (Only appears when a component is selected)
     // ----------------------------------------
@@ -650,6 +850,16 @@ export class Toolbar {
       cls: "umlcanvas-color-indicator",
     });
     this.contextGroup.appendChild(this.colorBtn);
+
+    // Context Brush Settings (visible when freehand strokes are selected)
+    this.contextBrushBtn = this.createButton(
+      "Brush Width & Strength for Selected Stroke(s)",
+      "",
+      () => this.toggleBrushMenu(this.contextBrushBtn),
+      "sliders-horizontal",
+      "umlcanvas-context-brush-btn is-hidden"
+    );
+    this.contextGroup.appendChild(this.contextBrushBtn);
 
     // Context Typography Controls: [ − ] [ 13px ] [ + ] [ B ] [ I ] [ Sans ]
     const contextFontStepper = this.contextGroup.createDiv({
@@ -742,6 +952,86 @@ export class Toolbar {
     );
     this.contextGroup.appendChild(this.autoFitBtn);
 
+    // Table Structure Controls (visible when table is selected)
+    this.addTableRowBtn = this.createButton(
+      "Add Row to Table",
+      "+ Row",
+      () => {
+        const id = this.editor.selectedNodeIds[0];
+        if (id) {
+          if (this.renderer.activeInlineEditor) {
+            this.renderer.commitInlineEditor();
+          }
+          this.editor.addTableRow(id);
+        }
+      },
+      "rows"
+    );
+    this.contextGroup.appendChild(this.addTableRowBtn);
+
+    this.deleteTableRowBtn = this.createButton(
+      "Delete Row from Table",
+      "− Row",
+      () => {
+        const id = this.editor.selectedNodeIds[0];
+        if (id) {
+          if (this.renderer.activeInlineEditor) {
+            this.renderer.commitInlineEditor();
+          }
+          this.editor.deleteTableRow(id);
+        }
+      },
+      "minus-circle"
+    );
+    this.contextGroup.appendChild(this.deleteTableRowBtn);
+
+    this.addTableColBtn = this.createButton(
+      "Add Column to Table",
+      "+ Col",
+      () => {
+        const id = this.editor.selectedNodeIds[0];
+        if (id) {
+          if (this.renderer.activeInlineEditor) {
+            this.renderer.commitInlineEditor();
+          }
+          this.editor.addTableColumn(id);
+        }
+      },
+      "columns"
+    );
+    this.contextGroup.appendChild(this.addTableColBtn);
+
+    this.deleteTableColBtn = this.createButton(
+      "Delete Column from Table",
+      "− Col",
+      () => {
+        const id = this.editor.selectedNodeIds[0];
+        if (id) {
+          if (this.renderer.activeInlineEditor) {
+            this.renderer.commitInlineEditor();
+          }
+          this.editor.deleteTableColumn(id);
+        }
+      },
+      "minus"
+    );
+    this.contextGroup.appendChild(this.deleteTableColBtn);
+
+    // Enhance Handdrawn Notes to Standard Components
+    this.enhanceBtn = this.createButton(
+      "Enhance handdrawn note into standard components (Shift+E)",
+      "Enhance",
+      () => {
+        const handled = this.editor.enhanceHanddrawnSelection();
+        if (!handled) {
+          this.editor.enhanceSelection();
+        }
+      },
+      "sparkles",
+      "umlcanvas-enhance-btn"
+    );
+    this.contextGroup.appendChild(this.enhanceBtn);
+
     // Align & Distribute
     this.alignBtn = this.createButton(
       "Align & Distribute Selected Nodes",
@@ -784,7 +1074,7 @@ export class Toolbar {
       "",
       () => this.editor.deleteSelection(),
       "trash",
-      "umlcanvas-toolbar-btn-danger"
+      "umlcanvas-toolbar-btn-danger umlcanvas-delete-btn"
     );
     this.contextGroup.appendChild(this.deleteBtn);
 
@@ -913,18 +1203,23 @@ export class Toolbar {
     // Mode Group (Select, Grab, Draw, Auto Shape)
     const modeGroup = this.createGroup(this.bottomToolbarEl);
 
-    // Select Tool (V / Esc)
+    // Select Tool (V)
     this.selectBtn = this.createButton(
-      "Select & Move (V / Esc)",
+      "Select & Move (V)",
       "",
       () => {
+        if (typeof (this.renderer as any).cancelOrResetActiveDrag === "function") {
+          (this.renderer as any).cancelOrResetActiveDrag();
+        }
         if (typeof this.renderer.setGrabMode === "function") {
           this.renderer.setGrabMode(false);
         }
         this.renderer.setFreehandMode(false);
         this.updateToolMode();
       },
-      "mouse-pointer"
+      "mouse-pointer",
+      "umlcanvas-select-btn",
+      "V"
     );
     modeGroup.appendChild(this.selectBtn);
 
@@ -933,6 +1228,9 @@ export class Toolbar {
       "Grab / Move Canvas (H)",
       "",
       () => {
+        if (typeof (this.renderer as any).cancelOrResetActiveDrag === "function") {
+          (this.renderer as any).cancelOrResetActiveDrag();
+        }
         const active = !this.renderer.grabMode;
         if (active && typeof this.renderer.setFreehandMode === "function") {
           this.renderer.setFreehandMode(false);
@@ -942,7 +1240,9 @@ export class Toolbar {
         }
         this.updateToolMode();
       },
-      "hand"
+      "hand",
+      "umlcanvas-grab-btn",
+      "H"
     );
     modeGroup.appendChild(this.grabBtn);
 
@@ -951,10 +1251,15 @@ export class Toolbar {
       "Draw / Freehand (P)",
       "",
       () => {
+        if (typeof (this.renderer as any).cancelOrResetActiveDrag === "function") {
+          (this.renderer as any).cancelOrResetActiveDrag();
+        }
         if (typeof this.renderer.setGrabMode === "function") {
           this.renderer.setGrabMode(false);
         }
-        const isDrawActive = this.renderer.freehandMode && !this.renderer.isAutoShapeDetection;
+        const isDrawActive =
+          this.renderer.freehandMode &&
+          !this.renderer.isAutoShapeDetection;
         if (isDrawActive) {
           this.renderer.setFreehandMode(false);
         } else {
@@ -963,19 +1268,45 @@ export class Toolbar {
         }
         this.updateToolMode();
       },
-      "pencil"
+      "pencil",
+      "umlcanvas-draw-btn",
+      "P"
     );
-    modeGroup.appendChild(this.drawBtn);
-
-    // Auto Shape Detection (Shift+P)
-    this.autoShapeBtn = this.createButton(
-      "Auto Shape Recognition (Shift+P) - Automatically recognize common shapes",
-      "",
-      () => {
+    this.drawBtn.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof (this.renderer as any).cancelOrResetActiveDrag === "function") {
+        (this.renderer as any).cancelOrResetActiveDrag();
+      }
+      const isDrawActive =
+        this.renderer.freehandMode &&
+        !this.renderer.isAutoShapeDetection;
+      if (!isDrawActive) {
         if (typeof this.renderer.setGrabMode === "function") {
           this.renderer.setGrabMode(false);
         }
-        const isAutoShapeActive = this.renderer.freehandMode && this.renderer.isAutoShapeDetection;
+        this.renderer.setAutoShapeDetection(false);
+        this.renderer.setFreehandMode(true);
+        this.updateToolMode();
+      }
+      this.toggleBrushMenu(this.brushBtn || this.drawBtn);
+    });
+    modeGroup.appendChild(this.drawBtn);
+
+    // Auto Shape Detection (S / Shift+P)
+    this.autoShapeBtn = this.createButton(
+      "Auto Shape Recognition (S) - Automatically recognize common shapes",
+      "",
+      () => {
+        if (typeof (this.renderer as any).cancelOrResetActiveDrag === "function") {
+          (this.renderer as any).cancelOrResetActiveDrag();
+        }
+        if (typeof this.renderer.setGrabMode === "function") {
+          this.renderer.setGrabMode(false);
+        }
+        const isAutoShapeActive =
+          this.renderer.freehandMode &&
+          this.renderer.isAutoShapeDetection;
         if (isAutoShapeActive) {
           this.renderer.setFreehandMode(false);
         } else {
@@ -984,7 +1315,9 @@ export class Toolbar {
         }
         this.updateToolMode();
       },
-      "sparkles"
+      "sparkles",
+      "umlcanvas-autoshape-btn",
+      "S"
     );
     modeGroup.appendChild(this.autoShapeBtn);
 
@@ -998,12 +1331,14 @@ export class Toolbar {
       "Rectangle (R)",
       "",
       () => {
-        this.addShapeAtCenter("generic.rectangle", "Rectangle", {
+        this.addShapeAtCenter("generic.rectangle", "Node", {
           width: 140,
           height: 80,
         });
       },
-      "square"
+      "square",
+      undefined,
+      "R"
     );
     shapeGroup.appendChild(this.rectBtn);
 
@@ -1017,7 +1352,9 @@ export class Toolbar {
           height: 90,
         });
       },
-      "circle"
+      "circle",
+      undefined,
+      "O"
     );
     shapeGroup.appendChild(this.circleBtn);
 
@@ -1031,13 +1368,15 @@ export class Toolbar {
           height: 90,
         });
       },
-      "diamond"
+      "diamond",
+      undefined,
+      "D"
     );
     shapeGroup.appendChild(this.diamondBtn);
 
     // Triangle
     this.triangleBtn = this.createButton(
-      "Triangle (T)",
+      "Triangle (Y)",
       "",
       () => {
         this.addShapeAtCenter("generic.triangle", "Triangle", {
@@ -1045,9 +1384,24 @@ export class Toolbar {
           height: 90,
         });
       },
-      "triangle"
+      "triangle",
+      undefined,
+      "Y"
     );
     shapeGroup.appendChild(this.triangleBtn);
+
+    // Table
+    this.tableBtn = this.createButton(
+      "Table (B) - Add structured table",
+      "",
+      () => {
+        this.addTableAtCenter();
+      },
+      "table",
+      undefined,
+      "B"
+    );
+    shapeGroup.appendChild(this.tableBtn);
 
     // Note Card
     this.noteBtn = this.createButton(
@@ -1056,13 +1410,28 @@ export class Toolbar {
       () => {
         this.addStickyNoteAtCenter();
       },
-      "sticky-note"
+      "sticky-note",
+      undefined,
+      "N"
     );
     shapeGroup.appendChild(this.noteBtn);
 
+    // Direct Text on Canvas
+    this.textBtn = this.createButton(
+      "Text (T) - Add direct text on canvas",
+      "",
+      () => {
+        this.addTextAtCenter();
+      },
+      "type",
+      undefined,
+      "T"
+    );
+    shapeGroup.appendChild(this.textBtn);
+
     // Image (Photo Frame)
     this.imageBtn = this.createButton(
-      "Insert Image (Photo Frame)",
+      "Insert Image (I)",
       "",
       () => {
         if (this.onAddImageRequested) {
@@ -1071,19 +1440,40 @@ export class Toolbar {
           this.addImageAtCenter();
         }
       },
-      "image"
+      "image",
+      undefined,
+      "I"
     );
     shapeGroup.appendChild(this.imageBtn);
+
+    // PDF Document
+    this.pdfBtn = this.createButton(
+      "Insert PDF Document (F)",
+      "",
+      () => {
+        if (this.onAddPdfRequested) {
+          this.onAddPdfRequested();
+        } else {
+          this.addPdfAtCenter();
+        }
+      },
+      "file-text",
+      undefined,
+      "F"
+    );
+    shapeGroup.appendChild(this.pdfBtn);
 
     // Vault Note
     if (this.onAddNoteRequested) {
       this.vaultNoteBtn = this.createButton(
-        "Insert Note from Vault",
+        "Insert Note from Vault (W)",
         "",
         () => {
           this.onAddNoteRequested!();
         },
-        "file-text"
+        "file-text",
+        undefined,
+        "W"
       );
       shapeGroup.appendChild(this.vaultNoteBtn);
     }
@@ -1095,7 +1485,9 @@ export class Toolbar {
       () => {
         this.addGroupBoxAtCenter();
       },
-      "boxes"
+      "boxes",
+      undefined,
+      "G"
     );
     shapeGroup.appendChild(this.groupBoxBtn);
 
@@ -1110,7 +1502,9 @@ export class Toolbar {
       () => {
         this.handleLineButtonClick();
       },
-      "arrow-up-right"
+      "arrow-up-right",
+      undefined,
+      "L"
     );
     lineGroup.appendChild(this.lineBtn);
   }
@@ -1121,7 +1515,11 @@ export class Toolbar {
         (n) => n.id === this.editor.selectedNodeIds[0]
       );
       if (node) {
-        this.renderer.startInlineEditor(node);
+        if (node.kind === "generic.table") {
+          this.renderer.startInlineEditor(node, { row: 0, col: 0 });
+        } else {
+          this.renderer.startInlineEditor(node);
+        }
       }
     } else if (this.editor.selectedEdgeIds.length === 1) {
       const edge = this.editor.diagram.edges.find(
@@ -1255,6 +1653,60 @@ export class Toolbar {
       // Auto-fit button (node selected)
       this.autoFitBtn.disabled = selectedNodeCount === 0;
       this.autoFitBtn.classList.toggle("is-hidden", selectedNodeCount === 0);
+
+      // Table context controls
+      const isSingleTable =
+        selectedNodeCount === 1 &&
+        totalSelected === 1 &&
+        this.editor.diagram.nodes.find((n) => n.id === this.editor.selectedNodeIds[0])?.kind === "generic.table";
+
+      if (this.addTableRowBtn) {
+        this.addTableRowBtn.classList.toggle("is-hidden", !isSingleTable);
+      }
+      if (this.deleteTableRowBtn) {
+        this.deleteTableRowBtn.classList.toggle("is-hidden", !isSingleTable);
+        if (isSingleTable) {
+          const tableNode = this.editor.diagram.nodes.find((n) => n.id === this.editor.selectedNodeIds[0]);
+          const rows = (tableNode?.customData?.rows as number) || 1;
+          this.deleteTableRowBtn.disabled = rows <= 1;
+        }
+      }
+      if (this.addTableColBtn) {
+        this.addTableColBtn.classList.toggle("is-hidden", !isSingleTable);
+      }
+      if (this.deleteTableColBtn) {
+        this.deleteTableColBtn.classList.toggle("is-hidden", !isSingleTable);
+        if (isSingleTable) {
+          const tableNode = this.editor.diagram.nodes.find((n) => n.id === this.editor.selectedNodeIds[0]);
+          const cols = (tableNode?.customData?.cols as number) || 1;
+          this.deleteTableColBtn.disabled = cols <= 1;
+        }
+      }
+
+      // Enhance button (visible when freehand nodes are selected)
+      const hasFreehandSelected = this.editor.diagram.nodes.some(
+        (n) => this.editor.selectedNodeIds.includes(n.id) && n.kind === "generic.freehand"
+      );
+      this.enhanceBtn.disabled = !hasFreehandSelected;
+      this.enhanceBtn.classList.toggle("is-hidden", !hasFreehandSelected);
+
+      if (this.contextBrushBtn) {
+        this.contextBrushBtn.disabled = !hasFreehandSelected;
+        this.contextBrushBtn.classList.toggle("is-hidden", !hasFreehandSelected);
+        if (hasFreehandSelected) {
+          const firstFreehand = this.editor.diagram.nodes.find(
+            (n) => this.editor.selectedNodeIds.includes(n.id) && n.kind === "generic.freehand"
+          );
+          if (firstFreehand?.style?.strokeWidth) {
+            this.currentBrushWidth = firstFreehand.style.strokeWidth;
+          }
+          if (firstFreehand?.style?.strokeOpacity !== undefined) {
+            this.currentBrushStrength = firstFreehand.style.strokeOpacity;
+          } else if (firstFreehand?.style?.opacity !== undefined) {
+            this.currentBrushStrength = firstFreehand.style.opacity;
+          }
+        }
+      }
 
       // Align & Distribute (2+ nodes selected)
       this.alignBtn.disabled = selectedNodeCount < 2;
@@ -1466,48 +1918,69 @@ export class Toolbar {
   }
 
   updateToolMode(): void {
-    const isFreehand = this.renderer.freehandMode;
-    const isGrab = Boolean(this.renderer.grabMode);
+    const isFreehand = Boolean(this.renderer?.freehandMode);
+    const isGrab = Boolean(this.renderer?.grabMode);
+    const isAutoShape = Boolean(this.renderer?.isAutoShapeDetection);
+    const isFreehandEnabled = this.freehandEnabled ?? true;
+
     if (this.selectBtn) {
       this.selectBtn.classList.toggle("is-active", !isFreehand && !isGrab);
     }
     if (this.grabBtn) {
       this.grabBtn.classList.toggle("is-active", isGrab);
     }
+    const isDrawActive = isFreehand && !isAutoShape;
     if (this.drawBtn) {
-      if (!this.freehandEnabled) {
+      if (!isFreehandEnabled) {
         this.drawBtn.classList.add("is-hidden");
         this.drawBtn.classList.remove("is-active");
       } else {
         this.drawBtn.classList.remove("is-hidden");
-        this.drawBtn.classList.toggle(
+        this.drawBtn.classList.toggle("is-active", isDrawActive);
+      }
+    }
+    const isDrawToolActive = isFreehandEnabled && isDrawActive;
+    if (this.brushGroup) {
+      this.brushGroup.classList.toggle("is-hidden", !isDrawToolActive);
+    }
+    if (this.brushBtn) {
+      if (!isDrawToolActive) {
+        this.brushBtn.classList.add("is-hidden");
+        this.brushBtn.classList.remove("is-active");
+        if (this.brushPopoverEl && !this.contextBrushBtn?.classList.contains("is-active")) {
+          this.closeBrushMenu();
+        }
+      } else {
+        this.brushBtn.classList.remove("is-hidden");
+        this.brushBtn.classList.toggle(
           "is-active",
-          isFreehand && !this.renderer.isAutoShapeDetection
+          Boolean(this.brushPopoverEl)
         );
       }
     }
     if (this.autoShapeBtn) {
-      if (!this.freehandEnabled) {
+      if (!isFreehandEnabled) {
         this.autoShapeBtn.classList.add("is-hidden");
         this.autoShapeBtn.classList.remove("is-active");
       } else {
         this.autoShapeBtn.classList.remove("is-hidden");
         this.autoShapeBtn.classList.toggle(
           "is-active",
-          isFreehand && this.renderer.isAutoShapeDetection
+          isFreehand && isAutoShape
         );
       }
     }
   }
 
-  setFreehandEnabled(enabled: boolean): void {
-    this.freehandEnabled = enabled;
+  setFreehandEnabled(enabled?: boolean): void {
+    this.freehandEnabled = enabled ?? true;
     this.updateToolMode();
   }
 
   updatePaletteButtonState(isOpen: boolean): void {
     if (this.paletteBtn) {
       this.paletteBtn.classList.toggle("is-active", isOpen);
+      this.paletteBtn.setAttribute("aria-pressed", String(isOpen));
     }
   }
 
@@ -1517,6 +1990,7 @@ export class Toolbar {
     this.closeColorPalette();
     this.closeAlignMenu();
     this.closeFontSizeMenu();
+    this.closeBrushMenu();
   }
 
   // ==========================================
@@ -1609,6 +2083,13 @@ export class Toolbar {
         this.onAddImageRequested();
       } else {
         this.addImageAtCenter();
+      }
+    });
+    addItem("Insert PDF Document...", "file-text", () => {
+      if (this.onAddPdfRequested) {
+        this.onAddPdfRequested();
+      } else {
+        this.addPdfAtCenter();
       }
     });
     if (this.onAddNoteRequested) {
@@ -2586,7 +3067,585 @@ export class Toolbar {
     }
   }
 
+  // ==========================================
+  // Brush Settings Popover Menu
+  // ==========================================
+  toggleBrushMenu(anchorEl?: HTMLElement): void {
+    if (this.brushPopoverEl) {
+      this.closeBrushMenu();
+    } else {
+      this.openBrushMenu(anchorEl);
+    }
+  }
+
+  openBrushMenu(anchorEl?: HTMLElement): void {
+    if (this.brushPopoverEl) return;
+    this.closeAllPopovers();
+
+    const anchor = anchorEl ?? this.brushBtn ?? this.drawBtn;
+    const popover = createDiv({
+      cls: "umlcanvas-menu-dropdown umlcanvas-brush-popover",
+    });
+    popover.addEventListener("mousedown", (e) => {
+      markEventHandled(e);
+      e.stopPropagation();
+    });
+
+    // 1. Header
+    popover.createDiv({ cls: "umlcanvas-menu-header", text: "Brush Settings" });
+
+    // 2. Brush Width Section
+    const widthSection = popover.createDiv({ cls: "umlcanvas-brush-section" });
+    const widthHeader = widthSection.createDiv({ cls: "umlcanvas-brush-header-row" });
+    widthHeader.createSpan({ cls: "umlcanvas-brush-title", text: "Brush Width" });
+    const widthBadge = widthHeader.createSpan({
+      cls: "umlcanvas-brush-badge",
+      text: `${this.currentBrushWidth}px`,
+    });
+
+    // Quick Width Presets
+    const widthPresetsRow = widthSection.createDiv({ cls: "umlcanvas-brush-presets-row" });
+    const widthPresets = [1, 2, 4, 6, 10];
+    const widthPresetBtns: HTMLButtonElement[] = [];
+
+    for (const w of widthPresets) {
+      const btn = widthPresetsRow.createEl("button", {
+        cls: "umlcanvas-brush-preset-btn",
+        text: `${w}px`,
+      });
+      if (Math.round(this.currentBrushWidth) === w) {
+        btn.classList.add("is-active");
+      }
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.applyBrushSettings(w, this.currentBrushStrength);
+      });
+      widthPresetBtns.push(btn);
+    }
+
+    // Width Stepper & Slider
+    const widthStepperRow = widthSection.createDiv({ cls: "umlcanvas-brush-stepper-row" });
+    const widthDecBtn = widthStepperRow.createEl("button", {
+      cls: "umlcanvas-brush-step-btn",
+      text: "−",
+      title: "Decrease brush width (-1px)",
+    });
+    widthDecBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.applyBrushSettings(Math.max(1, this.currentBrushWidth - 1), this.currentBrushStrength);
+    });
+
+    const widthSlider = widthStepperRow.createEl("input", {
+      type: "range",
+      cls: "umlcanvas-brush-slider",
+      attr: { min: "1", max: "24", step: "1" },
+    });
+    widthSlider.value = String(Math.round(this.currentBrushWidth));
+    widthSlider.addEventListener("input", (e) => {
+      e.stopPropagation();
+      const val = parseInt((e.target as HTMLInputElement).value, 10);
+      if (!isNaN(val)) {
+        this.applyBrushSettings(val, this.currentBrushStrength);
+      }
+    });
+
+    const widthIncBtn = widthStepperRow.createEl("button", {
+      cls: "umlcanvas-brush-step-btn",
+      text: "+",
+      title: "Increase brush width (+1px)",
+    });
+    widthIncBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.applyBrushSettings(Math.min(50, this.currentBrushWidth + 1), this.currentBrushStrength);
+    });
+
+    popover.createDiv({ cls: "umlcanvas-menu-divider" });
+
+    // 3. Brush Strength / Opacity Section
+    const strengthSection = popover.createDiv({ cls: "umlcanvas-brush-section" });
+    const strengthHeader = strengthSection.createDiv({ cls: "umlcanvas-brush-header-row" });
+    strengthHeader.createSpan({ cls: "umlcanvas-brush-title", text: "Brush Strength" });
+    const strengthBadge = strengthHeader.createSpan({
+      cls: "umlcanvas-brush-badge",
+      text: `${Math.round(this.currentBrushStrength * 100)}%`,
+    });
+
+    // Quick Strength Presets
+    const strengthPresetsRow = strengthSection.createDiv({ cls: "umlcanvas-brush-presets-row" });
+    const strengthPresets = [0.25, 0.5, 0.75, 1.0];
+    const strengthLabels = ["25%", "50%", "75%", "100%"];
+    const strengthPresetBtns: HTMLButtonElement[] = [];
+
+    for (let i = 0; i < strengthPresets.length; i++) {
+      const s = strengthPresets[i];
+      const btn = strengthPresetsRow.createEl("button", {
+        cls: "umlcanvas-brush-preset-btn",
+        text: strengthLabels[i],
+      });
+      if (Math.abs(this.currentBrushStrength - s) < 0.05) {
+        btn.classList.add("is-active");
+      }
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.applyBrushSettings(this.currentBrushWidth, s);
+      });
+      strengthPresetBtns.push(btn);
+    }
+
+    // Strength Stepper & Slider
+    const strengthStepperRow = strengthSection.createDiv({ cls: "umlcanvas-brush-stepper-row" });
+    const strengthDecBtn = strengthStepperRow.createEl("button", {
+      cls: "umlcanvas-brush-step-btn",
+      text: "−",
+      title: "Decrease brush strength (-10%)",
+    });
+    strengthDecBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.applyBrushSettings(
+        this.currentBrushWidth,
+        Math.max(0.1, Math.round((this.currentBrushStrength - 0.1) * 10) / 10)
+      );
+    });
+
+    const strengthSlider = strengthStepperRow.createEl("input", {
+      type: "range",
+      cls: "umlcanvas-brush-slider",
+      attr: { min: "10", max: "100", step: "5" },
+    });
+    strengthSlider.value = String(Math.round(this.currentBrushStrength * 100));
+    strengthSlider.addEventListener("input", (e) => {
+      e.stopPropagation();
+      const val = parseInt((e.target as HTMLInputElement).value, 10);
+      if (!isNaN(val)) {
+        this.applyBrushSettings(this.currentBrushWidth, val / 100);
+      }
+    });
+
+    const strengthIncBtn = strengthStepperRow.createEl("button", {
+      cls: "umlcanvas-brush-step-btn",
+      text: "+",
+      title: "Increase brush strength (+10%)",
+    });
+    strengthIncBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.applyBrushSettings(
+        this.currentBrushWidth,
+        Math.min(1.0, Math.round((this.currentBrushStrength + 0.1) * 10) / 10)
+      );
+    });
+
+    popover.createDiv({ cls: "umlcanvas-menu-divider" });
+
+    // 4. Live Preview Box
+    const previewBox = popover.createDiv({ cls: "umlcanvas-brush-preview-box" });
+    const previewSvg = previewBox.createSvg("svg", {
+      cls: "umlcanvas-brush-preview-svg",
+      attr: { viewBox: "0 0 200 36", width: "100%", height: "36" },
+    });
+    const previewPath = previewSvg.createSvg("path", {
+      cls: "umlcanvas-brush-preview-line",
+      attr: {
+        d: "M 15,18 C 60,6 140,30 185,18",
+        fill: "none",
+        stroke: "currentColor",
+        "stroke-linecap": "round",
+        "stroke-linejoin": "round",
+        "stroke-width": String(this.currentBrushWidth),
+        "stroke-opacity": String(this.currentBrushStrength),
+      },
+    });
+    previewPath.style.strokeWidth = `${this.currentBrushWidth}px`;
+    previewPath.style.strokeOpacity = String(this.currentBrushStrength);
+
+    const previewLabel = previewBox.createSpan({
+      cls: "umlcanvas-brush-preview-label",
+      text: `${this.currentBrushWidth}px • ${Math.round(this.currentBrushStrength * 100)}% strength`,
+    });
+
+    // Helper to refresh live controls inside popover
+    this.updateBrushPopoverElements = () => {
+      widthBadge.textContent = `${this.currentBrushWidth}px`;
+      widthSlider.value = String(Math.round(this.currentBrushWidth));
+      for (let i = 0; i < widthPresets.length; i++) {
+        widthPresetBtns[i].classList.toggle(
+          "is-active",
+          Math.round(this.currentBrushWidth) === widthPresets[i]
+        );
+      }
+
+      strengthBadge.textContent = `${Math.round(this.currentBrushStrength * 100)}%`;
+      strengthSlider.value = String(Math.round(this.currentBrushStrength * 100));
+      for (let i = 0; i < strengthPresets.length; i++) {
+        strengthPresetBtns[i].classList.toggle(
+          "is-active",
+          Math.abs(this.currentBrushStrength - strengthPresets[i]) < 0.05
+        );
+      }
+
+      previewPath.setAttribute("stroke-width", String(this.currentBrushWidth));
+      previewPath.style.strokeWidth = `${this.currentBrushWidth}px`;
+      previewPath.setAttribute("stroke-opacity", String(this.currentBrushStrength));
+      previewPath.style.strokeOpacity = String(this.currentBrushStrength);
+      previewLabel.textContent = `${this.currentBrushWidth}px • ${Math.round(
+        this.currentBrushStrength * 100
+      )}% strength`;
+    };
+
+    this.container.appendChild(popover);
+    this.brushPopoverEl = popover;
+    if (anchor) {
+      anchor.classList.add("is-active");
+    }
+
+    this.positionPopover(popover, anchor, 6, 260);
+
+    this.brushWinClickBound = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (
+        this.brushPopoverEl &&
+        !this.brushPopoverEl.contains(target) &&
+        target !== this.brushBtn &&
+        !this.brushBtn?.contains(target) &&
+        target !== this.contextBrushBtn &&
+        !this.contextBrushBtn?.contains(target) &&
+        target !== this.drawBtn &&
+        !this.drawBtn?.contains(target)
+      ) {
+        this.closeBrushMenu();
+      }
+    };
+    window.setTimeout(() => {
+      if (typeof window !== "undefined" && window?.addEventListener && this.brushWinClickBound) {
+        window.addEventListener("mousedown", this.brushWinClickBound);
+      }
+    }, 0);
+  }
+
+  closeBrushMenu(): void {
+    if (this.brushPopoverEl) {
+      this.brushPopoverEl.remove();
+      this.brushPopoverEl = null;
+    }
+    this.updateBrushPopoverElements = null;
+    if (this.brushBtn) {
+      this.brushBtn.classList.remove("is-active");
+    }
+    if (this.contextBrushBtn) {
+      this.contextBrushBtn.classList.remove("is-active");
+    }
+    if (this.brushWinClickBound) {
+      if (typeof window !== "undefined" && window?.removeEventListener) {
+        window.removeEventListener("mousedown", this.brushWinClickBound);
+      }
+      this.brushWinClickBound = null;
+    }
+    this.updateToolMode();
+  }
+
+  applyBrushSettings(width: number, strength: number): void {
+    this.currentBrushWidth = Math.max(1, Math.min(50, Math.round(width)));
+    this.currentBrushStrength = Math.max(0.05, Math.min(1.0, Math.round(strength * 100) / 100));
+
+    if (this.renderer) {
+      this.renderer.setFreehandBrushWidth(this.currentBrushWidth);
+      this.renderer.setFreehandBrushStrength(this.currentBrushStrength);
+    }
+    if (this.editor) {
+      this.editor.setFreehandBrushSettings({
+        strokeWidth: this.currentBrushWidth,
+        strokeStrength: this.currentBrushStrength,
+      });
+    }
+    if (this.onBrushSettingsChange) {
+      this.onBrushSettingsChange(this.currentBrushWidth, this.currentBrushStrength);
+    }
+    if (this.updateBrushPopoverElements) {
+      this.updateBrushPopoverElements();
+    }
+  }
+
+  setBrushWidth(width: number): void {
+    this.applyBrushSettings(width, this.currentBrushStrength);
+  }
+
+  setBrushStrength(strength: number): void {
+    this.applyBrushSettings(this.currentBrushWidth, strength);
+  }
+
+  getBrushWidth(): number {
+    return this.currentBrushWidth;
+  }
+
+  getBrushStrength(): number {
+    return this.currentBrushStrength;
+  }
+
+  /**
+   * Handles keyboard shortcuts for quickly switching between tools and placing shapes,
+   * matching Excalidraw's tool shortcuts and letter badges.
+   */
+  public handleKeyDown(e: KeyboardEvent): boolean {
+    if (!e || (e as HandledEvent)._umlHandled || e.defaultPrevented) {
+      return false;
+    }
+
+    // Never handle when focused in text inputs, textareas, contenteditable elements, or inline editor
+    const target = e.target as HTMLElement | null;
+    const isInput =
+      target &&
+      (target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable ||
+        Boolean(target.closest?.(".umlcanvas-inline-editor")) ||
+        Boolean(target.closest?.("input")) ||
+        Boolean(target.closest?.("textarea")) ||
+        Boolean(target.closest?.(".modal")) ||
+        Boolean(target.closest?.(".menu")) ||
+        Boolean(target.closest?.("[class*='popover']")));
+
+    if (isInput) {
+      return false;
+    }
+
+    if (this.renderer?.activeInlineEditor) {
+      return false;
+    }
+
+    // If inside Obsidian workspace leaf, don't intercept events when leaf is not active
+    if (typeof this.container?.closest === "function") {
+      const leaf = this.container.closest(".workspace-leaf");
+      if (leaf && typeof leaf.classList?.contains === "function" && !leaf.classList.contains("mod-active")) {
+        return false;
+      }
+    }
+
+    // Do not interfere with Ctrl/Cmd or Alt key combinations (copy, paste, undo, redo, bold, italic, etc.)
+    if (e.ctrlKey || e.metaKey || e.altKey) {
+      return false;
+    }
+
+    // Shift combinations: Shift+P (Auto Shape), Shift+T (Triangle)
+    if (e.shiftKey) {
+      const key = e.key.toLowerCase();
+      if (key === "p") {
+        markEventHandled(e);
+        e.preventDefault();
+        e.stopPropagation();
+        this.autoShapeBtn?.click();
+        return true;
+      }
+      if (key === "t") {
+        markEventHandled(e);
+        e.preventDefault();
+        e.stopPropagation();
+        this.triangleBtn?.click();
+        return true;
+      }
+      return false;
+    }
+
+    const key = e.key.toLowerCase();
+
+    // Mode Tools
+    if (key === "v" || e.key === "Escape") {
+      markEventHandled(e);
+      e.preventDefault();
+      e.stopPropagation();
+      this.selectBtn?.click();
+      return true;
+    }
+    if (key === "h") {
+      markEventHandled(e);
+      e.preventDefault();
+      e.stopPropagation();
+      this.grabBtn?.click();
+      return true;
+    }
+    if (key === "p") {
+      markEventHandled(e);
+      e.preventDefault();
+      e.stopPropagation();
+      this.drawBtn?.click();
+      return true;
+    }
+    if (key === "s") {
+      markEventHandled(e);
+      e.preventDefault();
+      e.stopPropagation();
+      this.autoShapeBtn?.click();
+      return true;
+    }
+
+    // Shapes & Components
+    if (key === "r") {
+      markEventHandled(e);
+      e.preventDefault();
+      e.stopPropagation();
+      this.rectBtn?.click();
+      return true;
+    }
+    if (key === "o" || key === "c") {
+      markEventHandled(e);
+      e.preventDefault();
+      e.stopPropagation();
+      this.circleBtn?.click();
+      return true;
+    }
+    if (key === "d") {
+      markEventHandled(e);
+      e.preventDefault();
+      e.stopPropagation();
+      this.diamondBtn?.click();
+      return true;
+    }
+    if (key === "y") {
+      markEventHandled(e);
+      e.preventDefault();
+      e.stopPropagation();
+      this.triangleBtn?.click();
+      return true;
+    }
+    if (key === "b") {
+      markEventHandled(e);
+      e.preventDefault();
+      e.stopPropagation();
+      this.tableBtn?.click();
+      return true;
+    }
+    if (key === "n") {
+      markEventHandled(e);
+      e.preventDefault();
+      e.stopPropagation();
+      this.noteBtn?.click();
+      return true;
+    }
+    if (key === "t" || key === "x") {
+      markEventHandled(e);
+      e.preventDefault();
+      e.stopPropagation();
+      this.textBtn?.click();
+      return true;
+    }
+    if (key === "i") {
+      markEventHandled(e);
+      e.preventDefault();
+      e.stopPropagation();
+      this.imageBtn?.click();
+      return true;
+    }
+    if (key === "f") {
+      markEventHandled(e);
+      e.preventDefault();
+      e.stopPropagation();
+      this.pdfBtn?.click();
+      return true;
+    }
+    if (key === "w") {
+      markEventHandled(e);
+      e.preventDefault();
+      e.stopPropagation();
+      if (this.vaultNoteBtn) {
+        this.vaultNoteBtn.click();
+      } else if (this.onAddNoteRequested) {
+        this.onAddNoteRequested();
+      }
+      return true;
+    }
+    if (key === "g") {
+      markEventHandled(e);
+      e.preventDefault();
+      e.stopPropagation();
+      this.groupBoxBtn?.click();
+      return true;
+    }
+    if (key === "l" || key === "a") {
+      markEventHandled(e);
+      e.preventDefault();
+      e.stopPropagation();
+      this.lineBtn?.click();
+      return true;
+    }
+
+    // Excalidraw number keys: 1-9 (active when there is no selection, so 1-6 does not override selection color presets)
+    const hasSelection =
+      (this.editor?.selectedNodeIds.length ?? 0) > 0 ||
+      (this.editor?.selectedEdgeIds.length ?? 0) > 0 ||
+      (this.editor?.selectedGroupIds.length ?? 0) > 0;
+
+    if (!hasSelection) {
+      if (key === "1") {
+        markEventHandled(e);
+        e.preventDefault();
+        e.stopPropagation();
+        this.selectBtn?.click();
+        return true;
+      }
+      if (key === "2") {
+        markEventHandled(e);
+        e.preventDefault();
+        e.stopPropagation();
+        this.grabBtn?.click();
+        return true;
+      }
+      if (key === "3") {
+        markEventHandled(e);
+        e.preventDefault();
+        e.stopPropagation();
+        this.rectBtn?.click();
+        return true;
+      }
+      if (key === "4") {
+        markEventHandled(e);
+        e.preventDefault();
+        e.stopPropagation();
+        this.diamondBtn?.click();
+        return true;
+      }
+      if (key === "5") {
+        markEventHandled(e);
+        e.preventDefault();
+        e.stopPropagation();
+        this.circleBtn?.click();
+        return true;
+      }
+      if (key === "6") {
+        markEventHandled(e);
+        e.preventDefault();
+        e.stopPropagation();
+        this.lineBtn?.click();
+        return true;
+      }
+      if (key === "7") {
+        markEventHandled(e);
+        e.preventDefault();
+        e.stopPropagation();
+        this.drawBtn?.click();
+        return true;
+      }
+      if (key === "8") {
+        markEventHandled(e);
+        e.preventDefault();
+        e.stopPropagation();
+        this.textBtn?.click();
+        return true;
+      }
+      if (key === "9") {
+        markEventHandled(e);
+        e.preventDefault();
+        e.stopPropagation();
+        this.imageBtn?.click();
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   destroy(): void {
+    if (this.onKeyDownBound && typeof window !== "undefined" && typeof window.removeEventListener === "function") {
+      window.removeEventListener("keydown", this.onKeyDownBound);
+      this.onKeyDownBound = null;
+    }
     this.closeAllPopovers();
     if (this.unsubscribe) {
       this.unsubscribe();

@@ -1,11 +1,12 @@
 import { DiagramEditor } from "../../application/use-cases/DiagramEditor";
+import { getDescendantGroups } from "../../application/commands/DiagramCommands";
 import { DiagramNode } from "../../domain/entities/DiagramNode";
 import { DiagramEdge, EdgeStyle } from "../../domain/entities/DiagramEdge";
 import { Group } from "../../domain/entities/Group";
 import { Point, point } from "../../domain/value-objects/Point";
 import { Rect, Size, rect, rectFromBounds, intersects, contains, center } from "../../domain/value-objects/Rect";
 import { Side } from "../../domain/types";
-import { ShapeRegistry, defaultShapeRegistry } from "./ShapeRegistry";
+import { ShapeRegistry, defaultShapeRegistry, getTableDataFromNode, safeCreateEl, safeCreateDiv } from "./ShapeRegistry";
 import {
   estimateMarkdownContentHeight,
   wrapTextToLines,
@@ -18,10 +19,28 @@ import {
   clampZoom,
 } from "./ViewportMath";
 import { getSidePoint, getRectCenter, getFacingSide } from "./ConnectorGeometry";
-import { defaultRoutingService } from "../../domain/services/RoutingService";
+import { defaultRoutingService, RoutingResult } from "../../domain/services/RoutingService";
 import { defaultSnappingService, AlignmentGuides } from "../../domain/services/SnappingService";
 import { defaultEdgeStyleRegistry, EdgeStyleDefinition } from "./EdgeStyleRegistry";
+import {
+  ArrowAttachmentPopup,
+  ArrowAttachmentItem,
+  DEFAULT_ATTACHMENT_ITEMS,
+} from "../views/ArrowAttachmentPopup";
+
+export interface ArrowAttachmentContext {
+  fromNodeId: string;
+  fromPortId?: string;
+  fromSide?: Side;
+  dropCanvasPoint: Point;
+  dropClientPoint: Point;
+  startPoint: Point;
+}
 import { Stroke, StrokePoint } from "../../domain/services/ShapeRecognizer";
+import {
+  pointsToSmoothSvgPath,
+  roundCoord,
+} from "../../domain/services/FreehandSmoother";
 import { resolveCanvasColor, isCanvasColorPreset } from "../../domain/value-objects/CanvasColor";
 import { defaultCustomChipRegistry } from "../../domain/services/CustomChipRegistry";
 import {
@@ -35,16 +54,39 @@ interface HandledMouseEvent extends MouseEvent {
   _umlHandled?: boolean;
 }
 
+interface HandledEvent extends Event {
+  _umlHandled?: boolean;
+}
+
+function markEventHandled(e: Event): void {
+  if (!e) return;
+  (e as HandledEvent)._umlHandled = true;
+  try {
+    Object.defineProperty(e, "defaultPrevented", { value: true, configurable: true });
+  } catch (_err) {
+    void _err;
+  }
+}
+
 export interface SvgSceneRendererOptions {
   shapeRegistry?: ShapeRegistry;
   showGrid?: boolean;
   initialTransform?: ViewportTransform;
   onTransformChange?: (transform: ViewportTransform) => void;
-  onStrokeComplete?: (stroke: Stroke, options?: { autoDetect?: boolean }) => void;
+  onStrokeComplete?: (
+    stroke: Stroke,
+    options?: {
+      autoDetect?: boolean;
+      strokeWidth?: number;
+      strokeOpacity?: number;
+    }
+  ) => void;
   enableVirtualization?: boolean;
   virtualizationThreshold?: number;
   enableFreehand?: boolean;
   autoShapeDetection?: boolean;
+  freehandBrushWidth?: number;
+  freehandBrushStrength?: number;
   onModeChange?: (mode: "select" | "draw" | "grab") => void;
   onContextMenu?: (
     e: MouseEvent,
@@ -54,13 +96,32 @@ export interface SvgSceneRendererOptions {
     group?: Group
   ) => void;
   onNoteOpen?: (filePath: string) => void;
+  onPdfPick?: (node: DiagramNode) => void;
+  onPdfChangePage?: (node: DiagramNode) => void;
   onChipEdit?: (node: DiagramNode) => void;
+  onPasteRequested?: (canvasPoint?: Point) => void;
   onExternalDrop?: (e: DragEvent, canvasPoint: Point) => boolean | Promise<boolean> | void;
   onRenderMarkdown?: (
     markdown: string,
     el: HTMLElement,
     sourcePath: string
   ) => Promise<void> | void;
+  onOpenVaultNote?: (callback: (noteFile: VaultFileLike) => void) => void;
+  onOpenVaultImage?: (callback: (imageFileOrUrl: VaultImageLike | string) => void) => void;
+}
+
+export interface VaultFileLike {
+  path: string;
+  name?: string;
+  basename?: string;
+  extension?: string;
+}
+
+export interface VaultImageLike {
+  path?: string;
+  src?: string;
+  name?: string;
+  basename?: string;
 }
 
 type DragMode =
@@ -75,12 +136,14 @@ type DragMode =
       activeGuides?: AlignmentGuides;
       wasAlreadySingleSelected?: boolean;
       clickedNodeId?: string;
+      clickedCell?: { row: number; col: number };
     }
   | {
       type: "group-move";
       groupId: string;
       startClient: Point;
       initialGroupPos?: Point;
+      initialGroupPositions?: Map<string, Point>;
       initialMemberPositions: Map<string, Point>;
       moved: boolean;
       wasAlreadySingleSelected?: boolean;
@@ -159,6 +222,8 @@ export class SvgSceneRenderer {
   private inlineEditorEl: HTMLInputElement | HTMLTextAreaElement | null = null;
   private editingNodeId: string | null = null;
   private editingGroupId: string | null = null;
+  private editingCellRow?: number;
+  private editingCellCol?: number;
   private defsEl!: SVGDefsElement;
   private markerTemplates = new Map<
     string,
@@ -182,12 +247,23 @@ export class SvgSceneRenderer {
   private showGrid: boolean;
   private transform: ViewportTransform = { panX: 0, panY: 0, zoom: 1.0 };
   private onTransformChange?: (transform: ViewportTransform) => void;
-  private onStrokeComplete?: (stroke: Stroke, options?: { autoDetect?: boolean }) => void;
+  private onStrokeComplete?: (
+    stroke: Stroke,
+    options?: {
+      autoDetect?: boolean;
+      strokeWidth?: number;
+      strokeOpacity?: number;
+    }
+  ) => void;
+
+  private freehandBrushWidth = 2;
+  private freehandBrushStrength = 1.0;
 
   private isFreehandMode = false;
-  private autoShapeDetection = true;
+  private autoShapeDetection = false;
   private activeStroke: Stroke | null = null;
   private freehandPathEl: SVGPathElement | null = null;
+  private cachedContainerRect: { left: number; top: number; width: number; height: number } | null = null;
   private enableVirtualization: boolean;
   private virtualizationThreshold: number;
   private enableFreehand: boolean;
@@ -198,12 +274,30 @@ export class SvgSceneRenderer {
   private dragMode: DragMode = { type: "none" };
   private isSpacePressed = false;
   private unsubscribeEditor: (() => void) | null = null;
+  private hoveredTableNodeId?: string;
+  private lastTableButtonActionTime = 0;
+
+  // High-performance retained DOM maps and route cache
+  private nodeElements = new Map<string, SVGGElement>();
+  private nodeSignatures = new Map<string, string>();
+  private edgeElements = new Map<string, SVGGElement>();
+  private edgeSignatures = new Map<string, string>();
+  private edgeRouteCache = new Map<string, { key: string; result: RoutingResult }>();
+  private groupElements = new Map<string, SVGGElement>();
+  private groupSignatures = new Map<string, string>();
+  private lastVirtualizationCenter: Point | null = null;
+  private onWindowResizeBound: () => void;
+  private onWindowBlurBound: () => void;
+  private onVisibilityChangeBound: () => void;
+  private onPointerCancelBound: () => void;
+  private scrollingTimeout: any = null;
 
   // Bound event listeners for cleanup
   private onWheelBound: (e: WheelEvent) => void;
   private onMouseDownBound: (e: MouseEvent) => void;
   private onMouseMoveBound: (e: MouseEvent) => void;
   private onMouseUpBound: (e: MouseEvent) => void;
+  private onMouseLeaveBound: (e: MouseEvent) => void;
   private onKeyDownBound: (e: KeyboardEvent) => void;
   private onKeyUpBound: (e: KeyboardEvent) => void;
   private onDblClickBound: (e: MouseEvent) => void;
@@ -218,13 +312,21 @@ export class SvgSceneRenderer {
     group?: Group
   ) => void;
   private onNoteOpen?: (filePath: string) => void;
+  private onPdfPick?: (node: DiagramNode) => void;
+  private onPdfChangePage?: (node: DiagramNode) => void;
   private onChipEdit?: (node: DiagramNode) => void;
+  private onPasteRequested?: (canvasPoint?: Point) => void;
   private onExternalDrop?: (e: DragEvent, canvasPoint: Point) => boolean | Promise<boolean> | void;
+  private lastMouseCanvasPos: Point | null = null;
   private onRenderMarkdown?: (
     markdown: string,
     el: HTMLElement,
     sourcePath: string
   ) => Promise<void> | void;
+  private arrowAttachmentPopup: ArrowAttachmentPopup | null = null;
+  private arrowAttachmentState: ArrowAttachmentContext | null = null;
+  private onOpenVaultNote?: (callback: (noteFile: VaultFileLike) => void) => void;
+  private onOpenVaultImage?: (callback: (imageFileOrUrl: VaultImageLike | string) => void) => void;
 
   constructor(
     container: HTMLElement,
@@ -236,14 +338,21 @@ export class SvgSceneRenderer {
     this.showGrid = options?.showGrid ?? true;
     this.onTransformChange = options?.onTransformChange;
     this.onStrokeComplete = options?.onStrokeComplete;
-    this.autoShapeDetection = options?.autoShapeDetection ?? true;
+    this.autoShapeDetection = options?.autoShapeDetection ?? false;
     this.enableVirtualization = options?.enableVirtualization ?? false;
     this.virtualizationThreshold = options?.virtualizationThreshold ?? 200;
     this.enableFreehand = options?.enableFreehand ?? true;
+    this.freehandBrushWidth = options?.freehandBrushWidth ?? 2;
+    this.freehandBrushStrength = options?.freehandBrushStrength ?? 1.0;
     this.onModeChange = options?.onModeChange;
     this.onContextMenu = options?.onContextMenu;
     this.onNoteOpen = options?.onNoteOpen;
+    this.onPdfPick = options?.onPdfPick;
+    this.onPdfChangePage = options?.onPdfChangePage;
     this.onChipEdit = options?.onChipEdit;
+    this.onOpenVaultNote = options?.onOpenVaultNote;
+    this.onOpenVaultImage = options?.onOpenVaultImage;
+    this.onPasteRequested = options?.onPasteRequested;
     this.onExternalDrop = options?.onExternalDrop;
     this.onRenderMarkdown = options?.onRenderMarkdown;
 
@@ -303,16 +412,23 @@ export class SvgSceneRenderer {
     this.viewportEl.appendChild(this.interactionLayerEl);
 
     this.container.appendChild(this.svgEl);
+    if (typeof this.container.setAttribute === "function") {
+      this.container.setAttribute("tabindex", "-1");
+    }
 
     // Bind event handlers
     this.onWheelBound = this.handleWheel.bind(this);
     this.onMouseDownBound = this.handleMouseDown.bind(this);
     this.onMouseMoveBound = this.handleMouseMove.bind(this);
     this.onMouseUpBound = this.handleMouseUp.bind(this);
+    this.onMouseLeaveBound = this.handleMouseLeave.bind(this);
     this.onKeyDownBound = this.handleKeyDown.bind(this);
     this.onKeyUpBound = this.handleKeyUp.bind(this);
     this.onDblClickBound = this.handleDblClick.bind(this);
     this.onContextMenuBound = this.handleContextMenu.bind(this);
+    this.onWindowBlurBound = this.handleWindowBlur.bind(this);
+    this.onVisibilityChangeBound = this.handleVisibilityChange.bind(this);
+    this.onPointerCancelBound = this.handlePointerCancel.bind(this);
     this.onDragOverBound = (e: DragEvent) => {
       e.preventDefault();
       if (e.dataTransfer) {
@@ -346,7 +462,7 @@ export class SvgSceneRenderer {
             y: Math.round(canvasPoint.y - shapeDef.defaultSize.height / 2),
           },
           size: { ...shapeDef.defaultSize },
-          title: shapeDef.displayName,
+          title: shapeDef.defaultTitle ?? shapeDef.displayName,
         });
         this.editor.selectNode(node.id, false);
         return;
@@ -369,7 +485,7 @@ export class SvgSceneRenderer {
             y: Math.round(canvasPoint.y - shapeDef.defaultSize.height / 2),
           },
           size: { ...shapeDef.defaultSize },
-          title: shapeDef.displayName,
+          title: shapeDef.defaultTitle ?? shapeDef.displayName,
         });
         this.editor.selectNode(node.id, false);
       }
@@ -386,6 +502,20 @@ export class SvgSceneRenderer {
     this.svgEl.addEventListener("contextmenu", this.onContextMenuBound);
     this.svgEl.addEventListener("dragover", this.onDragOverBound);
     this.svgEl.addEventListener("drop", this.onDropBound);
+    this.svgEl.addEventListener("mouseleave", this.onMouseLeaveBound);
+
+    if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+      window.addEventListener("blur", this.onWindowBlurBound);
+      window.addEventListener("pointercancel", this.onPointerCancelBound);
+    }
+    if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+      document.addEventListener("visibilitychange", this.onVisibilityChangeBound);
+    }
+
+    this.onWindowResizeBound = () => {
+      this.cachedContainerRect = null;
+    };
+    window.addEventListener("resize", this.onWindowResizeBound);
 
     this.unsubscribeEditor = this.editor.subscribe(() => {
       this.render();
@@ -393,6 +523,31 @@ export class SvgSceneRenderer {
 
     this.updateViewportTransform();
     this.render();
+  }
+
+  private renderScheduled = false;
+  private animationFrameId: number | null = null;
+
+  /**
+   * Schedules a render on the next animation frame, coalescing rapid state mutations
+   * to ensure 60-120fps buttery smooth performance without redundant DOM diffing.
+   */
+  public scheduleRender(): void {
+    if (this.renderScheduled) return;
+    this.renderScheduled = true;
+
+    if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+      this.animationFrameId = window.requestAnimationFrame(() => {
+        this.renderScheduled = false;
+        this.animationFrameId = null;
+        this.render();
+      });
+    } else {
+      queueMicrotask(() => {
+        this.renderScheduled = false;
+        this.render();
+      });
+    }
   }
 
   get currentTransform(): ViewportTransform {
@@ -407,19 +562,27 @@ export class SvgSceneRenderer {
     };
     this.updateViewportTransform();
     if (this.isVirtualizationActive()) {
-      this.render();
+      const last = this.lastVirtualizationCenter;
+      const dx = last ? Math.abs(this.transform.panX - last.x) : Infinity;
+      const dy = last ? Math.abs(this.transform.panY - last.y) : Infinity;
+      if (dx > 120 || dy > 120) {
+        this.lastVirtualizationCenter = { x: this.transform.panX, y: this.transform.panY };
+        this.render();
+      }
     }
   }
 
   public getVisibleCanvasRect(margin = 200): Rect {
     const width =
       this.container.clientWidth ||
+      this.cachedContainerRect?.width ||
       (typeof this.container.getBoundingClientRect === "function"
         ? this.container.getBoundingClientRect().width
         : 0) ||
       800;
     const height =
       this.container.clientHeight ||
+      this.cachedContainerRect?.height ||
       (typeof this.container.getBoundingClientRect === "function"
         ? this.container.getBoundingClientRect().height
         : 0) ||
@@ -473,32 +636,125 @@ export class SvgSceneRenderer {
     return this.container.clientHeight || 600;
   }
 
-  setEnableFreehand(enabled: boolean): void {
-    this.enableFreehand = enabled;
-    if (!enabled && this.isFreehandMode) {
+  setEnableFreehand(enabled?: boolean): void {
+    const isEnabled = enabled ?? true;
+    this.enableFreehand = isEnabled;
+    if (!isEnabled && this.isFreehandMode) {
       this.setFreehandMode(false);
     }
   }
 
   get isFreehandEnabled(): boolean {
-    return this.enableFreehand;
+    return Boolean(this.enableFreehand ?? true);
+  }
+
+  get brushWidth(): number {
+    return this.freehandBrushWidth;
+  }
+
+  setFreehandBrushWidth(width: number): void {
+    if (typeof width === "number" && !isNaN(width) && width > 0) {
+      this.freehandBrushWidth = Math.max(0.5, Math.min(100, width));
+    }
+  }
+
+  get brushStrength(): number {
+    return this.freehandBrushStrength;
+  }
+
+  setFreehandBrushStrength(strength: number): void {
+    if (typeof strength === "number" && !isNaN(strength) && strength > 0) {
+      this.freehandBrushStrength = Math.max(0.05, Math.min(1.0, strength));
+    }
+  }
+
+  public cancelOrResetActiveDrag(): void {
+    if (this.dragMode.type === "freehand") {
+      this.cachedContainerRect = null;
+      if (this.freehandPathEl) {
+        this.freehandPathEl.remove();
+        this.freehandPathEl = null;
+      }
+      this.activeStroke = null;
+    }
+    this.dragMode = { type: "none" };
+    if (this.container && typeof this.container.classList?.remove === "function") {
+      this.container.classList.remove(
+        "umlcanvas-panning",
+        "umlcanvas-moving",
+        "umlcanvas-resizing",
+        "umlcanvas-selecting",
+        "umlcanvas-connecting",
+        "umlcanvas-drawing",
+        "umlcanvas-dragging-active"
+      );
+    }
+    this.cachedContainerRect = null;
+    this.renderInteractions();
+  }
+
+  private handleWindowBlur(): void {
+    this.isSpacePressed = false;
+    if (this.container && typeof this.container.classList?.remove === "function") {
+      this.container.classList.remove("umlcanvas-space-pressed");
+    }
+    if (this.dragMode.type !== "none") {
+      this.cancelOrResetActiveDrag();
+    }
+  }
+
+  private handleVisibilityChange(): void {
+    if (typeof document !== "undefined" && document.hidden) {
+      this.isSpacePressed = false;
+      if (this.container && typeof this.container.classList?.remove === "function") {
+        this.container.classList.remove("umlcanvas-space-pressed");
+      }
+      if (this.dragMode.type !== "none") {
+        this.cancelOrResetActiveDrag();
+      }
+    }
+  }
+
+  private handlePointerCancel(): void {
+    if (this.dragMode.type !== "none") {
+      this.cancelOrResetActiveDrag();
+    }
   }
 
   setFreehandMode(active: boolean): void {
-    if (active && !this.enableFreehand) {
+    if (this.dragMode.type !== "none") {
+      this.cancelOrResetActiveDrag();
+    }
+    this.isSpacePressed = false;
+    if (this.container && typeof this.container.classList?.remove === "function") {
+      this.container.classList.remove("umlcanvas-space-pressed");
+    }
+    if (active && !this.isFreehandEnabled) {
       return;
     }
     if (active && this.isGrabMode) {
       this.isGrabMode = false;
       this.container.classList.remove("umlcanvas-grab-mode");
     }
+    if (active && this.editor.hasSelection) {
+      this.editor.clearSelection();
+    }
     this.isFreehandMode = active;
+    if (!active) {
+      this.autoShapeDetection = false;
+    }
     if (active) {
       this.container.classList.add("umlcanvas-freehand-mode");
     } else {
       this.container.classList.remove("umlcanvas-freehand-mode");
     }
-    this.onModeChange?.(active ? "draw" : (this.isGrabMode ? "grab" : "select"));
+    this.onModeChange?.(
+      active
+        ? "draw"
+        : this.isGrabMode
+        ? "grab"
+        : "select"
+    );
   }
 
   get freehandMode(): boolean {
@@ -506,6 +762,13 @@ export class SvgSceneRenderer {
   }
 
   setGrabMode(active: boolean): void {
+    if (this.dragMode.type !== "none") {
+      this.cancelOrResetActiveDrag();
+    }
+    this.isSpacePressed = false;
+    if (this.container && typeof this.container.classList?.remove === "function") {
+      this.container.classList.remove("umlcanvas-space-pressed");
+    }
     if (active && this.isFreehandMode) {
       this.isFreehandMode = false;
       this.container.classList.remove("umlcanvas-freehand-mode");
@@ -516,7 +779,13 @@ export class SvgSceneRenderer {
     } else {
       this.container.classList.remove("umlcanvas-grab-mode");
     }
-    this.onModeChange?.(active ? "grab" : (this.isFreehandMode ? "draw" : "select"));
+    this.onModeChange?.(
+      active
+        ? "grab"
+        : this.isFreehandMode
+        ? "draw"
+        : "select"
+    );
   }
 
   get grabMode(): boolean {
@@ -525,11 +794,19 @@ export class SvgSceneRenderer {
 
   setAutoShapeDetection(active: boolean): void {
     this.autoShapeDetection = active;
-    if (active && this.isGrabMode) {
-      this.isGrabMode = false;
-      this.container.classList.remove("umlcanvas-grab-mode");
+    if (active) {
+      if (this.isGrabMode) {
+        this.isGrabMode = false;
+        this.container.classList.remove("umlcanvas-grab-mode");
+      }
     }
-    this.onModeChange?.(this.isGrabMode ? "grab" : (this.isFreehandMode ? "draw" : "select"));
+    this.onModeChange?.(
+      this.isGrabMode
+        ? "grab"
+        : this.isFreehandMode
+        ? "draw"
+        : "select"
+    );
   }
 
   get isAutoShapeDetection(): boolean {
@@ -878,6 +1155,16 @@ export class SvgSceneRenderer {
   // --- Rendering ---
 
   render(): void {
+    if (
+      this.animationFrameId !== null &&
+      typeof window !== "undefined" &&
+      typeof window.cancelAnimationFrame === "function"
+    ) {
+      window.cancelAnimationFrame(this.animationFrameId);
+      this.animationFrameId = null;
+    }
+    this.renderScheduled = false;
+
     this.renderGroups();
     this.renderEdges();
     this.renderNodes();
@@ -926,13 +1213,47 @@ export class SvgSceneRenderer {
 
   private renderGroups(): void {
     const svgNS = "http://www.w3.org/2000/svg";
-    this.groupsLayerEl.textContent = "";
 
     const visibleRect = this.isVirtualizationActive()
       ? this.getVisibleCanvasRect()
       : null;
 
-    for (const group of this.editor.diagram.groups) {
+    const diagramGroupMap = new Map<string, Group>(
+      this.editor.diagram.groups.map((g) => [g.id, g])
+    );
+
+    const existingChildren = Array.from(this.groupsLayerEl.children ?? []) as SVGGElement[];
+    const domGroupMap = new Map<string, SVGGElement>();
+    for (const child of existingChildren) {
+      const groupId = child.getAttribute("data-group-id");
+      if (groupId) {
+        domGroupMap.set(groupId, child);
+        if (!this.groupElements.has(groupId)) {
+          this.groupElements.set(groupId, child);
+        }
+      } else {
+        this.safeRemove(child);
+      }
+    }
+
+    for (const [groupId, childEl] of domGroupMap.entries()) {
+      const grp = diagramGroupMap.get(groupId);
+      if (!grp) {
+        this.safeRemove(childEl);
+        this.groupElements.delete(groupId);
+        this.groupSignatures.delete(groupId);
+      }
+    }
+
+    const sortedGroups = [...this.editor.diagram.groups].sort((a, b) => {
+      const boundsA = this.getGroupBounds(a);
+      const boundsB = this.getGroupBounds(b);
+      const areaA = boundsA.size.width * boundsA.size.height;
+      const areaB = boundsB.size.width * boundsB.size.height;
+      return areaB - areaA;
+    });
+
+    for (const group of sortedGroups) {
       const bounds = this.getGroupBounds(group);
       const gx = bounds.position.x;
       const gy = bounds.position.y;
@@ -943,190 +1264,218 @@ export class SvgSceneRenderer {
         visibleRect &&
         !intersects(visibleRect, bounds)
       ) {
+        const existingEl = this.groupElements.get(group.id);
+        if (existingEl) {
+          this.safeRemove(existingEl);
+          this.groupElements.delete(group.id);
+          this.groupSignatures.delete(group.id);
+        }
         continue;
       }
 
       const isSelected = this.editor.isGroupSelected(group.id);
       const isCollapsed = group.collapsed;
       const isLocked = group.locked ?? false;
+      const groupSignature = `${gx},${gy},${gw},${gh}|${group.name ?? ""}|${group.color ?? ""}|${isSelected}|${isCollapsed}|${isLocked}|${this.editingGroupId === group.id}|${group.nodeIds.length}`;
 
-      const groupEl = document.createElementNS(svgNS, "g");
-      groupEl.setAttribute("class", "umlcanvas-group");
-      groupEl.setAttribute("data-group-id", group.id);
+      const existingEl = this.groupElements.get(group.id);
+      const previousSignature = this.groupSignatures.get(group.id);
 
-      if (isSelected) {
-        groupEl.classList.add("is-selected");
-      }
-      if (isCollapsed) {
-        groupEl.classList.add("is-collapsed");
-      }
-      if (isLocked) {
-        groupEl.classList.add("is-locked");
-      }
-      if (this.editingGroupId === group.id) {
-        groupEl.classList.add("umlcanvas-group-editing");
+      if (existingEl && (existingEl.parentElement as unknown) === this.groupsLayerEl && groupSignature === previousSignature) {
+        continue;
       }
 
-      if (group.color) {
-        groupEl.setAttribute("data-color", group.color);
-        const resolvedColor = resolveCanvasColor(group.color);
-        if (resolvedColor) {
-          const styledEl = groupEl as unknown as HTMLElement;
-          if (typeof (groupEl as { setCssProps?: (props: Record<string, string>) => void }).setCssProps === "function") {
-            (groupEl as { setCssProps: (props: Record<string, string>) => void }).setCssProps({ "--canvas-color": resolvedColor });
-          }
-          if (styledEl.style && typeof styledEl.style.setProperty === "function") {
-            styledEl.style.setProperty("--canvas-color", resolvedColor);
-          } else if (styledEl.style) {
-            styledEl.style["--canvas-color" as unknown as number] = resolvedColor;
-          }
-        }
-        if (isCanvasColorPreset(group.color)) {
-          groupEl.classList.add(`is-color-${group.color}`);
-        } else {
-          groupEl.classList.add("has-custom-color");
-        }
-      }
-
-      if (isCollapsed) {
-        const cardW = Math.max(180, Math.min(gw, 260));
-        const cardH = 34;
-
-        const bgRect = document.createElementNS(svgNS, "rect");
-        bgRect.setAttribute("x", String(gx));
-        bgRect.setAttribute("y", String(gy));
-        bgRect.setAttribute("width", String(cardW));
-        bgRect.setAttribute("height", String(cardH));
-        bgRect.setAttribute("rx", "6");
-        bgRect.setAttribute("ry", "6");
-        bgRect.setAttribute("class", "umlcanvas-group-collapsed-card");
-        bgRect.setAttribute("data-group-id", group.id);
-        groupEl.appendChild(bgRect);
-
-        const toggle = document.createElementNS(svgNS, "text");
-        toggle.setAttribute("x", String(gx + 10));
-        toggle.setAttribute("y", String(gy + 22));
-        toggle.setAttribute("class", "umlcanvas-group-collapse-btn");
-        toggle.setAttribute("data-group-id", group.id);
-        toggle.textContent = "▶";
-        groupEl.appendChild(toggle);
-
-        const groupFont = getGroupFontStyle(group);
-        const badgeFontSize = groupFont.fontSize ? Math.max(8, Math.round(groupFont.fontSize * 0.85)) : undefined;
-
-        const title = document.createElementNS(svgNS, "text");
-        title.setAttribute("x", String(gx + 26));
-        title.setAttribute("y", String(gy + 22));
-        title.setAttribute("class", "umlcanvas-group-title");
-        title.setAttribute("data-group-id", group.id);
-        title.textContent = group.name;
-        applyFontToSvgElement(title, groupFont);
-        groupEl.appendChild(title);
-
-        const badge = document.createElementNS(svgNS, "text");
-        badge.setAttribute("x", String(gx + cardW - 28));
-        badge.setAttribute("y", String(gy + 22));
-        badge.setAttribute("text-anchor", "end");
-        badge.setAttribute("class", "umlcanvas-group-badge");
-        badge.textContent = `(${group.nodeIds.length})`;
-        applyFontToSvgElement(badge, { ...groupFont, fontSize: badgeFontSize, bold: false });
-        groupEl.appendChild(badge);
-
-        const colorDot = document.createElementNS(svgNS, "circle");
-        colorDot.setAttribute("cx", String(gx + cardW - 14));
-        colorDot.setAttribute("cy", String(gy + 17));
-        colorDot.setAttribute("r", "5");
-        colorDot.setAttribute("class", "umlcanvas-group-color-dot");
-        colorDot.setAttribute("data-group-id", group.id);
-        const resolvedCollapsedDotColor = group.color ? (resolveCanvasColor(group.color) ?? group.color) : "var(--interactive-accent)";
-        colorDot.setAttribute("fill", resolvedCollapsedDotColor);
-        groupEl.appendChild(colorDot);
-      } else {
-        const rectEl = document.createElementNS(svgNS, "rect");
-        rectEl.setAttribute("x", String(gx));
-        rectEl.setAttribute("y", String(gy));
-        rectEl.setAttribute("width", String(gw));
-        rectEl.setAttribute("height", String(gh));
-        rectEl.setAttribute("rx", "6");
-        rectEl.setAttribute("ry", "6");
-        rectEl.setAttribute("class", "umlcanvas-group-box");
-        rectEl.setAttribute("pointer-events", "stroke");
-        rectEl.setAttribute("data-group-id", group.id);
-        groupEl.appendChild(rectEl);
-
-        const headerH = 28;
-        const headerBg = document.createElementNS(svgNS, "rect");
-        headerBg.setAttribute("x", String(gx));
-        headerBg.setAttribute("y", String(gy));
-        headerBg.setAttribute("width", String(gw));
-        headerBg.setAttribute("height", String(headerH));
-        headerBg.setAttribute("rx", "6");
-        headerBg.setAttribute("ry", "6");
-        headerBg.setAttribute("class", "umlcanvas-group-header-bg");
-        headerBg.setAttribute("data-group-id", group.id);
-        groupEl.appendChild(headerBg);
-
-        const toggle = document.createElementNS(svgNS, "text");
-        toggle.setAttribute("x", String(gx + 10));
-        toggle.setAttribute("y", String(gy + 18));
-        toggle.setAttribute("class", "umlcanvas-group-collapse-btn");
-        toggle.setAttribute("data-group-id", group.id);
-        toggle.textContent = "▼";
-        groupEl.appendChild(toggle);
-
-        const groupFont = getGroupFontStyle(group);
-        const badgeFontSize = groupFont.fontSize ? Math.max(8, Math.round(groupFont.fontSize * 0.85)) : undefined;
-
-        const title = document.createElementNS(svgNS, "text");
-        title.setAttribute("x", String(gx + 26));
-        title.setAttribute("y", String(gy + 18));
-        title.setAttribute("class", "umlcanvas-group-title");
-        title.setAttribute("data-group-id", group.id);
-        title.textContent = group.name;
-        applyFontToSvgElement(title, groupFont);
-        groupEl.appendChild(title);
-
-        const badge = document.createElementNS(svgNS, "text");
-        badge.setAttribute("x", String(gx + gw - 32));
-        badge.setAttribute("y", String(gy + 18));
-        badge.setAttribute("text-anchor", "end");
-        badge.setAttribute("class", "umlcanvas-group-badge");
-        badge.textContent = `${group.nodeIds.length} items`;
-        applyFontToSvgElement(badge, { ...groupFont, fontSize: badgeFontSize, bold: false });
-        groupEl.appendChild(badge);
-
-        const colorDot = document.createElementNS(svgNS, "circle");
-        colorDot.setAttribute("cx", String(gx + gw - 16));
-        colorDot.setAttribute("cy", String(gy + 14));
-        colorDot.setAttribute("r", "5");
-        colorDot.setAttribute("class", "umlcanvas-group-color-dot");
-        colorDot.setAttribute("data-group-id", group.id);
-        const resolvedExpandedDotColor = group.color ? (resolveCanvasColor(group.color) ?? group.color) : "var(--interactive-accent)";
-        colorDot.setAttribute("fill", resolvedExpandedDotColor);
-        groupEl.appendChild(colorDot);
-
-        if (isLocked) {
-          const lockIcon = document.createElementNS(svgNS, "text");
-          lockIcon.setAttribute("x", String(gx + gw - 84));
-          lockIcon.setAttribute("y", String(gy + 18));
-          lockIcon.setAttribute("text-anchor", "end");
-          lockIcon.setAttribute("class", "umlcanvas-group-lock-icon");
-          lockIcon.textContent = "🔒";
-          groupEl.appendChild(lockIcon);
-        }
-
-        if (isSelected && !isLocked) {
-          this.renderGroupResizeHandles(groupEl, group, bounds);
-        }
-      }
-
-      this.groupsLayerEl.appendChild(groupEl);
+      const groupEl = this.renderGroupElement(group, bounds, svgNS);
+      this.replaceOrAppend(this.groupsLayerEl, groupEl, existingEl);
+      this.groupElements.set(group.id, groupEl);
+      this.groupSignatures.set(group.id, groupSignature);
     }
+  }
+
+  private renderGroupElement(group: Group, bounds: Rect, svgNS: string): SVGGElement {
+    const gx = bounds.position.x;
+    const gy = bounds.position.y;
+    const gw = bounds.size.width;
+    const gh = bounds.size.height;
+    const isSelected = this.editor.isGroupSelected(group.id);
+    const isCollapsed = group.collapsed;
+    const isLocked = group.locked ?? false;
+
+    const groupEl = document.createElementNS(svgNS, "g") as SVGGElement;
+    groupEl.setAttribute("class", "umlcanvas-group");
+    groupEl.setAttribute("data-group-id", group.id);
+
+    if (isSelected) {
+      groupEl.classList.add("is-selected");
+    }
+    if (isCollapsed) {
+      groupEl.classList.add("is-collapsed");
+    }
+    if (isLocked) {
+      groupEl.classList.add("is-locked");
+    }
+    if (this.editingGroupId === group.id) {
+      groupEl.classList.add("umlcanvas-group-editing");
+    }
+
+    if (group.color) {
+      groupEl.setAttribute("data-color", group.color);
+      const resolvedColor = resolveCanvasColor(group.color);
+      if (resolvedColor) {
+        const styledEl = groupEl as unknown as HTMLElement;
+        if (typeof (groupEl as { setCssProps?: (props: Record<string, string>) => void }).setCssProps === "function") {
+          (groupEl as { setCssProps: (props: Record<string, string>) => void }).setCssProps({ "--canvas-color": resolvedColor });
+        }
+        if (styledEl.style && typeof styledEl.style.setProperty === "function") {
+          styledEl.style.setProperty("--canvas-color", resolvedColor);
+        } else if (styledEl.style) {
+          styledEl.style["--canvas-color" as unknown as number] = resolvedColor;
+        }
+      }
+      if (isCanvasColorPreset(group.color)) {
+        groupEl.classList.add(`is-color-${group.color}`);
+      } else {
+        groupEl.classList.add("has-custom-color");
+      }
+    }
+
+    if (isCollapsed) {
+      const cardW = Math.max(180, Math.min(gw, 260));
+      const cardH = 34;
+
+      const bgRect = document.createElementNS(svgNS, "rect");
+      bgRect.setAttribute("x", String(gx));
+      bgRect.setAttribute("y", String(gy));
+      bgRect.setAttribute("width", String(cardW));
+      bgRect.setAttribute("height", String(cardH));
+      bgRect.setAttribute("rx", "6");
+      bgRect.setAttribute("ry", "6");
+      bgRect.setAttribute("class", "umlcanvas-group-collapsed-card");
+      bgRect.setAttribute("data-group-id", group.id);
+      groupEl.appendChild(bgRect);
+
+      const toggle = document.createElementNS(svgNS, "text");
+      toggle.setAttribute("x", String(gx + 10));
+      toggle.setAttribute("y", String(gy + 22));
+      toggle.setAttribute("class", "umlcanvas-group-collapse-btn");
+      toggle.setAttribute("data-group-id", group.id);
+      toggle.textContent = "▶";
+      groupEl.appendChild(toggle);
+
+      const groupFont = getGroupFontStyle(group);
+      const badgeFontSize = groupFont.fontSize ? Math.max(8, Math.round(groupFont.fontSize * 0.85)) : undefined;
+
+      const title = document.createElementNS(svgNS, "text");
+      title.setAttribute("x", String(gx + 26));
+      title.setAttribute("y", String(gy + 22));
+      title.setAttribute("class", "umlcanvas-group-title");
+      title.setAttribute("data-group-id", group.id);
+      title.textContent = group.name;
+      applyFontToSvgElement(title as SVGElement, groupFont);
+      groupEl.appendChild(title);
+
+      const badge = document.createElementNS(svgNS, "text");
+      badge.setAttribute("x", String(gx + cardW - 28));
+      badge.setAttribute("y", String(gy + 22));
+      badge.setAttribute("text-anchor", "end");
+      badge.setAttribute("class", "umlcanvas-group-badge");
+      badge.textContent = `(${group.nodeIds.length})`;
+      applyFontToSvgElement(badge as SVGElement, { ...groupFont, fontSize: badgeFontSize, bold: false });
+      groupEl.appendChild(badge);
+
+      const colorDot = document.createElementNS(svgNS, "circle");
+      colorDot.setAttribute("cx", String(gx + cardW - 14));
+      colorDot.setAttribute("cy", String(gy + 17));
+      colorDot.setAttribute("r", "5");
+      colorDot.setAttribute("class", "umlcanvas-group-color-dot");
+      colorDot.setAttribute("data-group-id", group.id);
+      const resolvedCollapsedDotColor = group.color ? (resolveCanvasColor(group.color) ?? group.color) : "var(--interactive-accent)";
+      colorDot.setAttribute("fill", resolvedCollapsedDotColor);
+      groupEl.appendChild(colorDot);
+    } else {
+      const rectEl = document.createElementNS(svgNS, "rect");
+      rectEl.setAttribute("x", String(gx));
+      rectEl.setAttribute("y", String(gy));
+      rectEl.setAttribute("width", String(gw));
+      rectEl.setAttribute("height", String(gh));
+      rectEl.setAttribute("rx", "6");
+      rectEl.setAttribute("ry", "6");
+      rectEl.setAttribute("class", "umlcanvas-group-box");
+      rectEl.setAttribute("pointer-events", "stroke");
+      rectEl.setAttribute("data-group-id", group.id);
+      groupEl.appendChild(rectEl);
+
+      const headerH = 28;
+      const headerBg = document.createElementNS(svgNS, "rect");
+      headerBg.setAttribute("x", String(gx));
+      headerBg.setAttribute("y", String(gy));
+      headerBg.setAttribute("width", String(gw));
+      headerBg.setAttribute("height", String(headerH));
+      headerBg.setAttribute("rx", "6");
+      headerBg.setAttribute("ry", "6");
+      headerBg.setAttribute("class", "umlcanvas-group-header-bg");
+      headerBg.setAttribute("data-group-id", group.id);
+      groupEl.appendChild(headerBg);
+
+      const toggle = document.createElementNS(svgNS, "text");
+      toggle.setAttribute("x", String(gx + 10));
+      toggle.setAttribute("y", String(gy + 18));
+      toggle.setAttribute("class", "umlcanvas-group-collapse-btn");
+      toggle.setAttribute("data-group-id", group.id);
+      toggle.textContent = "▼";
+      groupEl.appendChild(toggle);
+
+      const groupFont = getGroupFontStyle(group);
+      const badgeFontSize = groupFont.fontSize ? Math.max(8, Math.round(groupFont.fontSize * 0.85)) : undefined;
+
+      const title = document.createElementNS(svgNS, "text");
+      title.setAttribute("x", String(gx + 26));
+      title.setAttribute("y", String(gy + 18));
+      title.setAttribute("class", "umlcanvas-group-title");
+      title.setAttribute("data-group-id", group.id);
+      title.textContent = group.name;
+      applyFontToSvgElement(title as SVGElement, groupFont);
+      groupEl.appendChild(title);
+
+      const badge = document.createElementNS(svgNS, "text");
+      badge.setAttribute("x", String(gx + gw - 32));
+      badge.setAttribute("y", String(gy + 18));
+      badge.setAttribute("text-anchor", "end");
+      badge.setAttribute("class", "umlcanvas-group-badge");
+      badge.textContent = `${group.nodeIds.length} items`;
+      applyFontToSvgElement(badge as SVGElement, { ...groupFont, fontSize: badgeFontSize, bold: false });
+      groupEl.appendChild(badge);
+
+      const colorDot = document.createElementNS(svgNS, "circle");
+      colorDot.setAttribute("cx", String(gx + gw - 16));
+      colorDot.setAttribute("cy", String(gy + 14));
+      colorDot.setAttribute("r", "5");
+      colorDot.setAttribute("class", "umlcanvas-group-color-dot");
+      colorDot.setAttribute("data-group-id", group.id);
+      const resolvedExpandedDotColor = group.color ? (resolveCanvasColor(group.color) ?? group.color) : "var(--interactive-accent)";
+      colorDot.setAttribute("fill", resolvedExpandedDotColor);
+      groupEl.appendChild(colorDot);
+
+      if (isLocked) {
+        const lockIcon = document.createElementNS(svgNS, "text");
+        lockIcon.setAttribute("x", String(gx + gw - 84));
+        lockIcon.setAttribute("y", String(gy + 18));
+        lockIcon.setAttribute("text-anchor", "end");
+        lockIcon.setAttribute("class", "umlcanvas-group-lock-icon");
+        lockIcon.textContent = "🔒";
+        groupEl.appendChild(lockIcon);
+      }
+
+      if (isSelected && !isLocked) {
+        this.renderGroupResizeHandles(groupEl, group, bounds);
+      }
+    }
+
+    return groupEl;
   }
 
   private renderEdges(): void {
     const svgNS = "http://www.w3.org/2000/svg";
-    this.edgesLayerEl.textContent = "";
 
     const visibleNodes = this.editor.diagram.nodes.filter((n) =>
       this.editor.isNodeVisible(n.id)
@@ -1139,251 +1488,401 @@ export class SvgSceneRenderer {
       ? this.getVisibleCanvasRect()
       : null;
 
+    const diagramEdgeMap = new Map<string, DiagramEdge>(
+      this.editor.diagram.edges.map((e) => [e.id, e])
+    );
+
+    const existingChildren = Array.from(this.edgesLayerEl.children ?? []) as SVGGElement[];
+    const domEdgeMap = new Map<string, SVGGElement>();
+    for (const child of existingChildren) {
+      const edgeId = child.getAttribute("data-edge-id");
+      if (edgeId) {
+        domEdgeMap.set(edgeId, child);
+        if (!this.edgeElements.has(edgeId)) {
+          this.edgeElements.set(edgeId, child);
+        }
+      } else {
+        this.safeRemove(child);
+      }
+    }
+
+    // Clean up DOM: Remove edges that no longer exist in the diagram
+    for (const [edgeId, childEl] of domEdgeMap.entries()) {
+      const edge = diagramEdgeMap.get(edgeId);
+      if (!edge) {
+        this.safeRemove(childEl);
+        this.edgeElements.delete(edgeId);
+        this.edgeSignatures.delete(edgeId);
+        this.edgeRouteCache.delete(edgeId);
+      }
+    }
+
     for (const edge of this.editor.diagram.edges) {
       const fromNode = nodeMap.get(edge.fromNodeId);
-      const toNode = nodeMap.get(edge.toNodeId);
-      if (!fromNode || !toNode) continue;
+      const toNode = edge.toNodeId ? nodeMap.get(edge.toNodeId) : undefined;
+      if (!fromNode || (!toNode && !edge.toPoint)) {
+        const existingEl = this.edgeElements.get(edge.id);
+        if (existingEl) {
+          this.safeRemove(existingEl);
+          this.edgeElements.delete(edge.id);
+          this.edgeSignatures.delete(edge.id);
+          this.edgeRouteCache.delete(edge.id);
+        }
+        continue;
+      }
+
+      const targetX = toNode ? toNode.position.x : edge.toPoint!.x;
+      const targetY = toNode ? toNode.position.y : edge.toPoint!.y;
+      const targetW = toNode ? toNode.size.width : 0;
+      const targetH = toNode ? toNode.size.height : 0;
 
       if (visibleRect) {
-        const minX = Math.min(fromNode.position.x, toNode.position.x);
-        const minY = Math.min(fromNode.position.y, toNode.position.y);
+        const minX = Math.min(fromNode.position.x, targetX);
+        const minY = Math.min(fromNode.position.y, targetY);
         const maxX = Math.max(
           fromNode.position.x + fromNode.size.width,
-          toNode.position.x + toNode.size.width
+          targetX + targetW
         );
         const maxY = Math.max(
           fromNode.position.y + fromNode.size.height,
-          toNode.position.y + toNode.size.height
+          targetY + targetH
         );
         const edgeBounds = rectFromBounds(minX, minY, maxX - minX, maxY - minY);
         if (!intersects(visibleRect, edgeBounds)) {
+          const existingEl = this.edgeElements.get(edge.id);
+          if (existingEl) {
+            this.safeRemove(existingEl);
+            this.edgeElements.delete(edge.id);
+            this.edgeSignatures.delete(edge.id);
+          }
           continue;
         }
       }
 
-      // Look up specific ports if defined
-      const fromPort = fromNode.ports.find((p) => p.id === edge.fromPortId);
-      const toPort = toNode.ports.find((p) => p.id === edge.toPortId);
+      const fromPort = fromNode.ports?.find((p) => p.id === edge.fromPortId);
+      const toPort = toNode?.ports?.find((p) => p.id === edge.toPortId);
 
       const fromSide = fromPort?.side ?? edge.fromSide;
       const toSide = toPort?.side ?? edge.toSide;
 
-      // Calculate edge route (supports straight & orthogonal with obstacle avoidance)
-      const routingResult = defaultRoutingService.route(
-        {
-          id: fromNode.id,
-          position: fromNode.position,
-          size: fromNode.size,
-          side: fromSide,
-          portOffset: fromPort?.offset,
-        },
-        {
-          id: toNode.id,
-          position: toNode.position,
-          size: toNode.size,
-          side: toSide,
-          portOffset: toPort?.offset,
-        },
-        {
-          routing: edge.routing,
-          obstacles: visibleNodes,
-          manualWaypoints: edge.waypoints,
-        }
-      );
+      const targetBoundary = toNode
+        ? {
+            id: toNode.id,
+            position: toNode.position,
+            size: toNode.size,
+            side: toSide,
+            portOffset: toPort?.offset,
+            kind: toNode.kind,
+          }
+        : {
+            position: edge.toPoint!,
+            size: { width: 0, height: 0 },
+            side: toSide,
+          };
 
-      const edgeGroup = document.createElementNS(svgNS, "g");
-      edgeGroup.setAttribute("class", "umlcanvas-edge");
-      edgeGroup.setAttribute("data-edge-id", edge.id);
+      const routeKey = `${fromNode.id}:${fromNode.position.x},${fromNode.position.y},${fromNode.size.width},${fromNode.size.height},${fromSide},${fromPort?.offset}|${toNode?.id ?? "pt"}:${targetX},${targetY},${targetW},${targetH},${toSide},${toPort?.offset}|${edge.routing}|${JSON.stringify(edge.waypoints)}`;
+
+      let routingResult: RoutingResult;
+      const cached = this.edgeRouteCache.get(edge.id);
+      if (cached && cached.key === routeKey) {
+        routingResult = cached.result;
+      } else {
+        routingResult = defaultRoutingService.route(
+          {
+            id: fromNode.id,
+            position: fromNode.position,
+            size: fromNode.size,
+            side: fromSide,
+            portOffset: fromPort?.offset,
+            kind: fromNode.kind,
+          },
+          targetBoundary,
+          {
+            routing: edge.routing,
+            obstacles: visibleNodes,
+            manualWaypoints: edge.waypoints,
+          }
+        );
+        this.edgeRouteCache.set(edge.id, { key: routeKey, result: routingResult });
+      }
 
       const isSelected = this.editor.isEdgeSelected(edge.id);
-      const styleDef = defaultEdgeStyleRegistry.get(edge.kind);
-
-      // Hitbox path
-      const hitPath = document.createElementNS(svgNS, "path");
-      hitPath.setAttribute("d", routingResult.svgPath);
-      hitPath.setAttribute("class", "umlcanvas-edge-hitbox");
-      edgeGroup.appendChild(hitPath);
-
-      if (isSelected) {
-        edgeGroup.classList.add("umlcanvas-edge-selected");
-      }
-
-      // Visible path
-      const path = document.createElementNS(svgNS, "path");
-      path.setAttribute("d", routingResult.svgPath);
-      path.setAttribute(
-        "class",
-        isSelected
-          ? "umlcanvas-edge-line umlcanvas-edge-selected"
-          : "umlcanvas-edge-line"
-      );
-
-      const customStroke = edge.style?.color ?? edge.style?.strokeColor;
-
-      let rawMarkerEndId: string | undefined;
-      if (edge.style?.markerEnd !== undefined) {
-        rawMarkerEndId = edge.style.markerEnd === "none" || !edge.style.markerEnd
-          ? undefined
-          : this.normalizeMarkerId(edge.style.markerEnd);
-      } else {
-        rawMarkerEndId = styleDef.markerEndId;
-      }
-
-      let rawMarkerStartId: string | undefined;
-      if (edge.style?.markerStart !== undefined) {
-        rawMarkerStartId = edge.style.markerStart === "none" || !edge.style.markerStart
-          ? undefined
-          : this.normalizeMarkerId(edge.style.markerStart);
-      } else {
-        rawMarkerStartId = styleDef.markerStartId;
-      }
-
-      let markerEndId = rawMarkerEndId;
-      let markerStartId = rawMarkerStartId;
-
-      if (isSelected) {
-        if (markerEndId) markerEndId = this.getOrCreateColoredMarker(markerEndId, "", true);
-        if (markerStartId) markerStartId = this.getOrCreateColoredMarker(markerStartId, "", true);
-      } else if (customStroke) {
-        if (markerEndId) markerEndId = this.getOrCreateColoredMarker(markerEndId, customStroke, false);
-        if (markerStartId) markerStartId = this.getOrCreateColoredMarker(markerStartId, customStroke, false);
-      }
-
-      if (markerEndId) {
-        path.setAttribute("marker-end", `url(#${markerEndId})`);
-      }
-      if (markerStartId) {
-        path.setAttribute("marker-start", `url(#${markerStartId})`);
-      }
-
-      const strokeDasharray = this.resolveStrokeDasharray(edge.style, styleDef);
-      if (strokeDasharray) {
-        path.setAttribute("stroke-dasharray", strokeDasharray);
-      }
-      if (edge.style?.color) {
-        edgeGroup.setAttribute("data-color", edge.style.color);
-        const resolvedColor = resolveCanvasColor(edge.style.color);
-        if (resolvedColor) {
-          edgeGroup.setCssProps({ "--canvas-color": resolvedColor, color: resolvedColor });
-          path.setAttribute("stroke", resolvedColor);
-        }
-        if (isCanvasColorPreset(edge.style.color)) {
-          edgeGroup.classList.add(`is-color-${edge.style.color}`);
-        } else {
-          edgeGroup.classList.add("has-custom-color");
-        }
-      } else if (edge.style?.strokeColor) {
-        path.setAttribute("stroke", edge.style.strokeColor);
-      }
-      if (edge.style?.strokeWidth || styleDef.strokeWidth) {
-        path.setAttribute(
-          "stroke-width",
-          String(edge.style?.strokeWidth ?? styleDef.strokeWidth)
-        );
-      }
-
-      edgeGroup.appendChild(path);
-
-      // Edge labels (F-031) or default stereotype (e.g. «include», «extend»)
       const displayLabel =
         edge.labels && edge.labels.length > 0
           ? edge.labels[0].text
-          : styleDef.defaultStereotype
-          ? `«${styleDef.defaultStereotype}»`
           : undefined;
+      const edgeSignature = `${routeKey}|${edge.kind}|${JSON.stringify(edge.style)}|${displayLabel}|${edge.multiplicitySource ?? ""}|${edge.multiplicityTarget ?? ""}|${isSelected}`;
 
-      const tooltipText = displayLabel
-        ? `Line (${edge.kind}): "${displayLabel}"\nDouble-click or press Enter to edit label`
-        : `Line (${edge.kind})\nDouble-click or press Enter to add label`;
-      edgeGroup.setAttribute("title", tooltipText);
+      const existingEl = this.edgeElements.get(edge.id);
+      const previousSignature = this.edgeSignatures.get(edge.id);
 
-      if (displayLabel && routingResult.points.length >= 2) {
-        const midIdx = Math.floor(routingResult.points.length / 2);
-        const p1 = routingResult.points[midIdx - 1] ?? routingResult.points[0];
-        const p2 = routingResult.points[midIdx] ?? routingResult.points[1];
-        const midX = (p1.x + p2.x) / 2;
-        const midY = (p1.y + p2.y) / 2;
-
-        const labelGroup = document.createElementNS(svgNS, "g");
-        labelGroup.setAttribute("class", "umlcanvas-edge-label-group");
-        labelGroup.setAttribute("data-edge-id", edge.id);
-
-        const edgeFont = getEdgeFontStyle(edge);
-        const fontSize = edgeFont.fontSize ?? 11;
-        const padX = 6;
-        const textLen = displayLabel.length;
-        const charWidth = fontSize * 0.6;
-        const bgWidth = Math.max(24, Math.round(textLen * charWidth + padX * 2));
-        const bgHeight = Math.max(18, Math.round(fontSize * 1.5));
-
-        const bgRect = document.createElementNS(svgNS, "rect");
-        bgRect.setAttribute("x", String(Math.round(midX - bgWidth / 2)));
-        bgRect.setAttribute("y", String(Math.round(midY - bgHeight / 2)));
-        bgRect.setAttribute("width", String(bgWidth));
-        bgRect.setAttribute("height", String(bgHeight));
-        bgRect.setAttribute("rx", "4");
-        bgRect.setAttribute("ry", "4");
-        bgRect.setAttribute("class", "umlcanvas-edge-label-bg");
-        labelGroup.appendChild(bgRect);
-
-        const text = document.createElementNS(svgNS, "text");
-        text.setAttribute("x", String(midX));
-        text.setAttribute("y", String(midY));
-        text.setAttribute("text-anchor", "middle");
-        text.setAttribute("dominant-baseline", "central");
-        text.setAttribute("class", "umlcanvas-edge-label");
-        text.textContent = displayLabel;
-        applyFontToSvgElement(text, edgeFont);
-        labelGroup.appendChild(text);
-
-        edgeGroup.appendChild(labelGroup);
+      if (existingEl && (existingEl.parentElement as unknown) === this.edgesLayerEl && edgeSignature === previousSignature) {
+        continue;
       }
 
-      // Multiplicity annotations (F-034)
-      if (routingResult.points.length >= 2) {
-        const startPt = routingResult.points[0];
-        const secondPt = routingResult.points[1];
-        const endPt = routingResult.points[routingResult.points.length - 1];
-        const beforeEndPt = routingResult.points[routingResult.points.length - 2];
-        const edgeFont = getEdgeFontStyle(edge);
-        const multFontSize = edgeFont.fontSize ? Math.max(8, Math.round(edgeFont.fontSize * 0.85)) : undefined;
+      const edgeGroup = this.renderEdgeGroup(edge, routingResult, svgNS);
+      this.replaceOrAppend(this.edgesLayerEl, edgeGroup, existingEl);
+      this.edgeElements.set(edge.id, edgeGroup);
+      this.edgeSignatures.set(edge.id, edgeSignature);
+    }
+  }
 
-        if (edge.multiplicitySource) {
-          const sText = document.createElementNS(svgNS, "text");
-          const dirX = Math.sign(secondPt.x - startPt.x);
-          const dirY = Math.sign(secondPt.y - startPt.y);
-          sText.setAttribute("x", String(startPt.x + (dirX !== 0 ? dirX * 18 : 10)));
-          sText.setAttribute("y", String(startPt.y + (dirY !== 0 ? dirY * 18 : -8)));
-          sText.setAttribute("class", "umlcanvas-edge-multiplicity umlcanvas-multiplicity-source");
-          sText.textContent = edge.multiplicitySource;
-          applyFontToSvgElement(sText, { ...edgeFont, fontSize: multFontSize });
-          edgeGroup.appendChild(sText);
-        }
+  private renderEdgeGroup(
+    edge: DiagramEdge,
+    routingResult: RoutingResult,
+    svgNS: string
+  ): SVGGElement {
+    const edgeGroup = document.createElementNS(svgNS, "g") as SVGGElement;
+    edgeGroup.setAttribute("class", "umlcanvas-edge");
+    edgeGroup.setAttribute("data-edge-id", edge.id);
 
-        if (edge.multiplicityTarget) {
-          const tText = document.createElementNS(svgNS, "text");
-          const dirX = Math.sign(endPt.x - beforeEndPt.x);
-          const dirY = Math.sign(endPt.y - beforeEndPt.y);
-          tText.setAttribute("x", String(endPt.x - (dirX !== 0 ? dirX * 22 : 12)));
-          tText.setAttribute("y", String(endPt.y - (dirY !== 0 ? dirY * 22 : 8)));
-          tText.setAttribute("class", "umlcanvas-edge-multiplicity umlcanvas-multiplicity-target");
-          tText.textContent = edge.multiplicityTarget;
-          applyFontToSvgElement(tText, { ...edgeFont, fontSize: multFontSize });
-          edgeGroup.appendChild(tText);
-        }
+    const isSelected = this.editor.isEdgeSelected(edge.id);
+    const styleDef = defaultEdgeStyleRegistry.get(edge.kind);
+
+    // Hitbox path
+    const hitPath = document.createElementNS(svgNS, "path");
+    hitPath.setAttribute("d", routingResult.svgPath);
+    hitPath.setAttribute("class", "umlcanvas-edge-hitbox");
+    edgeGroup.appendChild(hitPath);
+
+    if (isSelected) {
+      edgeGroup.classList.add("umlcanvas-edge-selected");
+    }
+
+    // Visible path
+    const path = document.createElementNS(svgNS, "path");
+    path.setAttribute("d", routingResult.svgPath);
+    path.setAttribute(
+      "class",
+      isSelected
+        ? "umlcanvas-edge-line umlcanvas-edge-selected"
+        : "umlcanvas-edge-line"
+    );
+
+    const customStroke = edge.style?.color ?? edge.style?.strokeColor;
+
+    let rawMarkerEndId: string | undefined;
+    if (edge.style?.markerEnd !== undefined) {
+      rawMarkerEndId =
+        edge.style.markerEnd === "none" || !edge.style.markerEnd
+          ? undefined
+          : this.normalizeMarkerId(edge.style.markerEnd);
+    } else {
+      rawMarkerEndId = styleDef.markerEndId;
+    }
+
+    let rawMarkerStartId: string | undefined;
+    if (edge.style?.markerStart !== undefined) {
+      rawMarkerStartId =
+        edge.style.markerStart === "none" || !edge.style.markerStart
+          ? undefined
+          : this.normalizeMarkerId(edge.style.markerStart);
+    } else {
+      rawMarkerStartId = styleDef.markerStartId;
+    }
+
+    let markerEndId = rawMarkerEndId;
+    let markerStartId = rawMarkerStartId;
+
+    if (isSelected) {
+      if (markerEndId) markerEndId = this.getOrCreateColoredMarker(markerEndId, "", true);
+      if (markerStartId) markerStartId = this.getOrCreateColoredMarker(markerStartId, "", true);
+    } else if (customStroke) {
+      if (markerEndId) markerEndId = this.getOrCreateColoredMarker(markerEndId, customStroke, false);
+      if (markerStartId) markerStartId = this.getOrCreateColoredMarker(markerStartId, customStroke, false);
+    }
+
+    if (markerEndId) {
+      path.setAttribute("marker-end", `url(#${markerEndId})`);
+    }
+    if (markerStartId) {
+      path.setAttribute("marker-start", `url(#${markerStartId})`);
+    }
+
+    const strokeDasharray = this.resolveStrokeDasharray(edge.style, styleDef);
+    if (strokeDasharray) {
+      path.setAttribute("stroke-dasharray", strokeDasharray);
+    }
+    if (edge.style?.color) {
+      edgeGroup.setAttribute("data-color", edge.style.color);
+      const resolvedColor = resolveCanvasColor(edge.style.color);
+      if (resolvedColor) {
+        edgeGroup.setCssProps({ "--canvas-color": resolvedColor, color: resolvedColor });
+        path.setAttribute("stroke", resolvedColor);
+      }
+      if (isCanvasColorPreset(edge.style.color)) {
+        edgeGroup.classList.add(`is-color-${edge.style.color}`);
+      } else {
+        edgeGroup.classList.add("has-custom-color");
+      }
+    } else if (edge.style?.strokeColor) {
+      path.setAttribute("stroke", edge.style.strokeColor);
+    }
+    if (edge.style?.strokeWidth || styleDef.strokeWidth) {
+      path.setAttribute(
+        "stroke-width",
+        String(edge.style?.strokeWidth ?? styleDef.strokeWidth)
+      );
+    }
+
+    edgeGroup.appendChild(path);
+
+    // Edge labels (F-031) or default stereotype (e.g. «include», «extend»)
+    const displayLabel =
+      edge.labels && edge.labels.length > 0
+        ? edge.labels[0].text
+        : styleDef.defaultStereotype
+        ? `«${styleDef.defaultStereotype}»`
+        : undefined;
+
+    const tooltipText = displayLabel
+      ? `Line (${edge.kind}): "${displayLabel}"\nDouble-click or press Enter to edit label`
+      : `Line (${edge.kind})\nDouble-click or press Enter to add label`;
+    edgeGroup.setAttribute("title", tooltipText);
+
+    if (displayLabel && routingResult.points.length >= 2) {
+      const midIdx = Math.floor(routingResult.points.length / 2);
+      const p1 = routingResult.points[midIdx - 1] ?? routingResult.points[0];
+      const p2 = routingResult.points[midIdx] ?? routingResult.points[1];
+      const midX = (p1.x + p2.x) / 2;
+      const midY = (p1.y + p2.y) / 2;
+
+      const labelGroup = document.createElementNS(svgNS, "g");
+      labelGroup.setAttribute("class", "umlcanvas-edge-label-group");
+      labelGroup.setAttribute("data-edge-id", edge.id);
+
+      const edgeFont = getEdgeFontStyle(edge);
+      const fontSize = edgeFont.fontSize ?? 11;
+      const padX = 6;
+      const textLen = displayLabel.length;
+      const charWidth = fontSize * 0.6;
+      const bgWidth = Math.max(24, Math.round(textLen * charWidth + padX * 2));
+      const bgHeight = Math.max(18, Math.round(fontSize * 1.5));
+
+      const bgRect = document.createElementNS(svgNS, "rect");
+      bgRect.setAttribute("x", String(Math.round(midX - bgWidth / 2)));
+      bgRect.setAttribute("y", String(Math.round(midY - bgHeight / 2)));
+      bgRect.setAttribute("width", String(bgWidth));
+      bgRect.setAttribute("height", String(bgHeight));
+      bgRect.setAttribute("rx", "4");
+      bgRect.setAttribute("ry", "4");
+      bgRect.setAttribute("class", "umlcanvas-edge-label-bg");
+      labelGroup.appendChild(bgRect);
+
+      const text = document.createElementNS(svgNS, "text");
+      text.setAttribute("x", String(midX));
+      text.setAttribute("y", String(midY));
+      text.setAttribute("text-anchor", "middle");
+      text.setAttribute("dominant-baseline", "central");
+      text.setAttribute("class", "umlcanvas-edge-label");
+      text.textContent = displayLabel;
+      applyFontToSvgElement(text as SVGElement, edgeFont);
+      labelGroup.appendChild(text);
+
+      edgeGroup.appendChild(labelGroup);
+    }
+
+    // Multiplicity annotations (F-034)
+    if (routingResult.points.length >= 2) {
+      const startPt = routingResult.points[0];
+      const secondPt = routingResult.points[1];
+      const endPt = routingResult.points[routingResult.points.length - 1];
+      const beforeEndPt = routingResult.points[routingResult.points.length - 2];
+      const edgeFont = getEdgeFontStyle(edge);
+      const multFontSize = edgeFont.fontSize ? Math.max(8, Math.round(edgeFont.fontSize * 0.85)) : undefined;
+
+      if (edge.multiplicitySource) {
+        const sText = document.createElementNS(svgNS, "text");
+        const dirX = Math.sign(secondPt.x - startPt.x);
+        const dirY = Math.sign(secondPt.y - startPt.y);
+        sText.setAttribute("x", String(startPt.x + (dirX !== 0 ? dirX * 18 : 10)));
+        sText.setAttribute("y", String(startPt.y + (dirY !== 0 ? dirY * 18 : -8)));
+        sText.setAttribute("class", "umlcanvas-edge-multiplicity umlcanvas-multiplicity-source");
+        sText.textContent = edge.multiplicitySource;
+        applyFontToSvgElement(sText as SVGElement, { ...edgeFont, fontSize: multFontSize });
+        edgeGroup.appendChild(sText);
       }
 
-      this.edgesLayerEl.appendChild(edgeGroup);
+      if (edge.multiplicityTarget) {
+        const tText = document.createElementNS(svgNS, "text");
+        const dirX = Math.sign(endPt.x - beforeEndPt.x);
+        const dirY = Math.sign(endPt.y - beforeEndPt.y);
+        tText.setAttribute("x", String(endPt.x - (dirX !== 0 ? dirX * 22 : 12)));
+        tText.setAttribute("y", String(endPt.y - (dirY !== 0 ? dirY * 22 : 8)));
+        tText.setAttribute("class", "umlcanvas-edge-multiplicity umlcanvas-multiplicity-target");
+        tText.textContent = edge.multiplicityTarget;
+        applyFontToSvgElement(tText as SVGElement, { ...edgeFont, fontSize: multFontSize });
+        edgeGroup.appendChild(tText);
+      }
+    }
+
+    return edgeGroup;
+  }
+
+  private replaceOrAppend(parent: Element, newEl: Element, oldEl?: Element | null): void {
+    if (oldEl && ((oldEl.parentElement as unknown) === parent || !oldEl.parentElement)) {
+      const p = parent as unknown as Node;
+      if (typeof p.replaceChild === "function") {
+        p.replaceChild(newEl, oldEl);
+        return;
+      }
+      this.safeRemove(oldEl);
+    }
+    parent.appendChild(newEl);
+  }
+
+  private safeRemove(el: Element | null | undefined): void {
+    if (!el) return;
+    if (typeof el.remove === "function") {
+      el.remove();
+    } else if (el.parentElement) {
+      const p = el.parentElement as unknown as Node;
+      if (typeof p.removeChild === "function") {
+        p.removeChild(el);
+      }
     }
   }
 
   private renderNodes(): void {
     const svgNS = "http://www.w3.org/2000/svg";
-    this.nodesLayerEl.textContent = "";
 
     const visibleRect = this.isVirtualizationActive()
       ? this.getVisibleCanvasRect()
       : null;
+
+    const diagramNodeMap = new Map<string, DiagramNode>(
+      this.editor.diagram.nodes.map((n) => [n.id, n])
+    );
+    const existingChildren = Array.from(this.nodesLayerEl.children ?? []) as SVGGElement[];
+    const domNodeMap = new Map<string, SVGGElement>();
+
+    for (const child of existingChildren) {
+      const nodeId = child.getAttribute("data-node-id");
+      if (nodeId) {
+        domNodeMap.set(nodeId, child);
+        if (!this.nodeElements.has(nodeId)) {
+          this.nodeElements.set(nodeId, child);
+        }
+      } else {
+        this.safeRemove(child);
+      }
+    }
+
+    // Clean up DOM:
+    // Remove nodes that are no longer in the diagram, or are hidden/virtualized out.
+    for (const [nodeId, childEl] of domNodeMap.entries()) {
+      const node = diagramNodeMap.get(nodeId);
+      const isVisible =
+        node &&
+        this.editor.isNodeVisible(nodeId) &&
+        (!visibleRect || intersects(visibleRect, rect(node.position, node.size)));
+
+      if (!node || !isVisible) {
+        this.safeRemove(childEl);
+        this.nodeElements.delete(nodeId);
+        this.nodeSignatures.delete(nodeId);
+      }
+    }
 
     for (const node of this.editor.diagram.nodes) {
       if (!this.editor.isNodeVisible(node.id)) {
@@ -1394,144 +1893,570 @@ export class SvgSceneRenderer {
         continue;
       }
 
-      const nodeGroup = document.createElementNS(svgNS, "g");
-      nodeGroup.setAttribute("class", "umlcanvas-node");
-      nodeGroup.setAttribute("data-node-id", node.id);
-      nodeGroup.setAttribute(
-        "transform",
-        `translate(${node.position.x}, ${node.position.y})`
-      );
+      const existingEl = this.nodeElements.get(node.id);
 
-      const isSelected = this.editor.isNodeSelected(node.id);
-      const isLocked = this.editor.isNodeLocked(node.id);
-      if (isLocked) {
-        nodeGroup.classList.add("umlcanvas-node-locked");
-      }
-      if (this.editingNodeId === node.id) {
-        nodeGroup.classList.add("umlcanvas-node-editing");
-      }
-
-      if (node.style?.color) {
-        nodeGroup.setAttribute("data-color", node.style.color);
-        const resolvedColor = resolveCanvasColor(node.style.color);
-        if (resolvedColor) {
-          nodeGroup.setCssProps({ "--canvas-color": resolvedColor });
-        }
-        if (isCanvasColorPreset(node.style.color)) {
-          nodeGroup.classList.add(`is-color-${node.style.color}`);
+      if (node.kind === "generic.pdf") {
+        if (existingEl && (existingEl.parentElement as unknown) === this.nodesLayerEl) {
+          this.updateExistingPdfNode(existingEl, node, svgNS);
+          continue;
         } else {
-          nodeGroup.classList.add("has-custom-color");
+          const nodeGroup = this.renderNodeGroup(node, svgNS);
+          this.nodesLayerEl.appendChild(nodeGroup);
+          this.nodeElements.set(node.id, nodeGroup);
+          this.nodeSignatures.set(node.id, this.getNodeSignature(node));
+          continue;
         }
-      } else if (node.style?.strokeColor) {
-        nodeGroup.setAttribute("data-color", node.style.strokeColor);
-        nodeGroup.setCssProps({ "--canvas-color": node.style.strokeColor });
-        nodeGroup.classList.add("has-custom-color");
       }
 
-      // Transparent hitbox covering node boundary for reliable grabbing & moving
-      // Note: generic.freehand uses a stroked path hitbox so empty space inside the bounding box can be clicked through and deselected
-      if (node.kind !== "generic.freehand") {
-        const hitbox = document.createElementNS(svgNS, "rect");
-        hitbox.setAttribute("x", "0");
-        hitbox.setAttribute("y", "0");
-        hitbox.setAttribute("width", String(node.size.width));
-        hitbox.setAttribute("height", String(node.size.height));
-        hitbox.setAttribute("fill", "transparent");
-        hitbox.setAttribute("class", "umlcanvas-node-hitbox");
-        nodeGroup.appendChild(hitbox);
+      const currentSignature = this.getNodeSignature(node);
+      const previousSignature = this.nodeSignatures.get(node.id);
+
+      if (existingEl && (existingEl.parentElement as unknown) === this.nodesLayerEl && currentSignature === previousSignature) {
+        const posStr = `translate(${node.position.x}, ${node.position.y})`;
+        if (existingEl.getAttribute("transform") !== posStr) {
+          existingEl.setAttribute("transform", posStr);
+        }
+        const isLocked = this.editor.isNodeLocked(node.id);
+        const isSelected = this.editor.isNodeSelected(node.id);
+        if (typeof existingEl.classList?.toggle === "function") {
+          existingEl.classList.toggle("umlcanvas-node-locked", isLocked);
+          existingEl.classList.toggle("umlcanvas-node-editing", this.editingNodeId === node.id);
+          existingEl.classList.toggle("umlcanvas-node-selected", isSelected);
+        } else if (existingEl.classList) {
+          if (isLocked) existingEl.classList.add("umlcanvas-node-locked");
+          else existingEl.classList.remove("umlcanvas-node-locked");
+          if (this.editingNodeId === node.id) existingEl.classList.add("umlcanvas-node-editing");
+          else existingEl.classList.remove("umlcanvas-node-editing");
+          if (isSelected) existingEl.classList.add("umlcanvas-node-selected");
+          else existingEl.classList.remove("umlcanvas-node-selected");
+        }
+        continue;
       }
 
-      const shapeDef = this.shapeRegistry.get(node.kind);
-      const renderedShape = shapeDef.renderSvg(node, { isSelected });
-      nodeGroup.appendChild(renderedShape);
+      const nodeGroup = this.renderNodeGroup(node, svgNS);
+      this.replaceOrAppend(this.nodesLayerEl, nodeGroup, existingEl);
+      this.nodeElements.set(node.id, nodeGroup);
+      this.nodeSignatures.set(node.id, currentSignature);
+    }
+  }
 
-      // Render markdown for obsidian note embeds
-      if (node.kind === "obsidian.note" || node.metadata?.filePath) {
-        const bodyEl = renderedShape.querySelector<HTMLElement>(
-          ".umlcanvas-obsidian-note-body"
-        );
-        if (bodyEl && this.onRenderMarkdown) {
-          const filePath =
-            (node.metadata?.filePath as string) ||
-            (node.customData?.filePath as string) ||
-            "";
-          const markdown =
-            (node.customData?.content as string) ||
-            (node.customData?.snippet as string) ||
-            "";
-          if (markdown) {
-            const renderPromise = this.onRenderMarkdown(markdown, bodyEl, filePath);
-            const onComplete = () => {
-              if (node.customData?.scaleMode === "fit" && bodyEl.scrollHeight > 0) {
-                const actualH = bodyEl.scrollHeight;
-                const prevH = typeof node.customData.contentHeight === "number" ? node.customData.contentHeight : 0;
-                if (!prevH || Math.abs(prevH - actualH) > 30) {
-                  node.customData.contentHeight = actualH;
-                  const scaler = renderedShape.querySelector<HTMLElement>(".umlcanvas-obsidian-note-scale-wrapper");
-                  if (scaler) {
-                    const bodyH = Math.max(10, node.size.height - 32);
-                    const newScale = Math.round(Math.max(0.15, Math.min(1.0, bodyH / actualH)) * 100) / 100;
-                    scaler.style.transform = `scale(${newScale})`;
-                    scaler.style.width = `${Math.round((100 / newScale) * 100) / 100}%`;
-                    scaler.style.minHeight = `${Math.round((bodyH / newScale) * 100) / 100}px`;
-                    renderedShape.setAttribute("data-scale", String(newScale));
-                    const badge = renderedShape.querySelector<SVGTextElement>(".umlcanvas-obsidian-note-scale-badge");
-                    if (badge) badge.textContent = `${Math.round(newScale * 100)}%`;
-                  }
-                }
-              }
-            };
-            if (renderPromise instanceof Promise) {
-              void renderPromise.then(onComplete);
+  private getNodeSignature(node: DiagramNode): string {
+    const isSelected = this.editor.isNodeSelected(node.id);
+    const isLocked = this.editor.isNodeLocked(node.id);
+    const isEditing = this.editingNodeId === node.id;
+    const labelsStr = (node.labels ?? [])
+      .map(
+        (l) =>
+          `${l.text}|${l.style?.fontSize}|${l.style?.bold}|${l.style?.italic}|${l.style?.fontFamily}|${l.style?.color}`
+      )
+      .join("~");
+    const styleStr = node.style
+      ? `${node.style.color}|${node.style.fillColor}|${node.style.strokeColor}|${node.style.strokeWidth}|${node.style.cornerRadius}|${node.style.fontSize}|${node.style.fontFamily}`
+      : "";
+    const portsStr = (node.ports ?? [])
+      .map((p) => `${p.id}:${p.side}:${p.offset}:${p.name}`)
+      .join(";");
+    const compartmentsStr = (node.compartments ?? [])
+      .map((c) => {
+        const itemStrs = (c.items ?? []).map((it) => (typeof it === "string" ? it : JSON.stringify(it)));
+        return `${c.title}:${itemStrs.join(",")}`;
+      })
+      .join(";");
+
+    let customStr = "";
+    if (node.customData) {
+      if (node.kind === "generic.freehand") {
+        const pathDataStr = typeof node.customData.pathData === "string" ? node.customData.pathData : "";
+        const pointsLen = Array.isArray(node.customData.points) ? node.customData.points.length : 0;
+        customStr = `${pathDataStr.slice(0, 40)}#${pathDataStr.length}:${pointsLen}`;
+      } else {
+        const keys = Object.keys(node.customData).sort();
+        const parts: string[] = [];
+        for (const k of keys) {
+          const val = node.customData[k];
+          if (typeof val === "string") {
+            if (val.length > 80) {
+              parts.push(`${k}:${val.slice(0, 32)}..${val.length}`);
             } else {
-              onComplete();
+              parts.push(`${k}:${val}`);
+            }
+          } else if (typeof val === "number" || typeof val === "boolean") {
+            parts.push(`${k}:${val}`);
+          } else if (val && typeof val === "object") {
+            try {
+              parts.push(`${k}:${JSON.stringify(val).slice(0, 64)}`);
+            } catch {
+              parts.push(`${k}:obj`);
             }
           }
         }
+        customStr = parts.join(",");
       }
+    }
 
-      // Render ports & port handles (F-007, F-031)
-      const ports = shapeDef.getPorts(node);
-      for (const port of ports) {
-        const pt = getSidePoint({ x: 0, y: 0 }, node.size, port.side, port.offset);
-        const handle = document.createElementNS(svgNS, "circle");
-        handle.setAttribute("cx", String(pt.x));
-        handle.setAttribute("cy", String(pt.y));
-        handle.setAttribute("r", "5");
-        handle.setAttribute("class", "umlcanvas-port-handle");
-        handle.setAttribute("data-port-id", port.id);
-        handle.setAttribute("data-side", port.side);
-        nodeGroup.appendChild(handle);
+    const filePathStr = typeof node.metadata?.filePath === "string" ? node.metadata.filePath : "";
+    const subpathStr = typeof node.metadata?.subpath === "string" ? node.metadata.subpath : "";
+    const metaStr = `${filePathStr}|${subpathStr}`;
 
-        // Named port label (F-031)
-        if (port.name && !["top", "right", "bottom", "left"].includes(port.name)) {
-          const pLabel = document.createElementNS(svgNS, "text");
-          let lx = pt.x;
-          let ly = pt.y;
-          let anchor = "middle";
+    return `${node.kind}|${node.size.width}x${node.size.height}|${labelsStr}|${styleStr}|${portsStr}|${compartmentsStr}|${node.stereotype ?? ""}|${customStr}|${metaStr}|${isSelected}|${isLocked}|${isEditing}`;
+  }
 
-          if (port.side === "left") {
-            lx += 8;
-            anchor = "start";
-          } else if (port.side === "right") {
-            lx -= 8;
-            anchor = "end";
-          } else if (port.side === "top") {
-            ly += 12;
-          } else {
-            ly -= 6;
-          }
+  public getNodeElement(id: string): SVGGElement | null {
+    const el = this.nodeElements.get(id);
+    if (el && (el.parentElement as unknown) === this.nodesLayerEl) return el;
+    return this.nodesLayerEl.querySelector(`[data-node-id="${id}"]`);
+  }
 
-          pLabel.setAttribute("x", String(lx));
-          pLabel.setAttribute("y", String(ly));
-          pLabel.setAttribute("text-anchor", anchor);
-          pLabel.setAttribute("class", "umlcanvas-port-label");
-          pLabel.textContent = port.name;
-          nodeGroup.appendChild(pLabel);
+  public getEdgeElement(id: string): SVGGElement | null {
+    const el = this.edgeElements.get(id);
+    if (el && (el.parentElement as unknown) === this.edgesLayerEl) return el;
+    return this.edgesLayerEl.querySelector(`[data-edge-id="${id}"]`);
+  }
+
+  public getGroupElement(id: string): SVGGElement | null {
+    const el = this.groupElements.get(id);
+    if (el && (el.parentElement as unknown) === this.groupsLayerEl) return el;
+    return this.groupsLayerEl.querySelector(`[data-group-id="${id}"]`);
+  }
+
+  private renderNodeGroup(node: DiagramNode, svgNS: string): SVGGElement {
+    const nodeGroup = document.createElementNS(svgNS, "g") as SVGGElement;
+    nodeGroup.setAttribute("class", "umlcanvas-node");
+    nodeGroup.setAttribute("data-node-id", node.id);
+    nodeGroup.setAttribute(
+      "transform",
+      `translate(${node.position.x}, ${node.position.y})`
+    );
+
+    const isSelected = this.editor.isNodeSelected(node.id);
+    const isLocked = this.editor.isNodeLocked(node.id);
+    if (isSelected) {
+      nodeGroup.classList.add("umlcanvas-node-selected");
+    }
+    if (isLocked) {
+      nodeGroup.classList.add("umlcanvas-node-locked");
+    }
+    if (this.editingNodeId === node.id) {
+      nodeGroup.classList.add("umlcanvas-node-editing");
+    }
+
+    if (node.style?.color) {
+      nodeGroup.setAttribute("data-color", node.style.color);
+      const resolvedColor = resolveCanvasColor(node.style.color);
+      if (resolvedColor) {
+        const obsEl = nodeGroup as unknown as { setCssProps?: (props: Record<string, string>) => void };
+        if (typeof obsEl.setCssProps === "function") {
+          obsEl.setCssProps({ "--canvas-color": resolvedColor });
+        } else if (nodeGroup.style && typeof nodeGroup.style.setProperty === "function") {
+          nodeGroup.style.setProperty("--canvas-color", resolvedColor);
         }
       }
+      if (isCanvasColorPreset(node.style.color)) {
+        nodeGroup.classList.add(`is-color-${node.style.color}`);
+      } else {
+        nodeGroup.classList.add("has-custom-color");
+      }
+    } else if (node.style?.strokeColor) {
+      nodeGroup.setAttribute("data-color", node.style.strokeColor);
+      const obsEl = nodeGroup as unknown as { setCssProps?: (props: Record<string, string>) => void };
+      if (typeof obsEl.setCssProps === "function") {
+        obsEl.setCssProps({ "--canvas-color": node.style.strokeColor });
+      } else if (nodeGroup.style && typeof nodeGroup.style.setProperty === "function") {
+        nodeGroup.style.setProperty("--canvas-color", node.style.strokeColor);
+      }
+      nodeGroup.classList.add("has-custom-color");
+    }
 
-      this.nodesLayerEl.appendChild(nodeGroup);
+    // Transparent hitbox covering node boundary for reliable grabbing & moving
+    // Note: generic.freehand uses a stroked path hitbox so empty space inside the bounding box can be clicked through and deselected
+    if (node.kind !== "generic.freehand") {
+      const hitbox = document.createElementNS(svgNS, "rect");
+      hitbox.setAttribute("x", "0");
+      hitbox.setAttribute("y", "0");
+      hitbox.setAttribute("width", String(node.size.width));
+      hitbox.setAttribute("height", String(node.size.height));
+      hitbox.setAttribute("fill", "transparent");
+      hitbox.setAttribute("class", "umlcanvas-node-hitbox");
+      nodeGroup.appendChild(hitbox);
+    }
+
+    const shapeDef = this.shapeRegistry.get(node.kind);
+    const renderedShape = shapeDef.renderSvg(node, { isSelected });
+    nodeGroup.appendChild(renderedShape);
+
+    // Render markdown for obsidian note embeds
+    if (node.kind === "obsidian.note" || (node.metadata?.filePath && node.kind !== "generic.image" && node.kind !== "generic.pdf")) {
+      const bodyEl = renderedShape.querySelector<HTMLElement>(
+        ".umlcanvas-obsidian-note-body"
+      );
+      if (bodyEl && this.onRenderMarkdown) {
+        const filePath =
+          (node.metadata?.filePath as string) ||
+          (node.customData?.filePath as string) ||
+          "";
+        const markdown =
+          (node.customData?.content as string) ||
+          (node.customData?.snippet as string) ||
+          "";
+        if (markdown) {
+          const renderPromise = this.onRenderMarkdown(markdown, bodyEl, filePath);
+          const onComplete = () => {
+            if (node.customData?.scaleMode === "fit" && bodyEl.scrollHeight > 0) {
+              const actualH = bodyEl.scrollHeight;
+              const prevH = typeof node.customData.contentHeight === "number" ? node.customData.contentHeight : 0;
+              if (!prevH || Math.abs(prevH - actualH) > 30) {
+                node.customData.contentHeight = actualH;
+                const scaler = renderedShape.querySelector<HTMLElement>(".umlcanvas-obsidian-note-scale-wrapper");
+                if (scaler) {
+                  const bodyH = Math.max(10, node.size.height - 32);
+                  const newScale = Math.round(Math.max(0.15, Math.min(1.0, bodyH / actualH)) * 100) / 100;
+                  scaler.style.transform = `scale(${newScale})`;
+                  scaler.style.width = `${Math.round((100 / newScale) * 100) / 100}%`;
+                  scaler.style.minHeight = `${Math.round((bodyH / newScale) * 100) / 100}px`;
+                  renderedShape.setAttribute("data-scale", String(newScale));
+                  const badge = renderedShape.querySelector<SVGTextElement>(".umlcanvas-obsidian-note-scale-badge");
+                  if (badge) badge.textContent = `${Math.round(newScale * 100)}%`;
+                }
+              }
+            }
+          };
+          if (renderPromise instanceof Promise) {
+            void renderPromise.then(onComplete);
+          } else {
+            onComplete();
+          }
+        }
+      }
+    }
+
+    // Render ports & port handles (F-007, F-031)
+    const ports = shapeDef.getPorts(node);
+    for (const port of ports) {
+      const pt = getSidePoint({ x: 0, y: 0 }, node.size, port.side, port.offset, node.kind);
+      const handle = document.createElementNS(svgNS, "circle");
+      handle.setAttribute("cx", String(pt.x));
+      handle.setAttribute("cy", String(pt.y));
+      handle.setAttribute("r", "5");
+      handle.setAttribute("class", "umlcanvas-port-handle");
+      handle.setAttribute("data-port-id", port.id);
+      handle.setAttribute("data-side", port.side);
+      nodeGroup.appendChild(handle);
+
+      // Named port label (F-031)
+      if (port.name && !["top", "right", "bottom", "left"].includes(port.name)) {
+        const pLabel = document.createElementNS(svgNS, "text");
+        let lx = pt.x;
+        let ly = pt.y;
+        let anchor = "middle";
+
+        if (port.side === "left") {
+          lx += 8;
+          anchor = "start";
+        } else if (port.side === "right") {
+          lx -= 8;
+          anchor = "end";
+        } else if (port.side === "top") {
+          ly += 12;
+        } else {
+          ly -= 6;
+        }
+
+        pLabel.setAttribute("x", String(lx));
+        pLabel.setAttribute("y", String(ly));
+        pLabel.setAttribute("text-anchor", anchor);
+        pLabel.setAttribute("class", "umlcanvas-port-label");
+        pLabel.textContent = port.name;
+        nodeGroup.appendChild(pLabel);
+      }
+    }
+
+    return nodeGroup;
+  }
+
+  private updateExistingPdfNode(
+    nodeGroup: SVGGElement,
+    node: DiagramNode,
+    svgNS: string
+  ): void {
+    const isSelected = this.editor.isNodeSelected(node.id);
+    const isLocked = this.editor.isNodeLocked(node.id);
+
+    // 1. Position transform
+    nodeGroup.setAttribute(
+      "transform",
+      `translate(${node.position.x}, ${node.position.y})`
+    );
+
+    // 2. Locked, Editing & Selected classes
+    if (isLocked) {
+      nodeGroup.classList.add("umlcanvas-node-locked");
+    } else {
+      nodeGroup.classList.remove("umlcanvas-node-locked");
+    }
+    if (this.editingNodeId === node.id) {
+      nodeGroup.classList.add("umlcanvas-node-editing");
+    } else {
+      nodeGroup.classList.remove("umlcanvas-node-editing");
+    }
+    if (isSelected) {
+      nodeGroup.classList.add("umlcanvas-node-selected");
+    } else {
+      nodeGroup.classList.remove("umlcanvas-node-selected");
+    }
+
+    // 3. Styling / color
+    if (node.style?.color) {
+      nodeGroup.setAttribute("data-color", node.style.color);
+      const resolvedColor = resolveCanvasColor(node.style.color);
+      if (resolvedColor) {
+        const obsEl = nodeGroup as unknown as { setCssProps?: (props: Record<string, string>) => void };
+        if (typeof obsEl.setCssProps === "function") {
+          obsEl.setCssProps({ "--canvas-color": resolvedColor });
+        } else if (nodeGroup.style && typeof nodeGroup.style.setProperty === "function") {
+          nodeGroup.style.setProperty("--canvas-color", resolvedColor);
+        }
+      }
+      if (isCanvasColorPreset(node.style.color)) {
+        nodeGroup.classList.add(`is-color-${node.style.color}`);
+      } else {
+        nodeGroup.classList.add("has-custom-color");
+      }
+    } else if (node.style?.strokeColor) {
+      nodeGroup.setAttribute("data-color", node.style.strokeColor);
+      const obsEl = nodeGroup as unknown as { setCssProps?: (props: Record<string, string>) => void };
+      if (typeof obsEl.setCssProps === "function") {
+        obsEl.setCssProps({ "--canvas-color": node.style.strokeColor });
+      } else if (nodeGroup.style && typeof nodeGroup.style.setProperty === "function") {
+        nodeGroup.style.setProperty("--canvas-color", node.style.strokeColor);
+      }
+      nodeGroup.classList.add("has-custom-color");
+    } else {
+      nodeGroup.classList.remove("has-custom-color");
+    }
+
+    const w = node.size.width;
+    const h = node.size.height;
+    const r = 8;
+    const headerH = 32;
+    const bodyH = Math.max(10, h - headerH);
+
+    // 4. Hitbox
+    const hitbox = nodeGroup.querySelector<SVGRectElement>(".umlcanvas-node-hitbox");
+    if (hitbox) {
+      hitbox.setAttribute("width", String(w));
+      hitbox.setAttribute("height", String(h));
+    }
+
+    // 5. Card container / background rect
+    const bgRect = nodeGroup.querySelector<SVGRectElement>(".umlcanvas-pdf-card");
+    if (bgRect) {
+      bgRect.setAttribute("width", String(w));
+      bgRect.setAttribute("height", String(h));
+      if (isSelected) {
+        bgRect.classList.add("umlcanvas-node-selected");
+      } else {
+        bgRect.classList.remove("umlcanvas-node-selected");
+      }
+      if (node.style?.fillColor) {
+        bgRect.setAttribute("fill", node.style.fillColor);
+      }
+      if (node.style?.strokeColor) {
+        bgRect.setAttribute("stroke", node.style.strokeColor);
+      }
+    }
+
+    // 6. Header background path
+    const headerRect = nodeGroup.querySelector<SVGPathElement>(".umlcanvas-pdf-header-bg");
+    if (headerRect) {
+      headerRect.setAttribute(
+        "d",
+        `M 0 ${r} A ${r} ${r} 0 0 1 ${r} 0 L ${w - r} 0 A ${r} ${r} 0 0 1 ${w} ${r} L ${w} ${headerH} L 0 ${headerH} Z`
+      );
+    }
+
+    // 7. Header separator line
+    const sepLine = nodeGroup.querySelector<SVGLineElement>(".umlcanvas-pdf-header-sep");
+    if (sepLine) {
+      sepLine.setAttribute("x2", String(w));
+    }
+
+    // 8. Title text
+    const rawTitle = node.labels[0]?.text || (node.metadata?.filePath as string) || "PDF Document";
+    const title = rawTitle.replace(/\.pdf$/i, "");
+    const subpath =
+      (node.metadata?.subpath as string) || (node.customData?.subpath as string) || "";
+    const rightMargin = subpath ? (w >= 240 ? 80 : 35) : 30;
+    const maxChars = Math.max(8, Math.floor((w - rightMargin) / 7.5));
+    const titleText = nodeGroup.querySelector<SVGTextElement>(".umlcanvas-pdf-title");
+    if (titleText) {
+      titleText.textContent = title.length > maxChars ? `${title.slice(0, maxChars - 2)}…` : title;
+      titleText.setAttribute("title", rawTitle);
+      applyFontToSvgElement(titleText, getNodeFontStyle(node));
+    }
+
+    // 9. Subpath / Page badge
+    let pageBadge: SVGTextElement | null = nodeGroup.querySelector(".umlcanvas-pdf-page-badge");
+    if (subpath && w >= 220) {
+      const pageMatch = subpath.match(/page=(\d+)/i);
+      const badgeText = pageMatch ? `p. ${pageMatch[1]}` : subpath.replace(/^#/, "");
+      if (!pageBadge) {
+        pageBadge = document.createElementNS(svgNS, "text") as unknown as SVGTextElement;
+        pageBadge.setAttribute("class", "umlcanvas-pdf-page-badge");
+        const shape = nodeGroup.querySelector(".umlcanvas-shape-pdf");
+        if (shape && pageBadge) {
+          shape.appendChild(pageBadge);
+        }
+      }
+      if (pageBadge) {
+        pageBadge.setAttribute("x", String(w - 38));
+        pageBadge.setAttribute("y", "21");
+        pageBadge.textContent = badgeText;
+        pageBadge.setAttribute("title", `Target: ${subpath}`);
+      }
+    } else if (pageBadge) {
+      this.safeRemove(pageBadge);
+    }
+
+    // 10. Clickable Open Icon in Header (↗)
+    const openIcon = nodeGroup.querySelector<SVGTextElement>(".umlcanvas-pdf-open-btn");
+    if (openIcon) {
+      openIcon.setAttribute("x", String(w - 20));
+      const pdfFilePath =
+        (node.metadata?.filePath as string) || (node.customData?.filePath as string) || "";
+      const targetPathWithSubpath = subpath
+        ? `${pdfFilePath}${subpath.startsWith("#") ? subpath : "#" + subpath}`
+        : pdfFilePath;
+      openIcon.setAttribute("data-file-path", targetPathWithSubpath);
+    }
+
+    // 11. ForeignObject dimensions
+    const foreign = nodeGroup.querySelector<SVGForeignObjectElement>(".umlcanvas-pdf-foreign");
+    if (foreign) {
+      foreign.setAttribute("width", String(w));
+      foreign.setAttribute("height", String(bodyH));
+    }
+
+    // 12. Fallback SVG elements
+    const pageW = Math.round(w * 0.72);
+    const pageH = Math.round(bodyH * 0.78);
+    const pageX = Math.round((w - pageW) / 2);
+    const pageY = Math.round(headerH + (bodyH - pageH) / 2);
+
+    const fallbackPage = nodeGroup.querySelector<SVGRectElement>(".umlcanvas-pdf-fallback-page");
+    if (fallbackPage) {
+      fallbackPage.setAttribute("x", String(pageX));
+      fallbackPage.setAttribute("y", String(pageY));
+      fallbackPage.setAttribute("width", String(pageW));
+      fallbackPage.setAttribute("height", String(pageH));
+    }
+    const fallbackTitle = nodeGroup.querySelector<SVGTextElement>(".umlcanvas-pdf-fallback-text");
+    if (fallbackTitle) {
+      fallbackTitle.setAttribute("x", String(w / 2));
+      fallbackTitle.setAttribute("y", String(pageY + pageH / 2));
+      fallbackTitle.textContent = `${title}.pdf`;
+    }
+
+    // 13. Rich HTML PDF Body via foreignObject (loads PDF via iframe or embed)
+    // ONLY update iframe src if target URL has ACTUALLY changed.
+    // If it hasn't changed, never touch or reassign src to prevent reloading the PDF!
+    const src =
+      (node.customData?.src as string) ||
+      (node.metadata?.src as string) ||
+      (node.customData?.filePath as string) ||
+      (node.metadata?.filePath as string) ||
+      "";
+
+    let fullSrc = src;
+    if (src && subpath) {
+      if (src.includes("#")) {
+        fullSrc = `${src.split("#")[0]}${subpath.startsWith("#") ? subpath : "#" + subpath}`;
+      } else {
+        fullSrc = `${src}${subpath.startsWith("#") ? subpath : "#" + subpath}`;
+      }
+    }
+
+    const iframe = nodeGroup.querySelector<HTMLIFrameElement>(".umlcanvas-pdf-frame");
+    const placeholder = nodeGroup.querySelector<HTMLElement>(".umlcanvas-pdf-placeholder");
+
+    if (fullSrc) {
+      if (iframe) {
+        const currentSrc = iframe.getAttribute("data-pdf-src") || iframe.getAttribute("src");
+        if (currentSrc !== fullSrc) {
+          iframe.setAttribute("data-pdf-src", fullSrc);
+          iframe.setAttribute("src", fullSrc);
+        }
+      } else {
+        const containerDiv = nodeGroup.querySelector<HTMLElement>(".umlcanvas-pdf-container");
+        if (containerDiv) {
+          if (placeholder) this.safeRemove(placeholder);
+          const newIframe = safeCreateEl("iframe", {
+            cls: "umlcanvas-pdf-frame",
+            attr: {
+              src: fullSrc,
+              type: "application/pdf",
+              frameborder: "0",
+              title: title || "PDF Document",
+              "data-pdf-src": fullSrc,
+            },
+          });
+          containerDiv.appendChild(newIframe);
+        }
+      }
+    } else if (!iframe && !placeholder) {
+      const containerDiv = nodeGroup.querySelector<HTMLElement>(".umlcanvas-pdf-container");
+      if (containerDiv) {
+        const newPlaceholder = safeCreateDiv({
+          cls: "umlcanvas-pdf-placeholder",
+          text: "PDF Document (drop or select file)",
+        });
+        containerDiv.appendChild(newPlaceholder);
+      }
+    }
+
+    // 14. Port handles: recreate port handles if size changed
+    const oldHandles = Array.from(nodeGroup.querySelectorAll(".umlcanvas-port-handle"));
+    for (const p of oldHandles) this.safeRemove(p);
+    const oldLabels = Array.from(nodeGroup.querySelectorAll(".umlcanvas-port-label"));
+    for (const p of oldLabels) this.safeRemove(p);
+
+    const shapeDef = this.shapeRegistry.get(node.kind);
+    const ports = shapeDef.getPorts(node);
+    for (const port of ports) {
+      const pt = getSidePoint({ x: 0, y: 0 }, node.size, port.side, port.offset, node.kind);
+      const handle = document.createElementNS(svgNS, "circle");
+      handle.setAttribute("cx", String(pt.x));
+      handle.setAttribute("cy", String(pt.y));
+      handle.setAttribute("r", "5");
+      handle.setAttribute("class", "umlcanvas-port-handle");
+      handle.setAttribute("data-port-id", port.id);
+      handle.setAttribute("data-side", port.side);
+      nodeGroup.appendChild(handle);
+
+      if (port.name && !["top", "right", "bottom", "left"].includes(port.name)) {
+        const pLabel = document.createElementNS(svgNS, "text");
+        let lx = pt.x;
+        let ly = pt.y;
+        let anchor = "middle";
+
+        if (port.side === "left") {
+          lx += 8;
+          anchor = "start";
+        } else if (port.side === "right") {
+          lx -= 8;
+          anchor = "end";
+        } else if (port.side === "top") {
+          ly += 12;
+        } else {
+          ly -= 6;
+        }
+
+        pLabel.setAttribute("x", String(lx));
+        pLabel.setAttribute("y", String(ly));
+        pLabel.setAttribute("text-anchor", anchor);
+        pLabel.setAttribute("class", "umlcanvas-port-label");
+        pLabel.textContent = port.name;
+        nodeGroup.appendChild(pLabel);
+      }
     }
   }
 
@@ -1590,7 +2515,26 @@ export class SvgSceneRenderer {
           handle.setAttribute("data-handle", h);
           this.interactionLayerEl.appendChild(handle);
         }
+
       }
+    }
+
+    // On-canvas interactive table controls for selected or hovered generic.table
+    const tableNodesForControls = new Set<DiagramNode>();
+    for (const node of selectedNodes) {
+      if (node.kind === "generic.table" && selectedNodes.length === 1 && !this.editor.isNodeLocked(node.id)) {
+        tableNodesForControls.add(node);
+      }
+    }
+    if (this.hoveredTableNodeId && this.editor.selectedNodeIds.length <= 1) {
+      const hNode = this.editor.diagram.nodes.find((n) => n.id === this.hoveredTableNodeId);
+      if (hNode && hNode.kind === "generic.table" && !this.editor.isNodeLocked(hNode.id) && this.editor.isNodeVisible(hNode.id)) {
+        tableNodesForControls.add(hNode);
+      }
+    }
+
+    for (const tableNode of tableNodesForControls) {
+      this.renderTableControls(tableNode);
     }
 
     // Selection handles for selected edges (F-007, line editing & reconnecting)
@@ -1598,13 +2542,30 @@ export class SvgSceneRenderer {
       const edge = this.editor.diagram.edges.find((e) => e.id === edgeId);
       if (!edge) continue;
       const fromNode = this.editor.diagram.nodes.find((n) => n.id === edge.fromNodeId);
-      const toNode = this.editor.diagram.nodes.find((n) => n.id === edge.toNodeId);
-      if (!fromNode || !toNode) continue;
+      const toNode = edge.toNodeId
+        ? this.editor.diagram.nodes.find((n) => n.id === edge.toNodeId)
+        : undefined;
+      if (!fromNode || (!toNode && !edge.toPoint)) continue;
 
       const fromPort = fromNode.ports?.find((p) => p.id === edge.fromPortId);
-      const toPort = toNode.ports?.find((p) => p.id === edge.toPortId);
+      const toPort = toNode?.ports?.find((p) => p.id === edge.toPortId);
       const fromSide = fromPort?.side ?? edge.fromSide;
       const toSide = toPort?.side ?? edge.toSide;
+
+      const targetBoundary = toNode
+        ? {
+            id: toNode.id,
+            position: toNode.position,
+            size: toNode.size,
+            side: toSide,
+            portOffset: toPort?.offset,
+            kind: toNode.kind,
+          }
+        : {
+            position: edge.toPoint!,
+            size: { width: 0, height: 0 },
+            side: toSide,
+          };
 
       const routingResult = defaultRoutingService.route(
         {
@@ -1613,14 +2574,9 @@ export class SvgSceneRenderer {
           size: fromNode.size,
           side: fromSide,
           portOffset: fromPort?.offset,
+          kind: fromNode.kind,
         },
-        {
-          id: toNode.id,
-          position: toNode.position,
-          size: toNode.size,
-          side: toSide,
-          portOffset: toPort?.offset,
-        },
+        targetBoundary,
         {
           routing: edge.routing,
           manualWaypoints: edge.waypoints,
@@ -1741,6 +2697,28 @@ export class SvgSceneRenderer {
       this.interactionLayerEl.appendChild(line);
     }
 
+    // Arrow attachment preview line (when popup is open)
+    if (this.arrowAttachmentState) {
+      const line = document.createElementNS(svgNS, "line");
+      line.setAttribute("x1", String(this.arrowAttachmentState.startPoint.x));
+      line.setAttribute("y1", String(this.arrowAttachmentState.startPoint.y));
+      line.setAttribute("x2", String(this.arrowAttachmentState.dropCanvasPoint.x));
+      line.setAttribute("y2", String(this.arrowAttachmentState.dropCanvasPoint.y));
+      line.setAttribute("class", "umlcanvas-edge-preview-line");
+      const activeKind = this.editor.activeEdgeKind ?? "uml.association";
+      const activeStyle = defaultEdgeStyleRegistry.get(activeKind);
+      const previewMarkerEnd =
+        this.editor.defaultMarkerEnd !== undefined
+          ? this.editor.defaultMarkerEnd === "none"
+            ? undefined
+            : this.normalizeMarkerId(this.editor.defaultMarkerEnd)
+          : activeStyle.markerEndId ?? "open-arrow";
+      if (previewMarkerEnd) {
+        line.setAttribute("marker-end", `url(#${previewMarkerEnd})`);
+      }
+      this.interactionLayerEl.appendChild(line);
+    }
+
     // Edge reconnect preview
     if (this.dragMode.type === "edge-reconnect") {
       const reconnectState = this.dragMode;
@@ -1845,23 +2823,181 @@ export class SvgSceneRenderer {
     }
   }
 
+  private renderTableControls(node: DiagramNode): void {
+    const svgNS = "http://www.w3.org/2000/svg";
+    const rows = Math.max(1, (node.customData?.rows as number) || 3);
+    const cols = Math.max(1, (node.customData?.cols as number) || 3);
+
+    // Add Column (+) button at right border
+    const addColG = document.createElementNS(svgNS, "g");
+    addColG.setAttribute("class", "umlcanvas-table-canvas-btn umlcanvas-table-add-col-btn");
+    addColG.setAttribute("data-node-id", node.id);
+    addColG.setAttribute("title", "Add Column");
+    const addColCx = node.position.x + node.size.width + 16;
+    const addColCy = cols > 1
+      ? node.position.y + node.size.height / 2 - 14
+      : node.position.y + node.size.height / 2;
+    addColG.style.transformOrigin = `${addColCx}px ${addColCy}px`;
+
+    const addColHitbox = document.createElementNS(svgNS, "circle");
+    addColHitbox.setAttribute("cx", String(addColCx));
+    addColHitbox.setAttribute("cy", String(addColCy));
+    addColHitbox.setAttribute("r", "16");
+    addColHitbox.setAttribute("class", "umlcanvas-table-btn-hitbox");
+    addColG.appendChild(addColHitbox);
+
+    const addColCircle = document.createElementNS(svgNS, "circle");
+    addColCircle.setAttribute("cx", String(addColCx));
+    addColCircle.setAttribute("cy", String(addColCy));
+    addColCircle.setAttribute("r", "11");
+    addColCircle.setAttribute("class", "umlcanvas-table-btn-circle");
+    addColG.appendChild(addColCircle);
+
+    const addColText = document.createElementNS(svgNS, "text");
+    addColText.setAttribute("x", String(addColCx));
+    addColText.setAttribute("y", String(addColCy));
+    addColText.setAttribute("text-anchor", "middle");
+    addColText.setAttribute("dominant-baseline", "central");
+    addColText.setAttribute("class", "umlcanvas-table-btn-text");
+    addColText.textContent = "+";
+    addColG.appendChild(addColText);
+
+    this.interactionLayerEl.appendChild(addColG);
+
+    // Delete Column (-) button at right border (only if cols > 1)
+    if (cols > 1) {
+      const delColG = document.createElementNS(svgNS, "g");
+      delColG.setAttribute("class", "umlcanvas-table-canvas-btn umlcanvas-table-del-col-btn");
+      delColG.setAttribute("data-node-id", node.id);
+      delColG.setAttribute("title", "Delete Column");
+      const delColCx = node.position.x + node.size.width + 16;
+      const delColCy = node.position.y + node.size.height / 2 + 14;
+      delColG.style.transformOrigin = `${delColCx}px ${delColCy}px`;
+
+      const delColHitbox = document.createElementNS(svgNS, "circle");
+      delColHitbox.setAttribute("cx", String(delColCx));
+      delColHitbox.setAttribute("cy", String(delColCy));
+      delColHitbox.setAttribute("r", "16");
+      delColHitbox.setAttribute("class", "umlcanvas-table-btn-hitbox");
+      delColG.appendChild(delColHitbox);
+
+      const delColCircle = document.createElementNS(svgNS, "circle");
+      delColCircle.setAttribute("cx", String(delColCx));
+      delColCircle.setAttribute("cy", String(delColCy));
+      delColCircle.setAttribute("r", "11");
+      delColCircle.setAttribute("class", "umlcanvas-table-btn-circle is-delete");
+      delColG.appendChild(delColCircle);
+
+      const delColText = document.createElementNS(svgNS, "text");
+      delColText.setAttribute("x", String(delColCx));
+      delColText.setAttribute("y", String(delColCy));
+      delColText.setAttribute("text-anchor", "middle");
+      delColText.setAttribute("dominant-baseline", "central");
+      delColText.setAttribute("class", "umlcanvas-table-btn-text");
+      delColText.textContent = "−";
+      delColG.appendChild(delColText);
+
+      this.interactionLayerEl.appendChild(delColG);
+    }
+
+    // Add Row (+) button at bottom border
+    const addRowG = document.createElementNS(svgNS, "g");
+    addRowG.setAttribute("class", "umlcanvas-table-canvas-btn umlcanvas-table-add-row-btn");
+    addRowG.setAttribute("data-node-id", node.id);
+    addRowG.setAttribute("title", "Add Row");
+    const addRowCx = rows > 1
+      ? node.position.x + node.size.width / 2 - 14
+      : node.position.x + node.size.width / 2;
+    const addRowCy = node.position.y + node.size.height + 16;
+    addRowG.style.transformOrigin = `${addRowCx}px ${addRowCy}px`;
+
+    const addRowHitbox = document.createElementNS(svgNS, "circle");
+    addRowHitbox.setAttribute("cx", String(addRowCx));
+    addRowHitbox.setAttribute("cy", String(addRowCy));
+    addRowHitbox.setAttribute("r", "16");
+    addRowHitbox.setAttribute("class", "umlcanvas-table-btn-hitbox");
+    addRowG.appendChild(addRowHitbox);
+
+    const addRowCircle = document.createElementNS(svgNS, "circle");
+    addRowCircle.setAttribute("cx", String(addRowCx));
+    addRowCircle.setAttribute("cy", String(addRowCy));
+    addRowCircle.setAttribute("r", "11");
+    addRowCircle.setAttribute("class", "umlcanvas-table-btn-circle");
+    addRowG.appendChild(addRowCircle);
+
+    const addRowText = document.createElementNS(svgNS, "text");
+    addRowText.setAttribute("x", String(addRowCx));
+    addRowText.setAttribute("y", String(addRowCy));
+    addRowText.setAttribute("text-anchor", "middle");
+    addRowText.setAttribute("dominant-baseline", "central");
+    addRowText.setAttribute("class", "umlcanvas-table-btn-text");
+    addRowText.textContent = "+";
+    addRowG.appendChild(addRowText);
+
+    this.interactionLayerEl.appendChild(addRowG);
+
+    // Delete Row (-) button at bottom border (only if rows > 1)
+    if (rows > 1) {
+      const delRowG = document.createElementNS(svgNS, "g");
+      delRowG.setAttribute("class", "umlcanvas-table-canvas-btn umlcanvas-table-del-row-btn");
+      delRowG.setAttribute("data-node-id", node.id);
+      delRowG.setAttribute("title", "Delete Row");
+      const delRowCx = node.position.x + node.size.width / 2 + 14;
+      const delRowCy = node.position.y + node.size.height + 16;
+      delRowG.style.transformOrigin = `${delRowCx}px ${delRowCy}px`;
+
+      const delRowHitbox = document.createElementNS(svgNS, "circle");
+      delRowHitbox.setAttribute("cx", String(delRowCx));
+      delRowHitbox.setAttribute("cy", String(delRowCy));
+      delRowHitbox.setAttribute("r", "16");
+      delRowHitbox.setAttribute("class", "umlcanvas-table-btn-hitbox");
+      delRowG.appendChild(delRowHitbox);
+
+      const delRowCircle = document.createElementNS(svgNS, "circle");
+      delRowCircle.setAttribute("cx", String(delRowCx));
+      delRowCircle.setAttribute("cy", String(delRowCy));
+      delRowCircle.setAttribute("r", "11");
+      delRowCircle.setAttribute("class", "umlcanvas-table-btn-circle is-delete");
+      delRowG.appendChild(delRowCircle);
+
+      const delRowText = document.createElementNS(svgNS, "text");
+      delRowText.setAttribute("x", String(delRowCx));
+      delRowText.setAttribute("y", String(delRowCy));
+      delRowText.setAttribute("text-anchor", "middle");
+      delRowText.setAttribute("dominant-baseline", "central");
+      delRowText.setAttribute("class", "umlcanvas-table-btn-text");
+      delRowText.textContent = "−";
+      delRowG.appendChild(delRowText);
+
+      this.interactionLayerEl.appendChild(delRowG);
+    }
+  }
+
   // --- Event Handling ---
 
   private getClientCoords(e: MouseEvent): Point {
-    const rect =
-      typeof this.container.getBoundingClientRect === "function"
-        ? this.container.getBoundingClientRect()
-        : { left: 0, top: 0, width: this.container.clientWidth || 800, height: this.container.clientHeight || 600 };
+    if (!this.cachedContainerRect) {
+      if (typeof this.container.getBoundingClientRect === "function") {
+        this.cachedContainerRect = this.container.getBoundingClientRect();
+      } else {
+        this.cachedContainerRect = {
+          left: 0,
+          top: 0,
+          width: this.container.clientWidth || 800,
+          height: this.container.clientHeight || 600,
+        };
+      }
+    }
     return {
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top,
+      x: e.clientX - this.cachedContainerRect.left,
+      y: e.clientY - this.cachedContainerRect.top,
     };
   }
 
   private handleWheel(e: WheelEvent): void {
     const target = e.target as HTMLElement | null;
     const scrollable = target?.closest?.(
-      ".umlcanvas-obsidian-note-body, .umlcanvas-scrollable, .umlcanvas-obsidian-note-container"
+      ".umlcanvas-obsidian-note-body, .umlcanvas-scrollable, .umlcanvas-obsidian-note-container, .umlcanvas-pdf-container, .umlcanvas-pdf-frame"
     ) as HTMLElement | null;
     if (scrollable) {
       if (e.altKey) {
@@ -1881,7 +3017,20 @@ export class SvgSceneRenderer {
     }
 
     e.preventDefault();
+    if (this.container && typeof this.container.classList?.add === "function") {
+      this.container.classList.add("umlcanvas-scrolling");
+      if (this.scrollingTimeout) {
+        clearTimeout(this.scrollingTimeout);
+      }
+      this.scrollingTimeout = setTimeout(() => {
+        if (this.container && typeof this.container.classList?.remove === "function") {
+          this.container.classList.remove("umlcanvas-scrolling");
+        }
+        this.scrollingTimeout = null;
+      }, 150);
+    }
     const cursor = this.getClientCoords(e);
+    this.lastMouseCanvasPos = screenToCanvas(cursor, this.transform);
     const zoomFactor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
     this.setTransform(zoomAtPoint(cursor, this.transform, zoomFactor));
   }
@@ -1894,13 +3043,72 @@ export class SvgSceneRenderer {
       target &&
       typeof target.closest === "function" &&
       target.closest(
-        ".umlcanvas-main-toolbar, .umlcanvas-floating-bottom-toolbar, .umlcanvas-toolbar, .umlcanvas-menu-dropdown, .umlcanvas-palette-panel, .umlcanvas-minimap, .umlcanvas-color-palette-popover, .umlcanvas-align-popover, .umlcanvas-font-size-popover, .umlcanvas-font-size-dropdown, .umlcanvas-font-family-dropdown, .umlcanvas-connector-popover, .umlcanvas-line-popover, .umlcanvas-breadcrumbs, .umlcanvas-inline-editor, .modal, .menu, [class*='popover'], [class*='dropdown']"
+        ".umlcanvas-main-toolbar, .umlcanvas-floating-bottom-toolbar, .umlcanvas-toolbar, .umlcanvas-menu-dropdown, .umlcanvas-palette-panel, .umlcanvas-palette-toggle-tab, .umlcanvas-minimap, .umlcanvas-color-palette-popover, .umlcanvas-align-popover, .umlcanvas-font-size-popover, .umlcanvas-font-size-dropdown, .umlcanvas-font-family-dropdown, .umlcanvas-connector-popover, .umlcanvas-line-popover, .umlcanvas-breadcrumbs, .umlcanvas-inline-editor, .modal, .menu, [class*='popover'], [class*='dropdown']"
       )
     ) {
       return;
     }
 
     (e as HandledMouseEvent)._umlHandled = true;
+    if (typeof this.container.focus === "function") {
+      this.container.focus();
+    }
+
+    // Table Action Buttons (+ / − for Rows and Columns) - handled first for smooth, immediate responsiveness
+    const tableAddCol = target?.closest(".umlcanvas-table-add-col-btn");
+    const tableDelCol = target?.closest(".umlcanvas-table-del-col-btn");
+    const tableAddRow = target?.closest(".umlcanvas-table-add-row-btn");
+    const tableDelRow = target?.closest(".umlcanvas-table-del-row-btn");
+
+    if (tableAddCol || tableDelCol || tableAddRow || tableDelRow) {
+      e.stopPropagation();
+      e.preventDefault();
+      if (this.inlineEditorEl) {
+        this.commitInlineEditor();
+      }
+      this.lastTableButtonActionTime = Date.now();
+      if (tableAddCol) {
+        const nodeId = tableAddCol.getAttribute("data-node-id");
+        if (nodeId) {
+          this.editor.addTableColumn(nodeId);
+          if (!this.editor.isNodeSelected(nodeId)) {
+            this.editor.selectNode(nodeId, false);
+          }
+        }
+      } else if (tableDelCol) {
+        const nodeId = tableDelCol.getAttribute("data-node-id");
+        if (nodeId) {
+          this.editor.deleteTableColumn(nodeId);
+          if (!this.editor.isNodeSelected(nodeId)) {
+            this.editor.selectNode(nodeId, false);
+          }
+        }
+      } else if (tableAddRow) {
+        const nodeId = tableAddRow.getAttribute("data-node-id");
+        if (nodeId) {
+          this.editor.addTableRow(nodeId);
+          if (!this.editor.isNodeSelected(nodeId)) {
+            this.editor.selectNode(nodeId, false);
+          }
+        }
+      } else if (tableDelRow) {
+        const nodeId = tableDelRow.getAttribute("data-node-id");
+        if (nodeId) {
+          this.editor.deleteTableRow(nodeId);
+          if (!this.editor.isNodeSelected(nodeId)) {
+            this.editor.selectNode(nodeId, false);
+          }
+        }
+      }
+      return;
+    }
+
+    // Detect if click landed on a table cell before commitInlineEditor potentially re-renders
+    const preCellEl = target?.closest(".umlcanvas-table-cell");
+    const preCellRow = preCellEl?.getAttribute("data-row");
+    const preCellCol = preCellEl?.getAttribute("data-col");
+    const preNodeEl = target?.closest(".umlcanvas-node");
+    const preNodeId = preNodeEl?.getAttribute("data-node-id");
 
     if (this.inlineEditorEl) {
       this.commitInlineEditor();
@@ -1908,6 +3116,7 @@ export class SvgSceneRenderer {
 
     const clientPoint = this.getClientCoords(e);
     const canvasPoint = screenToCanvas(clientPoint, this.transform);
+    this.lastMouseCanvasPos = canvasPoint;
 
     // Pan via middle button or spacebar + left click or grab tool + left click
     if (e.button === 1 || (e.button === 0 && (this.isSpacePressed || this.isGrabMode))) {
@@ -1924,11 +3133,15 @@ export class SvgSceneRenderer {
     if (e.button !== 0) return;
 
     // Freehand / Hand-drawing mode: Start drawing stroke across canvas (F-070, F-071)
-    if (this.isFreehandMode && this.enableFreehand && !this.isSpacePressed) {
+    if (this.isFreehandMode && this.isFreehandEnabled && !this.isSpacePressed) {
       e.preventDefault();
       if (!e.shiftKey && !e.metaKey && !e.ctrlKey && this.editor.hasSelection) {
         this.editor.clearSelection();
       }
+      this.cachedContainerRect =
+        typeof this.container.getBoundingClientRect === "function"
+          ? this.container.getBoundingClientRect()
+          : null;
       const initialPoint: StrokePoint = {
         x: canvasPoint.x,
         y: canvasPoint.y,
@@ -1942,8 +3155,16 @@ export class SvgSceneRenderer {
 
       const path = this.viewportEl.createSvg("path", {
         cls: "umlcanvas-freehand-stroke",
-        attr: { d: `M ${canvasPoint.x},${canvasPoint.y}` },
+        attr: {
+          d: `M ${canvasPoint.x},${canvasPoint.y} L ${canvasPoint.x},${canvasPoint.y}`,
+          "stroke-width": String(this.freehandBrushWidth),
+          "stroke-opacity": String(this.freehandBrushStrength),
+        },
       });
+      path.style.strokeWidth = `${this.freehandBrushWidth}px`;
+      if (this.freehandBrushStrength < 1.0) {
+        path.style.strokeOpacity = String(this.freehandBrushStrength);
+      }
       this.freehandPathEl = path;
 
       this.dragMode = { type: "freehand" };
@@ -2039,7 +3260,8 @@ export class SvgSceneRenderer {
             node.position,
             node.size,
             side,
-            port?.offset ?? 0.5
+            port?.offset ?? 0.5,
+            node.kind
           );
           this.dragMode = {
             type: "edge",
@@ -2081,6 +3303,7 @@ export class SvgSceneRenderer {
           initialPosition: { ...bounds.position },
           initialSize: { ...bounds.size },
         };
+        this.container.classList.add("umlcanvas-resizing");
         return;
       }
     }
@@ -2107,6 +3330,7 @@ export class SvgSceneRenderer {
               ? node.customData.pathData
               : undefined,
         };
+        this.container.classList.add("umlcanvas-resizing");
         return;
       }
     }
@@ -2148,13 +3372,28 @@ export class SvgSceneRenderer {
       }
     }
 
-    // Click on note open button (F-Obsidian-Notes)
-    const openBtn = target.closest(".umlcanvas-obsidian-note-open-btn");
+    // Click on note or PDF open button
+    const openBtn = target.closest(
+      ".umlcanvas-obsidian-note-open-btn, .umlcanvas-pdf-open-btn"
+    );
     if (openBtn) {
       e.stopPropagation();
       const filePath = openBtn.getAttribute("data-file-path");
       if (filePath && this.onNoteOpen) {
         this.onNoteOpen(filePath);
+        return;
+      }
+    }
+
+    // Click on PDF page badge in header (to change target page)
+    const pdfPageBadge = target.closest(".umlcanvas-pdf-page-badge");
+    if (pdfPageBadge) {
+      e.stopPropagation();
+      const nodeEl = target.closest(".umlcanvas-node");
+      const nodeId = nodeEl?.getAttribute("data-node-id");
+      const node = nodeId ? this.editor.diagram.nodes.find((n) => n.id === nodeId) : null;
+      if (node && this.onPdfChangePage) {
+        this.onPdfChangePage(node);
         return;
       }
     }
@@ -2219,28 +3458,78 @@ export class SvgSceneRenderer {
     }
 
     // Node click -> Select & start move
-    const nodeEl = target.closest(".umlcanvas-node");
-    if (nodeEl) {
-      const nodeId = nodeEl.getAttribute("data-node-id");
-      if (nodeId) {
-        if (this.editor.isNodeLocked(nodeId)) {
-          return;
+    let nodeEl = target ? target.closest<SVGGElement>(".umlcanvas-node") : null;
+    let nodeId = nodeEl?.getAttribute("data-node-id") ?? preNodeId;
+    if (nodeId) {
+      if (!nodeEl) {
+        nodeEl = this.nodesLayerEl.querySelector<SVGGElement>(`[data-node-id="${nodeId}"]`);
+      }
+      if (this.editor.isNodeLocked(nodeId)) {
+        return;
+      }
+
+      const isMulti = e.shiftKey || e.metaKey || e.ctrlKey;
+      const wasAlreadySingleSelected =
+        !isMulti &&
+        this.editor.selectedNodeIds.length === 1 &&
+        this.editor.selectedNodeIds[0] === nodeId;
+
+      if (isMulti) {
+        this.editor.toggleNodeSelection(nodeId);
+      } else if (!this.editor.isNodeSelected(nodeId)) {
+        this.editor.selectNode(nodeId, false);
+      }
+
+      // Calculate clicked table cell if applicable
+      let clickedCell: { row: number; col: number } | undefined = undefined;
+      const clickedNode = this.editor.diagram.nodes.find((n) => n.id === nodeId);
+      if (clickedNode && clickedNode.kind === "generic.table") {
+        const rows = Math.max(1, (clickedNode.customData?.rows as number) || 3);
+        const cols = Math.max(1, (clickedNode.customData?.cols as number) || 3);
+        if (preCellRow !== null && preCellRow !== undefined && preCellCol !== null && preCellCol !== undefined) {
+          clickedCell = {
+            row: Math.max(0, Math.min(rows - 1, parseInt(preCellRow, 10))),
+            col: Math.max(0, Math.min(cols - 1, parseInt(preCellCol, 10))),
+          };
+        } else {
+          const cellEl = target ? target.closest(".umlcanvas-table-cell") : null;
+          if (cellEl) {
+            const r = parseInt(cellEl.getAttribute("data-row") || "0", 10);
+            const c = parseInt(cellEl.getAttribute("data-col") || "0", 10);
+            clickedCell = { row: r, col: c };
+          } else {
+            const relX = canvasPoint.x - clickedNode.position.x;
+            const relY = canvasPoint.y - clickedNode.position.y;
+            if (
+              relX >= 0 &&
+              relX <= clickedNode.size.width &&
+              relY >= 0 &&
+              relY <= clickedNode.size.height
+            ) {
+              const colW = clickedNode.size.width / cols;
+              const rowH = clickedNode.size.height / rows;
+              const r = Math.max(0, Math.min(rows - 1, Math.floor(relY / rowH)));
+              const c = Math.max(0, Math.min(cols - 1, Math.floor(relX / colW)));
+              clickedCell = { row: r, col: c };
+            }
+          }
+        }
+      }
+
+        // If clicking on PDF placeholder (no PDF loaded yet), prompt to pick file
+        if (target.closest(".umlcanvas-pdf-placeholder")) {
+          if (clickedNode && clickedNode.kind === "generic.pdf" && this.onPdfPick) {
+            this.onPdfPick(clickedNode);
+            return;
+          }
         }
 
-        const isMulti = e.shiftKey || e.metaKey || e.ctrlKey;
-        const wasAlreadySingleSelected =
-          !isMulti &&
-          this.editor.selectedNodeIds.length === 1 &&
-          this.editor.selectedNodeIds[0] === nodeId;
-
-        if (isMulti) {
-          this.editor.toggleNodeSelection(nodeId);
-        } else if (!this.editor.isNodeSelected(nodeId)) {
-          this.editor.selectNode(nodeId, false);
-        }
-
-        // If clicking inside the scrollable note body, allow text selection and internal interactions without initiating card dragging
-        if (target.closest(".umlcanvas-obsidian-note-body")) {
+        // If clicking inside the scrollable note body or PDF container, allow text selection and internal interactions without initiating card dragging
+        if (
+          target.closest(
+            ".umlcanvas-obsidian-note-body, .umlcanvas-pdf-container, .umlcanvas-pdf-frame"
+          )
+        ) {
           return;
         }
 
@@ -2256,6 +3545,7 @@ export class SvgSceneRenderer {
               startClient: clientPoint,
               initialPositions,
               moved: true,
+              clickedCell,
             };
             this.container.classList.add("umlcanvas-moving");
             return;
@@ -2277,11 +3567,11 @@ export class SvgSceneRenderer {
           moved: false,
           wasAlreadySingleSelected,
           clickedNodeId: nodeId,
+          clickedCell,
         };
         this.container.classList.add("umlcanvas-moving");
         return;
       }
-    }
 
     // Group Color Dot click -> Cycle color preset
     const colorDot = target.closest(".umlcanvas-group-color-dot");
@@ -2323,21 +3613,28 @@ export class SvgSceneRenderer {
           }
 
           if (!group.locked) {
+            const descendants = getDescendantGroups(this.editor.diagram, group);
+            const allMovedGroupIds = new Set<string>([group.id, ...descendants.map((dg) => dg.id)]);
+
             if (group.position && group.size) {
               const groupBounds = rect(group.position, group.size);
               for (const node of this.editor.diagram.nodes) {
                 const nodeCenter = center(rect(node.position, node.size));
                 if (contains(groupBounds, nodeCenter) || contains(groupBounds, node.position)) {
-                  if (!group.nodeIds.includes(node.id)) {
-                    const otherSmallerGroup = this.editor.diagram.groups.find(
+                  const alreadyInMovedGroup = Array.from(allMovedGroupIds).some((gid) => {
+                    const g = this.editor.diagram.groups.find((grp) => grp.id === gid);
+                    return g && g.nodeIds.includes(node.id);
+                  });
+                  if (!alreadyInMovedGroup) {
+                    const otherSmallerOutsideGroup = this.editor.diagram.groups.find(
                       (og) =>
-                        og.id !== group.id &&
+                        !allMovedGroupIds.has(og.id) &&
                         og.position &&
                         og.size &&
                         (contains(rect(og.position, og.size), nodeCenter) || contains(rect(og.position, og.size), node.position)) &&
                         og.size.width * og.size.height < group.size!.width * group.size!.height
                     );
-                    if (!otherSmallerGroup) {
+                    if (!otherSmallerOutsideGroup) {
                       group.nodeIds.push(node.id);
                     }
                   }
@@ -2345,22 +3642,39 @@ export class SvgSceneRenderer {
               }
             }
 
+            const initialGroupPositions = new Map<string, Point>();
+            if (group.position) {
+              initialGroupPositions.set(group.id, { ...group.position });
+            }
+            for (const dg of descendants) {
+              if (dg.position) {
+                initialGroupPositions.set(dg.id, { ...dg.position });
+              }
+            }
+
             const initialMemberPositions = new Map<string, Point>();
-            for (const nid of group.nodeIds) {
+            const allNodeIds = new Set<string>();
+            for (const nid of group.nodeIds) allNodeIds.add(nid);
+            for (const dg of descendants) {
+              for (const nid of dg.nodeIds) allNodeIds.add(nid);
+            }
+            for (const nid of allNodeIds) {
               const n = this.editor.diagram.nodes.find((nd) => nd.id === nid);
               if (n) {
                 initialMemberPositions.set(nid, { ...n.position });
               }
             }
+
             this.dragMode = {
               type: "group-move",
               groupId: group.id,
               startClient: clientPoint,
               initialGroupPos: group.position ? { ...group.position } : undefined,
+              initialGroupPositions,
               initialMemberPositions,
               moved: false,
               wasAlreadySingleSelected,
-              isTitleClick,
+              isTitleClick: isTitleClick && !isMulti,
             };
             this.container.classList.add("umlcanvas-moving");
           }
@@ -2381,25 +3695,67 @@ export class SvgSceneRenderer {
     };
   }
 
+  public get lastMouseCanvasPosition(): Point | undefined {
+    return this.lastMouseCanvasPos ? { ...this.lastMouseCanvasPos } : undefined;
+  }
+
+  public getViewportCenterCanvasPoint(): Point {
+    const w = this.container.clientWidth || 800;
+    const h = this.container.clientHeight || 600;
+    return screenToCanvas({ x: w / 2, y: h / 2 }, this.transform);
+  }
+
   private handleMouseMove(e: MouseEvent): void {
+    if (
+      typeof e.buttons === "number" &&
+      e.buttons === 0 &&
+      this.dragMode.type !== "none"
+    ) {
+      this.handleMouseUp(e);
+      return;
+    }
+
     const clientPoint = this.getClientCoords(e);
     const canvasPoint = screenToCanvas(clientPoint, this.transform);
+    this.lastMouseCanvasPos = canvasPoint;
 
     if (
       this.dragMode.type === "freehand" &&
       this.activeStroke &&
       this.freehandPathEl
     ) {
-      this.activeStroke.points.push({
-        x: canvasPoint.x,
-        y: canvasPoint.y,
-        pressure: (e as unknown as PointerEvent).pressure ?? 0.5,
-        time: Date.now(),
-      });
-      const d = this.activeStroke.points
-        .map((pt, i) => `${i === 0 ? "M" : "L"} ${pt.x},${pt.y}`)
-        .join(" ");
-      this.freehandPathEl.setAttribute("d", d);
+      const pointerEvt = e as unknown as { getCoalescedEvents?: () => MouseEvent[] };
+      const rawEvents: MouseEvent[] =
+        typeof pointerEvt.getCoalescedEvents === "function"
+          ? pointerEvt.getCoalescedEvents()
+          : [e];
+
+      let added = false;
+      for (const evt of rawEvents) {
+        const clientPt = evt === e ? clientPoint : this.getClientCoords(evt);
+        const pt = evt === e ? canvasPoint : screenToCanvas(clientPt, this.transform);
+        const pts = this.activeStroke.points;
+        const lastPt = pts[pts.length - 1];
+
+        // Skip sub-pixel jitter points (distance < 1.2px)
+        const dx = pt.x - lastPt.x;
+        const dy = pt.y - lastPt.y;
+        if (dx * dx + dy * dy >= 1.44) {
+          pts.push({
+            x: pt.x,
+            y: pt.y,
+            pressure: (evt as unknown as PointerEvent).pressure ?? 0.5,
+            time: Date.now(),
+          });
+          added = true;
+        }
+      }
+
+      if (added || this.activeStroke.points.length <= 2) {
+        const pts = this.activeStroke.points;
+        const d = pointsToSmoothSvgPath(pts);
+        this.freehandPathEl.setAttribute("d", d);
+      }
       return;
     }
 
@@ -2455,13 +3811,19 @@ export class SvgSceneRenderer {
             x: Math.round(initialPos.x + dx + snapOffsetX),
             y: Math.round(initialPos.y + dy + snapOffsetY),
           };
+          const nodeEl = this.nodeElements.get(id);
+          if (nodeEl) {
+            nodeEl.setAttribute(
+              "transform",
+              `translate(${node.position.x}, ${node.position.y})`
+            );
+          }
         }
       }
 
       moveState.activeGuides = activeGuides;
 
       this.renderEdges();
-      this.renderNodes();
       this.renderInteractions();
       return;
     }
@@ -2483,18 +3845,37 @@ export class SvgSceneRenderer {
               x: Math.round(initialPos.x + dx),
               y: Math.round(initialPos.y + dy),
             };
+            const nodeEl = this.nodeElements.get(id);
+            if (nodeEl) {
+              nodeEl.setAttribute(
+                "transform",
+                `translate(${node.position.x}, ${node.position.y})`
+              );
+            }
           }
         }
-        if (moveState.initialGroupPos) {
+        if (moveState.initialGroupPositions) {
+          for (const [gid, initialPos] of moveState.initialGroupPositions.entries()) {
+            const grp = this.editor.diagram.groups.find((g) => g.id === gid);
+            if (grp && grp.position) {
+              grp.position = {
+                x: Math.round(initialPos.x + dx),
+                y: Math.round(initialPos.y + dy),
+              };
+            }
+          }
+        } else if (moveState.initialGroupPos) {
           const group = this.editor.diagram.groups.find((g) => g.id === moveState.groupId);
-          if (group) {
+          if (group && group.position) {
             group.position = {
               x: Math.round(moveState.initialGroupPos.x + dx),
               y: Math.round(moveState.initialGroupPos.y + dy),
             };
           }
         }
-        this.render();
+        this.renderGroups();
+        this.renderEdges();
+        this.renderInteractions();
       }
       return;
     }
@@ -2513,8 +3894,9 @@ export class SvgSceneRenderer {
       let newW = size.width;
       let newH = size.height;
 
-      const minW = 60;
-      const minH = 40;
+      const isCardNode = node.kind === "generic.pdf" || node.kind === "obsidian.note";
+      const minW = isCardNode ? 140 : 60;
+      const minH = isCardNode ? 100 : 40;
 
       if (handle.includes("e")) newW = Math.max(minW, size.width + dx);
       if (handle.includes("s")) newH = Math.max(minH, size.height + dy);
@@ -2547,10 +3929,24 @@ export class SvgSceneRenderer {
             y: Math.round(p.y * sy * 10) / 10,
           }));
           node.customData.points = scaledPoints;
-          node.customData.pathData = scaledPoints.reduce(
-            (acc, p, i) => `${acc}${i === 0 ? "M" : " L"} ${p.x},${p.y}`,
-            ""
-          );
+          let newPathData = pointsToSmoothSvgPath(scaledPoints);
+          if (
+            newPathData.startsWith("M") &&
+            !newPathData.includes("L") &&
+            !newPathData.includes("l") &&
+            !newPathData.includes("Z") &&
+            !newPathData.includes("z") &&
+            !newPathData.includes("Q") &&
+            !newPathData.includes("q") &&
+            !newPathData.includes("C") &&
+            !newPathData.includes("c")
+          ) {
+            const coords = newPathData.substring(1).trim().split(/[ ,]+/);
+            if (coords.length >= 2) {
+              newPathData = `${newPathData} L ${coords[0]},${coords[1]}`;
+            }
+          }
+          node.customData.pathData = newPathData;
         }
       }
 
@@ -2597,7 +3993,8 @@ export class SvgSceneRenderer {
       group.position = { x: Math.round(newX), y: Math.round(newY) };
       group.size = { width: Math.round(newW), height: Math.round(newH) };
 
-      this.render();
+      this.renderGroups();
+      this.renderInteractions();
       return;
     }
 
@@ -2629,7 +4026,7 @@ export class SvgSceneRenderer {
 
           if (node.ports && node.ports.length > 0) {
             for (const p of node.ports) {
-              const pt = getSidePoint(node.position, node.size, p.side, p.offset);
+              const pt = getSidePoint(node.position, node.size, p.side, p.offset, node.kind);
               if (Math.hypot(canvasPoint.x - pt.x, canvasPoint.y - pt.y) < 16) {
                 hoveredPortId = p.id;
                 hoveredSide = p.side;
@@ -2704,12 +4101,61 @@ export class SvgSceneRenderer {
       this.renderInteractions();
       return;
     }
+
+    if (
+      this.dragMode.type === "none" &&
+      !this.isFreehandMode &&
+      !this.isGrabMode &&
+      !this.isSpacePressed &&
+      this.editor.selectedNodeIds.length <= 1
+    ) {
+      const hasTables = this.editor.diagram.nodes.some(
+        (n) => n.kind === "generic.table"
+      );
+      if (hasTables) {
+        let hoveredTableId: string | undefined;
+        for (const node of this.editor.diagram.nodes) {
+          if (node.kind === "generic.table" && this.editor.isNodeVisible(node.id) && !this.editor.isNodeLocked(node.id)) {
+            const pad = 24;
+            if (
+              canvasPoint.x >= node.position.x - pad &&
+              canvasPoint.x <= node.position.x + node.size.width + 40 &&
+              canvasPoint.y >= node.position.y - pad &&
+              canvasPoint.y <= node.position.y + node.size.height + 40
+            ) {
+              hoveredTableId = node.id;
+              break;
+            }
+          }
+        }
+        if (hoveredTableId !== this.hoveredTableNodeId) {
+          this.hoveredTableNodeId = hoveredTableId;
+          this.renderInteractions();
+        }
+      } else if (this.hoveredTableNodeId) {
+        this.hoveredTableNodeId = undefined;
+        this.renderInteractions();
+      }
+    }
+  }
+
+  private handleMouseLeave(): void {
+    if (this.dragMode.type === "none") {
+      this.cachedContainerRect = null;
+    }
+    if (this.hoveredTableNodeId) {
+      this.hoveredTableNodeId = undefined;
+      this.renderInteractions();
+    }
   }
 
   private handleMouseUp(e: MouseEvent): void {
     const clientPoint = this.getClientCoords(e);
+    const canvasPoint = screenToCanvas(clientPoint, this.transform);
+    this.lastMouseCanvasPos = canvasPoint;
 
     if (this.dragMode.type === "freehand") {
+      this.cachedContainerRect = null;
       if (this.freehandPathEl) {
         this.freehandPathEl.remove();
         this.freehandPathEl = null;
@@ -2718,7 +4164,24 @@ export class SvgSceneRenderer {
         const stroke = this.activeStroke;
         this.activeStroke = null;
 
-        // Discard micro-strokes / accidental clicks (< 15px bounding box or < 4 points)
+        // Ensure final point is captured if movement occurred
+        const lastPt = stroke.points[stroke.points.length - 1];
+        const dx = canvasPoint.x - lastPt.x;
+        const dy = canvasPoint.y - lastPt.y;
+        if (dx * dx + dy * dy >= 1.44) {
+          stroke.points.push({
+            x: canvasPoint.x,
+            y: canvasPoint.y,
+            pressure: (e as unknown as PointerEvent).pressure ?? 0.5,
+            time: Date.now(),
+          });
+        }
+
+        const shiftKeyHeld = Boolean(e.shiftKey);
+        const effectiveAutoDetect = this.autoShapeDetection && !shiftKeyHeld;
+        const isNormalDraw = !effectiveAutoDetect;
+
+        // Discard micro-strokes / accidental clicks
         let minX = Infinity;
         let maxX = -Infinity;
         let minY = Infinity;
@@ -2731,12 +4194,45 @@ export class SvgSceneRenderer {
         }
         const width = maxX - minX;
         const height = maxY - minY;
-        const isMicroStroke = stroke.points.length < 4 || (width < 15 && height < 15);
 
-        if (!isMicroStroke && this.onStrokeComplete) {
-          const shiftKeyHeld = Boolean(e.shiftKey);
-          const effectiveAutoDetect = shiftKeyHeld ? !this.autoShapeDetection : this.autoShapeDetection;
-          this.onStrokeComplete(stroke, { autoDetect: effectiveAutoDetect });
+        // In normal draw mode (not enhance/shape mode),
+        // we explicitly support short drawings, single-tap dots, and small marks.
+        // In shape detection mode, micro-strokes (< 15px or < 4 points) are discarded as accidental clicks.
+        const isMicroStroke = isNormalDraw
+          ? stroke.points.length === 0
+          : stroke.points.length < 4 || (width < 15 && height < 15);
+
+        if (!isMicroStroke) {
+          if (stroke.points.length === 1) {
+            stroke.points.push({ ...stroke.points[0] });
+          }
+
+          if (this.onStrokeComplete) {
+            this.onStrokeComplete(stroke, {
+              autoDetect: effectiveAutoDetect,
+              strokeWidth: this.freehandBrushWidth,
+              strokeOpacity: this.freehandBrushStrength,
+            });
+          } else {
+            if (effectiveAutoDetect) {
+              this.editor.snapStrokeToShape(stroke, {
+                select: false,
+                fallbackToFreehand: true,
+                strokeWidth: this.freehandBrushWidth,
+                strokeOpacity: this.freehandBrushStrength,
+              });
+            } else {
+              this.editor.keepAsFreehand(stroke, {
+                select: false,
+                strokeWidth: this.freehandBrushWidth,
+                strokeOpacity: this.freehandBrushStrength,
+              });
+            }
+          }
+          if (this.editor.hasSelection) {
+            this.editor.clearSelection();
+          }
+          this.renderInteractions();
         } else if (isMicroStroke) {
           if (!e.shiftKey && !e.metaKey && !e.ctrlKey && this.editor.hasSelection) {
             this.editor.clearSelection();
@@ -2771,7 +4267,7 @@ export class SvgSceneRenderer {
         }
         this.editor.moveNodes(moves);
       } else if (
-        moveState.wasAlreadySingleSelected &&
+        (moveState.wasAlreadySingleSelected || (moveState.clickedCell !== undefined && moveState.clickedNodeId)) &&
         moveState.clickedNodeId
       ) {
         const node = this.editor.diagram.nodes.find(
@@ -2781,9 +4277,31 @@ export class SvgSceneRenderer {
           node &&
           !this.editor.isNodeLocked(node.id) &&
           node.kind !== "obsidian.note" &&
+          (node.kind !== "generic.pdf" || Boolean((e.target as HTMLElement | null)?.closest(".umlcanvas-pdf-title"))) &&
           node.kind !== "schematic.chip" &&
           node.kind !== "generic.freehand"
         ) {
+          if (node.kind === "generic.table") {
+            if (Date.now() - this.lastTableButtonActionTime < 350) {
+              this.dragMode = { type: "none" };
+              this.renderInteractions();
+              return;
+            }
+            let r = 0;
+            let c = 0;
+            if (moveState.clickedCell) {
+              r = moveState.clickedCell.row;
+              c = moveState.clickedCell.col;
+            } else {
+              const cellEl = (e.target as HTMLElement | null)?.closest(".umlcanvas-table-cell");
+              r = cellEl ? parseInt(cellEl.getAttribute("data-row") || "0", 10) : 0;
+              c = cellEl ? parseInt(cellEl.getAttribute("data-col") || "0", 10) : 0;
+            }
+            this.dragMode = { type: "none" };
+            this.renderInteractions();
+            this.startInlineEditor(node, { row: r, col: c });
+            return;
+          }
           this.dragMode = { type: "none" };
           this.renderInteractions();
           this.startInlineEditor(node);
@@ -2809,9 +4327,16 @@ export class SvgSceneRenderer {
             node.position = { ...initPos };
           }
         }
-        if (moveState.initialGroupPos) {
+        if (moveState.initialGroupPositions) {
+          for (const [gid, initPos] of moveState.initialGroupPositions.entries()) {
+            const grp = this.editor.diagram.groups.find((g) => g.id === gid);
+            if (grp && grp.position) {
+              grp.position = { ...initPos };
+            }
+          }
+        } else if (moveState.initialGroupPos) {
           const group = this.editor.diagram.groups.find((g) => g.id === moveState.groupId);
-          if (group) {
+          if (group && group.position) {
             group.position = { ...moveState.initialGroupPos };
           }
         }
@@ -2871,6 +4396,7 @@ export class SvgSceneRenderer {
           }
         );
       }
+      this.container.classList.remove("umlcanvas-resizing");
       this.dragMode = { type: "none" };
       return;
     }
@@ -2885,6 +4411,7 @@ export class SvgSceneRenderer {
         group.size = { ...resizeState.initialSize };
         this.editor.resizeGroup(resizeState.groupId, finalPos, finalSize);
       }
+      this.container.classList.remove("umlcanvas-resizing");
       this.dragMode = { type: "none" };
       this.render();
       return;
@@ -2909,10 +4436,29 @@ export class SvgSceneRenderer {
           kind: this.editor.activeEdgeKind,
           routing: this.editor.defaultRouting,
         });
+        this.dragMode = { type: "none" };
+        this.renderInteractions();
+        return;
       }
 
+      const edgeDrag = this.dragMode;
       this.dragMode = { type: "none" };
       this.renderInteractions();
+
+      const dx = edgeDrag.currentCanvasPoint.x - edgeDrag.startPoint.x;
+      const dy = edgeDrag.currentCanvasPoint.y - edgeDrag.startPoint.y;
+      const dist = Math.hypot(dx, dy);
+
+      if (dist >= 10) {
+        this.openArrowAttachmentPopup({
+          fromNodeId: edgeDrag.fromNodeId,
+          fromPortId: edgeDrag.fromPortId,
+          fromSide: edgeDrag.fromSide,
+          dropCanvasPoint: edgeDrag.currentCanvasPoint,
+          dropClientPoint: clientPoint,
+          startPoint: edgeDrag.startPoint,
+        });
+      }
       return;
     }
 
@@ -2937,6 +4483,14 @@ export class SvgSceneRenderer {
             nodeId: targetNodeId,
             portId: targetPortId,
             side: targetSide,
+          }
+        );
+      } else if (reconnectState.endpoint === "target") {
+        this.editor.reconnectEdge(
+          reconnectState.edgeId,
+          reconnectState.endpoint,
+          {
+            point: canvasPoint,
           }
         );
       }
@@ -3007,8 +4561,18 @@ export class SvgSceneRenderer {
   }
 
   private handleDblClick(e: MouseEvent): void {
-    if (this.isGrabMode) return;
+    if (this.isGrabMode || this.isFreehandMode) return;
+    const clientPoint = this.getClientCoords(e);
+    const canvasPoint = screenToCanvas(clientPoint, this.transform);
+    this.lastMouseCanvasPos = canvasPoint;
     const target = e.target as Element;
+
+    if (
+      (target && typeof target.closest === "function" && target.closest(".umlcanvas-table-canvas-btn")) ||
+      Date.now() - this.lastTableButtonActionTime < 350
+    ) {
+      return;
+    }
 
     // Double-click on waypoint handle -> remove waypoint
     if (target.classList.contains("umlcanvas-edge-waypoint-handle")) {
@@ -3016,6 +4580,29 @@ export class SvgSceneRenderer {
       const waypointIndex = parseInt(target.getAttribute("data-waypoint-index")!, 10);
       this.editor.removeEdgeWaypoint(edgeId, waypointIndex);
       return;
+    }
+
+    // Double-click on edge endpoint handle for dangling edges -> reopen attachment popup
+    if (target.classList.contains("umlcanvas-edge-endpoint-handle")) {
+      const edgeId = target.getAttribute("data-edge-id")!;
+      const endpoint = target.getAttribute("data-endpoint");
+      if (endpoint === "target") {
+        const edge = this.editor.diagram.edges.find((e) => e.id === edgeId);
+        if (edge && edge.toPoint && !edge.toNodeId) {
+          const fromNode = this.editor.diagram.nodes.find((n) => n.id === edge.fromNodeId);
+          if (fromNode) {
+            this.openArrowAttachmentPopup({
+              fromNodeId: edge.fromNodeId,
+              fromPortId: edge.fromPortId,
+              fromSide: edge.fromSide,
+              dropCanvasPoint: { ...edge.toPoint },
+              dropClientPoint: clientPoint,
+              startPoint: fromNode.position,
+            });
+            return;
+          }
+        }
+      }
     }
 
     // Double-click on resize handle -> auto-resize node (F-Obsidian-Notes-Scalability)
@@ -3050,20 +4637,55 @@ export class SvgSceneRenderer {
       if (nodeId) {
         const node = this.editor.diagram.nodes.find((n) => n.id === nodeId);
         if (node && !this.editor.isNodeLocked(node.id)) {
+          if (target && target.closest(".umlcanvas-pdf-title")) {
+            this.startInlineEditor(node);
+            return;
+          }
           if (
             (node.kind === "obsidian.note" ||
+              node.kind === "generic.pdf" ||
               (node.metadata?.filePath && node.kind !== "generic.image"))
           ) {
             const filePath =
               (node.metadata?.filePath as string) ||
               (node.customData?.filePath as string);
             if (filePath && this.onNoteOpen) {
-              this.onNoteOpen(filePath);
+              const subpath =
+                (node.metadata?.subpath as string) ||
+                (node.customData?.subpath as string) ||
+                "";
+              const fullTarget = filePath + (subpath ? (subpath.startsWith("#") ? subpath : "#" + subpath) : "");
+              this.onNoteOpen(fullTarget);
+              return;
+            } else if (!filePath && node.kind === "generic.pdf" && this.onPdfPick) {
+              this.onPdfPick(node);
               return;
             }
           }
           if (node.kind === "schematic.chip" && this.onChipEdit) {
             this.onChipEdit(node);
+            return;
+          }
+          if (node.kind === "generic.table") {
+            const rows = Math.max(1, (node.customData?.rows as number) || 3);
+            const cols = Math.max(1, (node.customData?.cols as number) || 3);
+            const cellEl = target ? target.closest(".umlcanvas-table-cell") : null;
+            let r = 0;
+            let c = 0;
+            if (cellEl) {
+              r = parseInt(cellEl.getAttribute("data-row") || "0", 10);
+              c = parseInt(cellEl.getAttribute("data-col") || "0", 10);
+            } else {
+              const clientPoint = this.getClientCoords(e);
+              const canvasPoint = screenToCanvas(clientPoint, this.transform);
+              const relX = canvasPoint.x - node.position.x;
+              const relY = canvasPoint.y - node.position.y;
+              const colW = node.size.width / cols;
+              const rowH = node.size.height / rows;
+              r = Math.max(0, Math.min(rows - 1, Math.floor(relY / rowH)));
+              c = Math.max(0, Math.min(cols - 1, Math.floor(relX / colW)));
+            }
+            this.startInlineEditor(node, { row: r, col: c });
             return;
           }
           this.startInlineEditor(node);
@@ -3089,18 +4711,18 @@ export class SvgSceneRenderer {
     }
 
     // Double-click empty canvas -> Add node
-    const clientPoint = this.getClientCoords(e);
-    const canvasPoint = screenToCanvas(clientPoint, this.transform);
     const newNode = this.editor.addNode({
       position: {
         x: Math.round(canvasPoint.x - 80),
         y: Math.round(canvasPoint.y - 50),
       },
-      title: "New Class",
+      title: "Node",
     });
 
     // Auto-containment: if double-clicked inside an expanded group, add to group
     if (newNode) {
+      let targetGroup: Group | null = null;
+      let minArea = Infinity;
       for (const group of this.editor.diagram.groups) {
         if (group.collapsed) continue;
         const bounds = this.getGroupBounds(group);
@@ -3110,9 +4732,15 @@ export class SvgSceneRenderer {
           canvasPoint.y >= bounds.position.y &&
           canvasPoint.y <= bounds.position.y + bounds.size.height
         ) {
-          this.editor.addNodesToGroup(group.id, [newNode.id]);
-          break;
+          const area = bounds.size.width * bounds.size.height;
+          if (area < minArea) {
+            minArea = area;
+            targetGroup = group;
+          }
         }
+      }
+      if (targetGroup) {
+        this.editor.addNodesToGroup(targetGroup.id, [newNode.id]);
       }
     }
   }
@@ -3121,6 +4749,7 @@ export class SvgSceneRenderer {
     e.preventDefault();
     const clientPoint = this.getClientCoords(e);
     const canvasPoint = screenToCanvas(clientPoint, this.transform);
+    this.lastMouseCanvasPos = canvasPoint;
 
     const target = e.target as Element;
     const nodeEl = target.closest(".umlcanvas-node");
@@ -3184,12 +4813,51 @@ export class SvgSceneRenderer {
         ? this.inlineEditorEl.value
         : node.labels[0]?.text ?? "";
 
-    const lines = textToMeasure.split(/\r?\n/);
-    const lineCount = Math.max(1, lines.length);
-
     const nodeFont = getNodeFontStyle(node);
     const baseFontSize = nodeFont.fontSize ?? 13;
     const lineHeight = Math.round(baseFontSize * 1.35);
+    const boldMultiplier = nodeFont.bold ? 1.1 : 1.0;
+    const charWidth = Math.max(4.5, baseFontSize * 0.58 * boldMultiplier);
+
+    let estInPlaceW = node.size.width - 16;
+    if (node.kind === "generic.table") {
+      const cols = Math.max(1, (node.customData?.cols as number) || 3);
+      estInPlaceW = node.size.width / cols - 8;
+    } else if (node.kind === "generic.note") {
+      estInPlaceW = node.size.width - 24;
+    } else if (node.kind === "generic.stickyNote") {
+      estInPlaceW = node.size.width - 20;
+    } else if (
+      node.kind === "generic.diamond" ||
+      node.kind === "generic.triangle" ||
+      node.kind === "activity.decision" ||
+      node.kind === "state.choice"
+    ) {
+      estInPlaceW = node.size.width * 0.7 - 8;
+    } else if (
+      node.kind === "generic.circle" ||
+      node.kind === "generic.ellipse" ||
+      node.kind === "uml.usecase"
+    ) {
+      estInPlaceW = node.size.width * 0.8 - 8;
+    }
+    const availableW = Math.max(20, estInPlaceW);
+    const rawLines = textToMeasure.split(/\r?\n/);
+    let effectiveAvailableW = availableW;
+    if (nodeFont.fontSize !== undefined && nodeFont.fontSize > 13) {
+      if (node.kind !== "generic.stickyNote" && node.kind !== "generic.table") {
+        const maxRawChars = rawLines.reduce((max, l) => Math.max(max, l.length), 0);
+        if (maxRawChars <= 25) {
+          const estimatedW = Math.ceil(maxRawChars * baseFontSize * 0.65 + 24);
+          if (estimatedW > effectiveAvailableW) {
+            effectiveAvailableW = estimatedW;
+          }
+        }
+      }
+    }
+    const wrappedLines = wrapTextToLines(textToMeasure, effectiveAvailableW, charWidth);
+    const lineCount = Math.max(1, wrappedLines.length);
+
     // Ensure content height accommodates font size and lines with vertical padding
     const contentH = Math.max(24, lineCount * lineHeight + 8);
 
@@ -3232,10 +4900,38 @@ export class SvgSceneRenderer {
       inPlaceY = node.position.y + Math.max(0, node.size.height - inPlaceH - 10);
       inPlaceW = Math.max(40, node.size.width - 16);
       textAlign = "center";
+    } else if (node.kind === "generic.pdf") {
+      inPlaceH = 24;
+      inPlaceX = node.position.x + 30;
+      inPlaceY = node.position.y + 4;
+      inPlaceW = Math.max(40, node.size.width - 60);
+      textAlign = "left";
+    } else if (node.kind === "generic.table") {
+      const rows = Math.max(1, (node.customData?.rows as number) || 3);
+      const cols = Math.max(1, (node.customData?.cols as number) || 3);
+      const colW = node.size.width / cols;
+      const rowH = node.size.height / rows;
+
+      const rAttr = this.inlineEditorEl?.getAttribute("data-cell-row");
+      const cAttr = this.inlineEditorEl?.getAttribute("data-cell-col");
+      const r = rAttr !== null && rAttr !== undefined ? parseInt(rAttr, 10) : (this.editingCellRow ?? 0);
+      const c = cAttr !== null && cAttr !== undefined ? parseInt(cAttr, 10) : (this.editingCellCol ?? 0);
+
+      inPlaceX = node.position.x + c * colW + 4;
+      inPlaceY = node.position.y + r * rowH + 4;
+      inPlaceW = Math.max(20, colW - 8);
+      inPlaceH = Math.max(20, rowH - 8);
+      textAlign = "center";
+    } else if (node.kind === "generic.text") {
+      inPlaceX = node.position.x + 2;
+      inPlaceY = node.position.y + 2;
+      inPlaceW = Math.max(40, node.size.width - 4);
+      inPlaceH = Math.max(24, contentH, node.size.height - 4);
+      textAlign = "left";
     } else {
       // General shapes: vertically and horizontally centered in node
-      inPlaceX = node.position.x + 8;
-      inPlaceW = Math.max(40, node.size.width - 16);
+      inPlaceW = Math.max(30, Math.round(estInPlaceW));
+      inPlaceX = node.position.x + (node.size.width - inPlaceW) / 2;
       if (contentH <= node.size.height - 12) {
         inPlaceY = node.position.y + Math.max(6, (node.size.height - contentH) / 2);
         inPlaceH = Math.max(24, contentH);
@@ -3243,19 +4939,24 @@ export class SvgSceneRenderer {
         inPlaceY = node.position.y + (node.size.height - contentH) / 2;
         inPlaceH = contentH;
       }
+      if (node.kind === "generic.triangle") {
+        inPlaceY = node.position.y + (node.size.height * 2) / 3 - inPlaceH / 2;
+      }
       textAlign = "center";
     }
 
     if (nodeFont.fontSize !== undefined && nodeFont.fontSize > 13) {
-      if (node.kind !== "generic.stickyNote") {
-        const maxLineChars = lines.reduce((max, l) => Math.max(max, l.length), 0);
-        const estimatedW = Math.ceil(maxLineChars * baseFontSize * 0.65 + 24);
-        if (estimatedW > inPlaceW) {
-          const extraW = estimatedW - inPlaceW;
-          if (textAlign === "center") {
-            inPlaceX -= extraW / 2;
+      if (node.kind !== "generic.stickyNote" && node.kind !== "generic.table") {
+        const maxLineChars = wrappedLines.reduce((max, l) => Math.max(max, l.length), 0);
+        if (maxLineChars <= 25) {
+          const estimatedW = Math.ceil(maxLineChars * baseFontSize * 0.65 + 24);
+          if (estimatedW > inPlaceW) {
+            const extraW = estimatedW - inPlaceW;
+            if (textAlign === "center") {
+              inPlaceX -= extraW / 2;
+            }
+            inPlaceW = estimatedW;
           }
-          inPlaceW = estimatedW;
         }
       }
     }
@@ -3297,6 +4998,18 @@ export class SvgSceneRenderer {
           lineHeight: `${lineHeight}px`,
           textAlign: bounds.textAlign,
         };
+        if (node.kind === "generic.table") {
+          const cols = Math.max(1, (node.customData?.cols as number) || 3);
+          const colW = node.size.width / cols;
+          const availableW = Math.max(16, colW - 16);
+          const isHdr = (this.editingCellRow ?? 0) === 0 && node.customData?.hasHeaderRow !== false;
+          const charW = Math.max(4.5, fontSize * 0.58 * (nodeFont.bold || isHdr ? 1.1 : 1.0));
+          const wrapped = wrapTextToLines(this.inlineEditorEl.value || "", availableW, charW);
+          const textLines = Math.max(1, wrapped.length);
+          const totalTextH = textLines * lineHeight;
+          const padTop = Math.max(2, Math.floor((screenH - totalTextH) / 2));
+          styles.paddingTop = `${padTop}px`;
+        }
         styles.fontWeight = nodeFont.bold ? "bold" : "normal";
         styles.fontStyle = nodeFont.italic ? "italic" : "normal";
         if (nodeFont.fontFamily) {
@@ -3305,6 +5018,7 @@ export class SvgSceneRenderer {
           styles.fontFamily = "";
         }
         this.inlineEditorEl.setCssStyles(styles);
+        this.inlineEditorEl.scrollTop = 0;
       }
       return;
     }
@@ -3397,14 +5111,78 @@ export class SvgSceneRenderer {
         this.renderNodes();
         this.renderInteractions();
       }
+    } else if (node.kind === "generic.table") {
+      const newText = this.inlineEditorEl.value;
+      const rows = Math.max(1, (node.customData?.rows as number) || 3);
+      const cols = Math.max(1, (node.customData?.cols as number) || 3);
+      const colWidth = node.size.width / cols;
+      const nodeFont = getNodeFontStyle(node);
+      const fontSize = Math.max(10, (nodeFont.fontSize ?? 12) - (rows > 4 ? 2 : 0));
+      const lineH = Math.round(fontSize * 1.35);
+      const availableW = Math.max(16, colWidth - 16);
+      const isHdr = (this.editingCellRow ?? 0) === 0 && node.customData?.hasHeaderRow !== false;
+      const charWidth = Math.max(4.5, fontSize * 0.58 * (nodeFont.bold || isHdr ? 1.1 : 1.0));
+      const wrapped = wrapTextToLines(newText, availableW, charWidth);
+      const neededRowH = Math.max(1, wrapped.length) * lineH + 16;
+      const neededTableH = Math.max(node.size.height, rows * neededRowH);
+      if (neededTableH > node.size.height) {
+        node.size = {
+          width: node.size.width,
+          height: Math.round(neededTableH),
+        };
+        this.renderNodes();
+        this.renderInteractions();
+      }
+    } else if (node.kind !== "generic.text" && node.kind !== "generic.pdf" && node.kind !== "generic.image") {
+      const newText = this.inlineEditorEl.value;
+      const nodeFont = getNodeFontStyle(node);
+      const baseFontSize = nodeFont.fontSize ?? 13;
+      const boldMultiplier = nodeFont.bold ? 1.1 : 1.0;
+      const charWidth = Math.max(4.5, baseFontSize * 0.58 * boldMultiplier);
+      const lineH = Math.round(baseFontSize * 1.35);
+      let availableW = Math.max(20, node.size.width - 16);
+      if (
+        node.kind === "generic.diamond" ||
+        node.kind === "generic.triangle" ||
+        node.kind === "activity.decision" ||
+        node.kind === "state.choice"
+      ) {
+        availableW = Math.max(20, node.size.width * 0.7 - 8);
+      } else if (
+        node.kind === "generic.circle" ||
+        node.kind === "generic.ellipse" ||
+        node.kind === "uml.usecase"
+      ) {
+        availableW = Math.max(20, node.size.width * 0.8 - 8);
+      }
+      const wrapped = wrapTextToLines(newText, availableW, charWidth);
+      const neededH = Math.max(1, wrapped.length) * lineH + 28;
+      if (neededH > node.size.height) {
+        node.size = {
+          width: node.size.width,
+          height: Math.round(neededH),
+        };
+        this.renderNodes();
+        this.renderInteractions();
+      }
     }
 
     this.updateInlineEditorPosition();
+    if (this.inlineEditorEl) {
+      this.inlineEditorEl.scrollTop = 0;
+    }
   }
 
-  public startInlineEditor(node: DiagramNode): void {
+  public startInlineEditor(
+    node: DiagramNode,
+    cell?: { row: number; col: number }
+  ): void {
     if (this.inlineEditorEl) {
-      if (this.editingNodeId === node.id) {
+      if (
+        this.editingNodeId === node.id &&
+        (node.kind !== "generic.table" ||
+          (this.editingCellRow === cell?.row && this.editingCellCol === cell?.col))
+      ) {
         this.inlineEditorEl.focus();
         return;
       }
@@ -3416,14 +5194,40 @@ export class SvgSceneRenderer {
     }
 
     this.editingNodeId = node.id;
+    if (node.kind === "generic.table") {
+      const rows = Math.max(1, (node.customData?.rows as number) || 3);
+      const cols = Math.max(1, (node.customData?.cols as number) || 3);
+      this.editingCellRow = Math.max(0, Math.min(rows - 1, cell?.row ?? 0));
+      this.editingCellCol = Math.max(0, Math.min(cols - 1, cell?.col ?? 0));
+    } else {
+      this.editingCellRow = undefined;
+      this.editingCellCol = undefined;
+    }
+
     const nodeEl = this.nodesLayerEl.querySelector<SVGGElement>(
       `[data-node-id="${node.id}"]`
     );
     if (nodeEl) {
       nodeEl.classList.add("umlcanvas-node-editing");
+      if (node.kind === "generic.table") {
+        const cellEls = nodeEl.querySelectorAll(".umlcanvas-table-cell");
+        cellEls.forEach((el) => {
+          const r = parseInt(el.getAttribute("data-row") || "0", 10);
+          const c = parseInt(el.getAttribute("data-col") || "0", 10);
+          if (r === this.editingCellRow && c === this.editingCellCol) {
+            el.classList.add("is-editing");
+          } else {
+            el.classList.remove("is-editing");
+          }
+        });
+      }
     }
 
-    const currentText = node.labels[0]?.text ?? "";
+    let currentText = node.labels[0]?.text ?? "";
+    if (node.kind === "generic.table") {
+      const cells = (node.customData?.cells as string[][]) || [];
+      currentText = cells[this.editingCellRow ?? 0]?.[this.editingCellCol ?? 0] ?? "";
+    }
 
     if (node.kind === "generic.stickyNote" || node.kind === "generic.note") {
       const nodeFont = getNodeFontStyle(node);
@@ -3462,6 +5266,10 @@ export class SvgSceneRenderer {
         spellcheck: "false",
       },
     });
+    if (node.kind === "generic.table") {
+      textarea.setAttribute("data-cell-row", String(this.editingCellRow ?? 0));
+      textarea.setAttribute("data-cell-col", String(this.editingCellCol ?? 0));
+    }
     textarea.value = currentText;
 
     const styles: Record<string, string> = {
@@ -3473,6 +5281,18 @@ export class SvgSceneRenderer {
       lineHeight: `${lineHeight}px`,
       textAlign: bounds.textAlign,
     };
+    if (node.kind === "generic.table") {
+      const cols = Math.max(1, (node.customData?.cols as number) || 3);
+      const colW = node.size.width / cols;
+      const availableW = Math.max(16, colW - 16);
+      const isHdr = (this.editingCellRow ?? 0) === 0 && node.customData?.hasHeaderRow !== false;
+      const charW = Math.max(4.5, fontSize * 0.58 * (nodeFont.bold || isHdr ? 1.1 : 1.0));
+      const wrapped = wrapTextToLines(currentText || "", availableW, charW);
+      const textLines = Math.max(1, wrapped.length);
+      const totalTextH = textLines * lineHeight;
+      const padTop = Math.max(2, Math.floor((screenH - totalTextH) / 2));
+      styles.paddingTop = `${padTop}px`;
+    }
     styles.fontWeight = nodeFont.bold ? "bold" : "normal";
     styles.fontStyle = nodeFont.italic ? "italic" : "normal";
     if (nodeFont.fontFamily) {
@@ -3482,6 +5302,38 @@ export class SvgSceneRenderer {
 
     textarea.addEventListener("keydown", (e: KeyboardEvent) => {
       e.stopPropagation();
+
+      if (node.kind === "generic.table") {
+        const rows = Math.max(1, (node.customData?.rows as number) || 3);
+        const cols = Math.max(1, (node.customData?.cols as number) || 3);
+        const r = this.editingCellRow ?? 0;
+        const c = this.editingCellCol ?? 0;
+
+        if (e.key === "Tab") {
+          e.preventDefault();
+          this.commitInlineEditor();
+          if (!e.shiftKey && r === rows - 1 && c === cols - 1) {
+            // Auto-expand table by appending a new row on Tab from the last cell
+            this.editor.addTableRow(node.id);
+            this.startInlineEditor(node, { row: rows, col: 0 });
+            return;
+          }
+          const nextC = e.shiftKey ? (c > 0 ? c - 1 : cols - 1) : (c + 1 < cols ? c + 1 : 0);
+          const nextR = e.shiftKey
+            ? (c > 0 ? r : (r > 0 ? r - 1 : rows - 1))
+            : (c + 1 < cols ? r : (r + 1 < rows ? r + 1 : 0));
+          this.startInlineEditor(node, { row: nextR, col: nextC });
+          return;
+        }
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          this.commitInlineEditor();
+          const nextR = r + 1 < rows ? r + 1 : 0;
+          this.startInlineEditor(node, { row: nextR, col: c });
+          return;
+        }
+      }
+
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
         e.preventDefault();
         this.editor.toggleBoldForSelection();
@@ -3509,6 +5361,18 @@ export class SvgSceneRenderer {
       if (e.key === "Enter") {
         if (e.shiftKey) {
           // Shift+Enter inserts a newline for multiline in-place editing
+          if (typeof e.preventDefault === "function") {
+            e.preventDefault();
+          }
+          const start = textarea.selectionStart ?? textarea.value.length;
+          const end = textarea.selectionEnd ?? textarea.value.length;
+          const val = textarea.value;
+          textarea.value = val.substring(0, start) + "\n" + val.substring(end);
+          if (textarea.selectionStart !== undefined) {
+            textarea.selectionStart = textarea.selectionEnd = start + 1;
+          }
+          this.adjustInlineEditorHeight();
+          textarea.scrollTop = 0;
           return;
         }
         // Enter, Ctrl+Enter, or Cmd+Enter commits the edit
@@ -3527,6 +5391,15 @@ export class SvgSceneRenderer {
 
     textarea.addEventListener("input", () => {
       this.adjustInlineEditorHeight();
+      textarea.scrollTop = 0;
+    });
+
+    textarea.addEventListener("scroll", () => {
+      textarea.scrollTop = 0;
+    });
+
+    textarea.addEventListener("keyup", () => {
+      textarea.scrollTop = 0;
     });
 
     textarea.addEventListener("mousedown", (e: MouseEvent) => {
@@ -3573,6 +5446,7 @@ export class SvgSceneRenderer {
         size: fromNode.size,
         side: fromSide,
         portOffset: fromPort?.offset,
+        kind: fromNode.kind,
       },
       {
         id: toNode.id,
@@ -3580,6 +5454,7 @@ export class SvgSceneRenderer {
         size: toNode.size,
         side: toSide,
         portOffset: toPort?.offset,
+        kind: toNode.kind,
       },
       {
         routing: edge.routing,
@@ -3624,13 +5499,15 @@ export class SvgSceneRenderer {
       fromNode.position,
       fromNode.size,
       fromSide ?? getFacingSide(fromNode.position, fromNode.size, getRectCenter(toNode.position, toNode.size)),
-      fromPort?.offset ?? 0.5
+      fromPort?.offset ?? 0.5,
+      fromNode.kind
     );
     const toPt = getSidePoint(
       toNode.position,
       toNode.size,
       toSide ?? getFacingSide(toNode.position, toNode.size, getRectCenter(fromNode.position, fromNode.size)),
-      toPort?.offset ?? 0.5
+      toPort?.offset ?? 0.5,
+      toNode.kind
     );
 
     const fullPoints = [fromPt, ...edge.waypoints, toPt];
@@ -3831,6 +5708,10 @@ export class SvgSceneRenderer {
     const nodeId = this.inlineEditorEl.getAttribute("data-node-id");
     const edgeId = this.inlineEditorEl.getAttribute("data-edge-id");
     const groupId = this.inlineEditorEl.getAttribute("data-group-id");
+    const cellRowAttr = this.inlineEditorEl.getAttribute("data-cell-row");
+    const cellColAttr = this.inlineEditorEl.getAttribute("data-cell-col");
+    const r = cellRowAttr !== null && cellRowAttr !== "" ? parseInt(cellRowAttr, 10) : (this.editingCellRow ?? 0);
+    const c = cellColAttr !== null && cellColAttr !== "" ? parseInt(cellColAttr, 10) : (this.editingCellCol ?? 0);
     const newText = this.inlineEditorEl.value.trim();
 
     this.cleanupInlineEditor();
@@ -3838,6 +5719,54 @@ export class SvgSceneRenderer {
     if (nodeId) {
       const node = this.editor.diagram.nodes.find((n) => n.id === nodeId);
       if (node) {
+        if (node.kind === "generic.table") {
+          this.editor.updateTableCell(node.id, r, c, newText);
+          const tableData = getTableDataFromNode(node);
+          const rows = Math.max(1, tableData.rows || 3);
+          const cols = Math.max(1, tableData.cols || 3);
+          const colWidth = node.size.width / cols;
+          const nodeFont = getNodeFontStyle(node);
+          const fontSize = Math.max(10, (nodeFont.fontSize ?? 12) - (rows > 4 ? 2 : 0));
+          const lineH = Math.round(fontSize * 1.35);
+          const availableW = Math.max(16, colWidth - 16);
+
+          const cells = tableData.cells || [];
+          let maxNeededRowH = 0;
+          for (let rowIdx = 0; rowIdx < rows; rowIdx++) {
+            let maxLinesInRow = 1;
+            for (let colIdx = 0; colIdx < cols; colIdx++) {
+              let text = cells[rowIdx]?.[colIdx] ?? "";
+              if (!text && rowIdx === 0 && tableData.headers?.[colIdx]) {
+                text = tableData.headers[colIdx];
+              }
+              if (text) {
+                const isHdr = rowIdx === 0 && tableData.hasHeaderRow !== false;
+                const cellCharW = Math.max(4.5, fontSize * 0.58 * (nodeFont.bold || isHdr ? 1.1 : 1.0));
+                const cellLines = wrapTextToLines(text, availableW, cellCharW);
+                if (cellLines.length > maxLinesInRow) {
+                  maxLinesInRow = cellLines.length;
+                }
+              }
+            }
+            const neededForThisRow = maxLinesInRow * lineH + 16;
+            if (neededForThisRow > maxNeededRowH) {
+              maxNeededRowH = neededForThisRow;
+            }
+          }
+
+          const neededTableH = Math.max(node.size.height, rows * maxNeededRowH);
+          if (neededTableH > node.size.height) {
+            node.size = {
+              width: node.size.width,
+              height: Math.round(neededTableH),
+            };
+          }
+
+          this.renderNodes();
+          this.renderInteractions();
+          return;
+        }
+
         const nodeFont = getNodeFontStyle(node);
         const fontSize = nodeFont.fontSize ?? (node.kind === "generic.note" ? 11 : 13);
         const boldMultiplier = nodeFont.bold ? 1.1 : 1.0;
@@ -3845,7 +5774,15 @@ export class SvgSceneRenderer {
         const lines = newText.split(/\r?\n/);
         const lineSpacing = Math.round(fontSize * 1.35);
 
-        if (node.kind === "generic.stickyNote" || node.kind === "generic.note") {
+        if (node.kind === "generic.text") {
+          const maxLineLen = lines.reduce((max, l) => Math.max(max, l.length), 1);
+          const neededW = Math.max(50, Math.round(maxLineLen * charWidth + 24));
+          const neededH = Math.max(30, Math.round(lines.length * lineSpacing + 16));
+          node.size = {
+            width: neededW,
+            height: neededH,
+          };
+        } else if (node.kind === "generic.stickyNote" || node.kind === "generic.note") {
           const availableW = Math.max(40, node.size.width - (node.kind === "generic.stickyNote" ? 24 : 20));
           const wrapped = wrapTextToLines(newText, availableW, charWidth);
           const topOffset = node.kind === "generic.stickyNote" ? (26 + fontSize) : (14 + fontSize);
@@ -3856,13 +5793,31 @@ export class SvgSceneRenderer {
               height: Math.round(neededH),
             };
           }
-        } else if (lines.length > 1 || fontSize > 14) {
-          const neededH = Math.max(node.size.height, lines.length * lineSpacing + 28);
-          if (neededH > node.size.height) {
-            node.size = {
-              width: node.size.width,
-              height: Math.round(neededH),
-            };
+        } else if (node.kind !== "generic.pdf" && node.kind !== "generic.image") {
+          let availableW = Math.max(20, node.size.width - 16);
+          if (
+            node.kind === "generic.diamond" ||
+            node.kind === "generic.triangle" ||
+            node.kind === "activity.decision" ||
+            node.kind === "state.choice"
+          ) {
+            availableW = Math.max(20, node.size.width * 0.7 - 8);
+          } else if (
+            node.kind === "generic.circle" ||
+            node.kind === "generic.ellipse" ||
+            node.kind === "uml.usecase"
+          ) {
+            availableW = Math.max(20, node.size.width * 0.8 - 8);
+          }
+          const wrapped = wrapTextToLines(newText, availableW, charWidth);
+          if (wrapped.length > 1 || fontSize > 14) {
+            const neededH = Math.max(node.size.height, wrapped.length * lineSpacing + 28);
+            if (neededH > node.size.height) {
+              node.size = {
+                width: node.size.width,
+                height: Math.round(neededH),
+              };
+            }
           }
         }
       }
@@ -3880,15 +5835,15 @@ export class SvgSceneRenderer {
   }
 
   public cleanupInlineEditor(): void {
-    if (this.editingNodeId) {
-      const nodeEl = this.nodesLayerEl.querySelector<SVGGElement>(
-        `[data-node-id="${this.editingNodeId}"]`
-      );
-      if (nodeEl) {
-        nodeEl.classList.remove("umlcanvas-node-editing");
-      }
-      this.editingNodeId = null;
+    if (this.nodesLayerEl) {
+      const editingCells = this.nodesLayerEl.querySelectorAll(".is-editing");
+      editingCells.forEach((el) => el.classList.remove("is-editing"));
+      const editingNodes = this.nodesLayerEl.querySelectorAll(".umlcanvas-node-editing");
+      editingNodes.forEach((el) => el.classList.remove("umlcanvas-node-editing"));
     }
+    this.editingNodeId = null;
+    this.editingCellRow = undefined;
+    this.editingCellCol = undefined;
     if (this.editingGroupId) {
       const groupEl = this.groupsLayerEl.querySelector<SVGGElement>(
         `[data-group-id="${this.editingGroupId}"]`
@@ -3916,6 +5871,13 @@ export class SvgSceneRenderer {
     return this.inlineEditorEl;
   }
 
+  public get activeEditingCell(): { row: number; col: number } | null {
+    if (this.editingCellRow !== undefined && this.editingCellCol !== undefined) {
+      return { row: this.editingCellRow, col: this.editingCellCol };
+    }
+    return null;
+  }
+
   private handleKeyDown(e: KeyboardEvent): void {
     if (e.code === "Space" && !this.inlineEditorEl) {
       this.isSpacePressed = true;
@@ -3932,7 +5894,10 @@ export class SvgSceneRenderer {
         );
         if (node && !this.editor.isNodeLocked(node.id)) {
           e.preventDefault();
-          this.startInlineEditor(node);
+          this.startInlineEditor(
+            node,
+            node.kind === "generic.table" ? { row: 0, col: 0 } : undefined
+          );
           return;
         }
       } else if (this.editor.selectedEdgeIds.length === 1) {
@@ -3958,9 +5923,18 @@ export class SvgSceneRenderer {
 
     // Delete / Backspace
     if (e.key === "Delete" || e.key === "Backspace") {
-      e.preventDefault();
-      this.editor.deleteSelection();
-      return;
+      const target = e.target as HTMLElement | null;
+      const isInput =
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable ||
+          Boolean(target.closest(".umlcanvas-inline-editor")));
+      if (!isInput && this.editor.hasSelection) {
+        e.preventDefault();
+        this.editor.deleteSelection();
+        return;
+      }
     }
 
     // Color shortcuts: Alt+1 to Alt+6 (or 1 to 6 when selection exists), Alt+0 to clear
@@ -4058,6 +6032,8 @@ export class SvgSceneRenderer {
     // Duplicate Selection: Ctrl+D / Cmd+D
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d") {
       e.preventDefault();
+      e.stopPropagation();
+      (e as unknown as { _umlHandled?: boolean })._umlHandled = true;
       this.editor.duplicateSelection();
       return;
     }
@@ -4065,6 +6041,8 @@ export class SvgSceneRenderer {
     // Copy: Ctrl+C / Cmd+C
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
       e.preventDefault();
+      e.stopPropagation();
+      (e as unknown as { _umlHandled?: boolean })._umlHandled = true;
       this.editor.copySelection();
       return;
     }
@@ -4072,7 +6050,14 @@ export class SvgSceneRenderer {
     // Paste: Ctrl+V / Cmd+V
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
       e.preventDefault();
-      this.editor.paste();
+      e.stopPropagation();
+      (e as unknown as { _umlHandled?: boolean })._umlHandled = true;
+      const targetPoint = this.lastMouseCanvasPos ?? this.getViewportCenterCanvasPoint();
+      if (this.onPasteRequested) {
+        this.onPasteRequested(targetPoint);
+        return;
+      }
+      this.editor.pasteAt(targetPoint);
       return;
     }
 
@@ -4125,7 +6110,18 @@ export class SvgSceneRenderer {
         }
       } else if (this.editor.selectedGroupIds.length > 0) {
         e.preventDefault();
-        for (const groupId of this.editor.selectedGroupIds) {
+        const selectedGroupIds = this.editor.selectedGroupIds;
+        const topLevelSelectedGroupIds = selectedGroupIds.filter((gid) => {
+          const g = this.editor.diagram.groups.find((group) => group.id === gid);
+          if (!g) return false;
+          return !selectedGroupIds.some((otherId) => {
+            if (otherId === gid) return false;
+            const otherG = this.editor.diagram.groups.find((group) => group.id === otherId);
+            if (!otherG) return false;
+            return getDescendantGroups(this.editor.diagram, otherG).some((dg) => dg.id === gid);
+          });
+        });
+        for (const groupId of topLevelSelectedGroupIds) {
           const group = this.editor.diagram.groups.find((g) => g.id === groupId);
           if (group && !group.locked) {
             this.editor.moveGroup(groupId, { x: dx, y: dy });
@@ -4138,6 +6134,7 @@ export class SvgSceneRenderer {
     // Group Box tool shortcut: G (without Ctrl/Cmd: add standalone group box at center if no selection)
     if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "g" && !this.freehandMode) {
       if (this.editor.selectedNodeIds.length === 0 && this.editor.selectedGroupIds.length === 0 && this.editor.selectedEdgeIds.length === 0) {
+        markEventHandled(e);
         e.preventDefault();
         const centerCanvas = screenToCanvas(
           { x: this.container.clientWidth / 2, y: this.container.clientHeight / 2 },
@@ -4155,14 +6152,22 @@ export class SvgSceneRenderer {
       }
     }
 
-    // Escape: exit grab mode or freehand mode or deselect
+    // Escape: dismiss arrow attachment popup, exit grab mode or freehand mode or deselect
     if (e.key === "Escape") {
+      if (this.arrowAttachmentState) {
+        markEventHandled(e);
+        e.preventDefault();
+        this.dismissArrowAttachmentPopupToEmptySpace();
+        return;
+      }
       if (this.isGrabMode) {
+        markEventHandled(e);
         e.preventDefault();
         this.setGrabMode(false);
         return;
       }
       if (this.isFreehandMode) {
+        markEventHandled(e);
         e.preventDefault();
         this.setFreehandMode(false);
         return;
@@ -4172,15 +6177,17 @@ export class SvgSceneRenderer {
         this.editor.selectedEdgeIds.length > 0 ||
         this.editor.selectedGroupIds.length > 0
       ) {
+        markEventHandled(e);
         e.preventDefault();
         this.editor.clearSelection();
         return;
       }
     }
 
-    // Select tool shortcut: V
-    if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "v") {
+    // Select tool shortcut: V or 1 (when no selection)
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && (e.key.toLowerCase() === "v" || (e.key === "1" && !hasSelection))) {
       if (this.isFreehandMode || this.isGrabMode) {
+        markEventHandled(e);
         e.preventDefault();
         this.setFreehandMode(false);
         this.setGrabMode(false);
@@ -4188,16 +6195,18 @@ export class SvgSceneRenderer {
       }
     }
 
-    // Grab tool shortcut: H
-    if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "h") {
+    // Grab tool shortcut: H or 2 (when no selection)
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && (e.key.toLowerCase() === "h" || (e.key === "2" && !hasSelection))) {
+      markEventHandled(e);
       e.preventDefault();
       this.setGrabMode(!this.isGrabMode);
       return;
     }
 
-    // Connector / Line tool shortcut: L (connect 2 selected nodes)
-    if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "l") {
+    // Connector / Line tool shortcut: L or A (connect 2 selected nodes)
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && (e.key.toLowerCase() === "l" || e.key.toLowerCase() === "a")) {
       if (this.editor.selectedNodeIds.length === 2) {
+        markEventHandled(e);
         e.preventDefault();
         const [fromId, toId] = this.editor.selectedNodeIds;
         this.editor.addEdge(fromId, toId, {
@@ -4208,8 +6217,23 @@ export class SvgSceneRenderer {
       }
     }
 
-    // Draw tool shortcut: P (toggle Draw mode) or Shift+P (toggle Auto Shape detection)
-    if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "p" && this.enableFreehand) {
+    // Auto Shape Detection tool shortcut: S
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "s" && this.isFreehandEnabled) {
+      markEventHandled(e);
+      e.preventDefault();
+      const isAutoShapeActive = this.isFreehandMode && this.autoShapeDetection;
+      if (isAutoShapeActive) {
+        this.setFreehandMode(false);
+      } else {
+        this.setAutoShapeDetection(true);
+        this.setFreehandMode(true);
+      }
+      return;
+    }
+
+    // Draw tool shortcut: P or 7 (toggle Draw mode) or Shift+P (toggle Auto Shape detection)
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && (e.key.toLowerCase() === "p" || (e.key === "7" && !hasSelection)) && this.isFreehandEnabled) {
+      markEventHandled(e);
       if (e.shiftKey) {
         e.preventDefault();
         const isAutoShapeActive = this.isFreehandMode && this.autoShapeDetection;
@@ -4287,7 +6311,245 @@ export class SvgSceneRenderer {
     return Math.round(Math.max(0.15, Math.min(1.0, bodyHeight / estHeight)) * 100) / 100;
   }
 
+  public canvasToScreenPoint(pt: Point): Point {
+    return canvasToScreen(pt, this.transform);
+  }
+
+  public openArrowAttachmentPopup(context: ArrowAttachmentContext): ArrowAttachmentPopup {
+    this.closeArrowAttachmentPopup();
+    this.arrowAttachmentState = context;
+    this.renderInteractions();
+
+    const screenPos = canvasToScreen(context.dropCanvasPoint, this.transform);
+
+    const popup = new ArrowAttachmentPopup({
+      container: this.container,
+      position: screenPos,
+      canvasPoint: context.dropCanvasPoint,
+      fromNodeId: context.fromNodeId,
+      fromPortId: context.fromPortId,
+      fromSide: context.fromSide,
+      startPoint: context.startPoint,
+      onSelect: (item) => {
+        this.attachShapeToArrow(item);
+      },
+      onDismissToEmpty: () => {
+        this.dismissArrowAttachmentPopupToEmptySpace();
+      },
+      onOpenVaultNote: this.onOpenVaultNote
+        ? () => {
+            this.onOpenVaultNote?.((file: VaultFileLike) => {
+              const item = DEFAULT_ATTACHMENT_ITEMS.find((it) => it.id === "vault-note")!;
+              const res = this.attachShapeToArrow(item);
+              if (res && file) {
+                this.editor.updateNode(res.node.id, {
+                  title: file.basename ?? file.name ?? "Note",
+                  metadata: { filePath: file.path },
+                  customData: { filePath: file.path },
+                });
+              }
+            });
+          }
+        : undefined,
+      onOpenVaultImage: this.onOpenVaultImage
+        ? () => {
+            this.onOpenVaultImage?.((img: VaultImageLike | string) => {
+              const item = DEFAULT_ATTACHMENT_ITEMS.find((it) => it.id === "image")!;
+              const res = this.attachShapeToArrow(item);
+              if (res && img) {
+                const src = typeof img === "string" ? img : (img.src || img.path || "");
+                this.editor.updateNode(res.node.id, {
+                  metadata: { src },
+                  customData: { src },
+                });
+              }
+            });
+          }
+        : undefined,
+    });
+
+    popup.open();
+    this.arrowAttachmentPopup = popup;
+    return popup;
+  }
+
+  public closeArrowAttachmentPopup(): void {
+    if (this.arrowAttachmentPopup) {
+      const p = this.arrowAttachmentPopup;
+      this.arrowAttachmentPopup = null;
+      p.close();
+    }
+    this.arrowAttachmentState = null;
+    this.renderInteractions();
+  }
+
+  public isArrowAttachmentPopupOpen(): boolean {
+    return Boolean(this.arrowAttachmentPopup && this.arrowAttachmentPopup.isOpen);
+  }
+
+  public getArrowAttachmentPopup(): ArrowAttachmentPopup | null {
+    return this.arrowAttachmentPopup;
+  }
+
+  public dismissArrowAttachmentPopupToEmptySpace(): DiagramEdge | null {
+    if (!this.arrowAttachmentState) return null;
+    const ctx = this.arrowAttachmentState;
+    this.closeArrowAttachmentPopup();
+
+    const edge = this.editor.addEdge(ctx.fromNodeId, "", {
+      fromPortId: ctx.fromPortId,
+      fromSide: ctx.fromSide,
+      toPoint: ctx.dropCanvasPoint,
+      kind: this.editor.activeEdgeKind,
+      routing: this.editor.defaultRouting,
+    });
+
+    this.editor.clearSelection();
+    this.editor.selectEdge(edge.id, false);
+    this.render();
+    return edge;
+  }
+
+  public attachShapeToArrow(
+    itemOrId: ArrowAttachmentItem | string
+  ): { node: DiagramNode; edge: DiagramEdge } | null {
+    if (!this.arrowAttachmentState) return null;
+    const ctx = this.arrowAttachmentState;
+    this.closeArrowAttachmentPopup();
+
+    let item: ArrowAttachmentItem | undefined;
+    if (typeof itemOrId === "string") {
+      item = DEFAULT_ATTACHMENT_ITEMS.find((it) => it.id === itemOrId || it.kind === itemOrId);
+      if (!item) {
+        item = {
+          id: itemOrId,
+          kind: itemOrId,
+          label: itemOrId,
+          title: itemOrId,
+          description: "",
+          defaultSize: { width: 140, height: 80 },
+        };
+      }
+    } else {
+      item = itemOrId;
+    }
+
+    const dx = ctx.dropCanvasPoint.x - ctx.startPoint.x;
+    const dy = ctx.dropCanvasPoint.y - ctx.startPoint.y;
+    const w = item.defaultSize.width;
+    const h = item.defaultSize.height;
+
+    let toSide: Side;
+    let posX = ctx.dropCanvasPoint.x;
+    let posY = ctx.dropCanvasPoint.y;
+
+    if (Math.abs(dx) >= Math.abs(dy)) {
+      if (dx >= 0) {
+        toSide = "left";
+        posX = Math.round(ctx.dropCanvasPoint.x);
+        posY = Math.round(ctx.dropCanvasPoint.y - h / 2);
+      } else {
+        toSide = "right";
+        posX = Math.round(ctx.dropCanvasPoint.x - w);
+        posY = Math.round(ctx.dropCanvasPoint.y - h / 2);
+      }
+    } else {
+      if (dy >= 0) {
+        toSide = "top";
+        posX = Math.round(ctx.dropCanvasPoint.x - w / 2);
+        posY = Math.round(ctx.dropCanvasPoint.y);
+      } else {
+        toSide = "bottom";
+        posX = Math.round(ctx.dropCanvasPoint.x - w / 2);
+        posY = Math.round(ctx.dropCanvasPoint.y - h);
+      }
+    }
+
+    const nodeParams: {
+      kind: string;
+      title: string;
+      position: Point;
+      size: Size;
+      style?: { color?: string };
+      customData?: Record<string, unknown>;
+    } = {
+      kind: item.kind,
+      title: item.title,
+      position: { x: posX, y: posY },
+      size: { width: w, height: h },
+    };
+    if (item.color) {
+      nodeParams.style = { color: item.color };
+    }
+    if (item.customData) {
+      nodeParams.customData = JSON.parse(JSON.stringify(item.customData)) as Record<string, unknown>;
+    }
+
+    const newNode = this.editor.addNode(nodeParams);
+
+    const edge = this.editor.addEdge(ctx.fromNodeId, newNode.id, {
+      fromPortId: ctx.fromPortId,
+      fromSide: ctx.fromSide,
+      toSide,
+      kind: this.editor.activeEdgeKind,
+      routing: this.editor.defaultRouting,
+    });
+
+    if (item.id === "vault-note" && this.onOpenVaultNote) {
+      this.onOpenVaultNote((file: VaultFileLike) => {
+        if (file) {
+          this.editor.updateNode(newNode.id, {
+            title: file.basename ?? file.name ?? "Note",
+            metadata: { filePath: file.path },
+            customData: { filePath: file.path },
+          });
+        }
+      });
+    }
+
+    if (item.id === "image" && this.onOpenVaultImage) {
+      this.onOpenVaultImage((img: VaultImageLike | string) => {
+        if (img) {
+          const src = typeof img === "string" ? img : (img.src || img.path || "");
+          this.editor.updateNode(newNode.id, {
+            metadata: { src },
+            customData: { src },
+          });
+        }
+      });
+    }
+
+    this.editor.clearSelection();
+    this.editor.selectNode(newNode.id, false);
+    this.render();
+
+    // Start inline editor for instant typing!
+    if (item.kind === "generic.table") {
+      this.startInlineEditor(newNode, { row: 0, col: 0 });
+    } else if (
+      item.kind === "generic.rectangle" ||
+      item.kind === "generic.stickyNote" ||
+      item.kind === "generic.text" ||
+      item.kind === "uml.class"
+    ) {
+      this.startInlineEditor(newNode);
+    }
+
+    return { node: newNode, edge };
+  }
+
   destroy(): void {
+    if (
+      this.animationFrameId !== null &&
+      typeof window !== "undefined" &&
+      typeof window.cancelAnimationFrame === "function"
+    ) {
+      window.cancelAnimationFrame(this.animationFrameId);
+      this.animationFrameId = null;
+    }
+    this.renderScheduled = false;
+
+    this.closeArrowAttachmentPopup();
     this.cleanupInlineEditor();
 
     this.container.classList.remove("umlcanvas-moving");
@@ -4307,11 +6569,25 @@ export class SvgSceneRenderer {
     this.svgEl.removeEventListener("contextmenu", this.onContextMenuBound);
     this.svgEl.removeEventListener("dragover", this.onDragOverBound);
     this.svgEl.removeEventListener("drop", this.onDropBound);
+    this.svgEl.removeEventListener("mouseleave", this.onMouseLeaveBound);
+    if (this.onWindowResizeBound) {
+      window.removeEventListener("resize", this.onWindowResizeBound);
+    }
 
     if (this.unsubscribeEditor) {
       this.unsubscribeEditor();
       this.unsubscribeEditor = null;
     }
+
+    this.nodeElements.clear();
+    this.nodeSignatures.clear();
+    this.edgeElements.clear();
+    this.edgeSignatures.clear();
+    this.edgeRouteCache.clear();
+    this.groupElements.clear();
+    this.groupSignatures.clear();
+    this.lastVirtualizationCenter = null;
+    this.cachedContainerRect = null;
 
     this.markerTemplates.clear();
     this.createdMarkerIds.clear();

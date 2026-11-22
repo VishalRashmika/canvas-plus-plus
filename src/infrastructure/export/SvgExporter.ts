@@ -5,6 +5,7 @@ import { defaultEdgeStyleRegistry } from "../../presentation/renderer/EdgeStyleR
 import { defaultRoutingService } from "../../domain/services/RoutingService";
 import { resolveCanvasColorHex, resolveCanvasBgColor } from "../../domain/value-objects/CanvasColor";
 import { wrapTextToLines } from "../../domain/services/TextMeasurement";
+import { getTableDataFromNode } from "../../presentation/renderer/ShapeRegistry";
 import {
   getNodeFontStyle,
   getEdgeFontStyle,
@@ -403,14 +404,29 @@ export class SvgExporter {
     theme: "light" | "dark" = "light"
   ): string {
     const fromNode = diagram.nodes.find((n) => n.id === edge.fromNodeId);
-    const toNode = diagram.nodes.find((n) => n.id === edge.toNodeId);
+    const toNode = edge.toNodeId ? diagram.nodes.find((n) => n.id === edge.toNodeId) : undefined;
 
-    if (!fromNode || !toNode) return "";
+    if (!fromNode || (!toNode && !edge.toPoint)) return "";
 
     const fromPort = fromNode.ports?.find((p) => p.id === edge.fromPortId);
-    const toPort = toNode.ports?.find((p) => p.id === edge.toPortId);
+    const toPort = toNode?.ports?.find((p) => p.id === edge.toPortId);
     const fromSide = fromPort?.side ?? edge.fromSide;
     const toSide = toPort?.side ?? edge.toSide;
+
+    const targetBoundary = toNode
+      ? {
+          id: toNode.id,
+          position: toNode.position,
+          size: toNode.size,
+          side: toSide,
+          portOffset: toPort?.offset,
+          kind: toNode.kind,
+        }
+      : {
+          position: edge.toPoint!,
+          size: { width: 0, height: 0 },
+          side: toSide,
+        };
 
     const routingResult = defaultRoutingService.route(
       {
@@ -419,14 +435,9 @@ export class SvgExporter {
         size: fromNode.size,
         side: fromSide,
         portOffset: fromPort?.offset,
+        kind: fromNode.kind,
       },
-      {
-        id: toNode.id,
-        position: toNode.position,
-        size: toNode.size,
-        side: toSide,
-        portOffset: toPort?.offset,
-      },
+      targetBoundary,
       {
         routing: edge.routing,
         manualWaypoints: edge.waypoints,
@@ -519,11 +530,21 @@ export class SvgExporter {
     fontAttrs: string,
     textAnchor = "middle",
     className = "node-title",
-    fontSize = 13
+    fontSize = 13,
+    maxWidth?: number
   ): string {
-    const lines = (title ?? "").split(/\r?\n/);
+    const bold = fontAttrs.includes("font-weight: bold") || fontAttrs.includes("font-weight: 700");
+    const charWidth = Math.max(4.5, fontSize * 0.58 * (bold ? 1.1 : 1.0));
+    let effectiveMaxWidth = maxWidth;
+    if (effectiveMaxWidth === undefined && textAnchor === "middle" && cx > 20) {
+      effectiveMaxWidth = Math.max(20, cx * 2 - 16);
+    }
+    const lines = effectiveMaxWidth
+      ? wrapTextToLines(title ?? "", effectiveMaxWidth, charWidth)
+      : (title ?? "").split(/\r?\n/);
+
     if (lines.length <= 1) {
-      return `    <text x="${cx}" y="${cy}" text-anchor="${textAnchor}" class="${className}"${fontAttrs}>${escapeXml(title)}</text>\n`;
+      return `    <text x="${cx}" y="${cy}" text-anchor="${textAnchor}" class="${className}"${fontAttrs}>${escapeXml(lines[0] ?? "")}</text>\n`;
     }
     const lineHeight = Math.round(fontSize * 1.35);
     const startY = cy - ((lines.length - 1) * lineHeight) / 2;
@@ -796,8 +817,27 @@ export class SvgExporter {
       }
 
       case "generic.freehand": {
-        const pathData = (node.customData?.pathData as string) || "";
-        out += `    <path class="umlcanvas-freehand-path" d="${escapeXml(pathData)}" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />\n`;
+        let pathData = (node.customData?.pathData as string) || "";
+        if (
+          pathData.startsWith("M") &&
+          !pathData.includes("L") &&
+          !pathData.includes("l") &&
+          !pathData.includes("Z") &&
+          !pathData.includes("z") &&
+          !pathData.includes("Q") &&
+          !pathData.includes("q") &&
+          !pathData.includes("C") &&
+          !pathData.includes("c")
+        ) {
+          const coords = pathData.substring(1).trim().split(/[ ,]+/);
+          if (coords.length >= 2) {
+            pathData = `${pathData} L ${coords[0]},${coords[1]}`;
+          }
+        }
+        const strokeW = node.style?.strokeWidth ?? 2;
+        const strokeOp = node.style?.strokeOpacity ?? node.style?.opacity ?? 1.0;
+        const opacityAttr = strokeOp < 1.0 ? ` stroke-opacity="${strokeOp}"` : "";
+        out += `    <path class="umlcanvas-freehand-path" d="${escapeXml(pathData)}" fill="none" stroke="${strokeColor}" stroke-width="${strokeW}"${opacityAttr} stroke-linecap="round" stroke-linejoin="round" />\n`;
         break;
       }
 
@@ -841,6 +881,33 @@ export class SvgExporter {
         if (title) {
           out += `    <text x="${w / 2}" y="${h - 14}" text-anchor="middle" class="umlcanvas-photo-frame-title" fill="${strokeColor}"${fontAttrs}>${escapeXml(title)}</text>\n`;
         }
+        break;
+      }
+
+      case "generic.pdf": {
+        const headerH = 32;
+        const r = 8;
+        const rawTitle = node.labels[0]?.text || (node.metadata?.filePath as string) || "PDF Document";
+        const pdfTitle = rawTitle.replace(/\.pdf$/i, "");
+        out += `    <rect x="0" y="0" width="${w}" height="${h}" rx="${r}" ry="${r}" class="umlcanvas-pdf-card"${bodyAttrs} />\n`;
+        out += `    <path d="M 0 ${r} A ${r} ${r} 0 0 1 ${r} 0 L ${w - r} 0 A ${r} ${r} 0 0 1 ${w} ${r} L ${w} ${headerH} L 0 ${headerH} Z" fill="rgba(128,128,128,0.06)" />\n`;
+        out += `    <line x1="0" y1="${headerH}" x2="${w}" y2="${headerH}" stroke="${strokeColor}" stroke-width="1" />\n`;
+        // PDF Icon
+        out += `    <g transform="translate(10, 8)">\n`;
+        out += `      <path d="M9 2H3.5A1.5 1.5 0 0 0 2 3.5v11A1.5 1.5 0 0 0 3.5 16h7a1.5 1.5 0 0 0 1.5-1.5V5L9 2z" fill="none" stroke="${strokeColor}" stroke-width="1.2" stroke-linejoin="round" />\n`;
+        out += `      <polyline points="8.5 2 8.5 5.5 12 5.5" fill="none" stroke="${strokeColor}" stroke-width="1.2" stroke-linejoin="round" />\n`;
+        out += `    </g>\n`;
+        // Title
+        out += `    <text x="32" y="21" class="umlcanvas-pdf-title"${fontAttrs}>${escapeXml(pdfTitle)}</text>\n`;
+        // Open icon
+        out += `    <text x="${w - 20}" y="21" font-size="14" fill="${strokeColor}">↗</text>\n`;
+        // Fallback document body
+        const pageW = Math.round(w * 0.7);
+        const pageH = Math.round((h - headerH) * 0.75);
+        const pageX = Math.round((w - pageW) / 2);
+        const pageY = Math.round(headerH + (h - headerH - pageH) / 2);
+        out += `    <rect x="${pageX}" y="${pageY}" width="${pageW}" height="${pageH}" rx="4" fill="rgba(128,128,128,0.08)" stroke="${strokeColor}" stroke-width="1" stroke-dasharray="3 3" />\n`;
+        out += `    <text x="${w / 2}" y="${pageY + pageH / 2}" text-anchor="middle" font-size="13" fill="${strokeColor}">PDF: ${escapeXml(pdfTitle)}</text>\n`;
         break;
       }
 
@@ -889,6 +956,65 @@ export class SvgExporter {
             curY += lineSpacing;
           }
           out += `    </g>\n`;
+        }
+        break;
+      }
+
+      case "generic.text": {
+        if (title) {
+          out += this.renderMultilineText(w / 2, h / 2, title, fontAttrs, "middle", "node-title", baseFontSize);
+        }
+        break;
+      }
+
+      case "generic.table": {
+        const tableData = getTableDataFromNode(node);
+        const rows = Math.max(1, tableData.rows || 3);
+        const cols = Math.max(1, tableData.cols || 3);
+        const cells = tableData.cells || [];
+        const hasHeader = tableData.hasHeaderRow !== false;
+        const rowHeight = h / rows;
+        const colWidth = w / cols;
+
+        out += `    <rect x="0" y="0" width="${w}" height="${h}" rx="3" class="node-body umlcanvas-table-bg"${bodyAttrs} />\n`;
+        if (hasHeader && rows > 1) {
+          out += `    <rect x="0" y="0" width="${w}" height="${rowHeight}" class="umlcanvas-table-header-bg" fill="rgba(128,128,128,0.08)" />\n`;
+        }
+        for (let r = 1; r < rows; r++) {
+          const yPos = Math.round(r * rowHeight);
+          out += `    <line x1="0" y1="${yPos}" x2="${w}" y2="${yPos}" stroke="${strokeColor}" stroke-width="${r === 1 && hasHeader ? "1.5" : "1"}" />\n`;
+        }
+        for (let c = 1; c < cols; c++) {
+          const xPos = Math.round(c * colWidth);
+          out += `    <line x1="${xPos}" y1="0" x2="${xPos}" y2="${h}" stroke="${strokeColor}" stroke-width="1" />\n`;
+        }
+        for (let r = 0; r < rows; r++) {
+          for (let c = 0; c < cols; c++) {
+            let cellText = cells[r]?.[c] ?? "";
+            if (!cellText && r === 0 && tableData.headers?.[c]) {
+              cellText = tableData.headers[c];
+            }
+            if (cellText) {
+              const cellCx = c * colWidth + colWidth / 2;
+              const cellCy = r * rowHeight + rowHeight / 2;
+              const isHdr = r === 0 && hasHeader;
+              const cellPaddingX = 8;
+              const availableCellW = Math.max(16, colWidth - cellPaddingX * 2);
+              const boldMultiplier = (nodeFont.bold || isHdr) ? 1.1 : 1.0;
+              const charWidth = Math.max(4.5, baseFontSize * 0.58 * boldMultiplier);
+              const lines = wrapTextToLines(cellText, availableCellW, charWidth);
+              const formattedText = lines.join("\n");
+              out += this.renderMultilineText(
+                cellCx,
+                cellCy + 4,
+                formattedText,
+                isHdr ? `${fontAttrs} font-weight="bold"` : fontAttrs,
+                "middle",
+                isHdr ? "umlcanvas-table-cell-header" : "umlcanvas-table-cell-text",
+                baseFontSize
+              );
+            }
+          }
         }
         break;
       }

@@ -14,6 +14,8 @@ export interface NodeBoundary {
   size: Size;
   side?: Side;
   portOffset?: number;
+  kind?: string;
+  shape?: string;
 }
 
 export interface RoutingOptions {
@@ -46,10 +48,31 @@ export class RoutingService {
   ): RoutingResult {
     const routingMode = options?.routing ?? "straight";
 
+    const manualWaypoints = options?.manualWaypoints;
+    const hasWaypoints = manualWaypoints && manualWaypoints.length > 0;
+    const sourceFacing = hasWaypoints ? manualWaypoints[0] : undefined;
+    const targetFacing = hasWaypoints
+      ? manualWaypoints[manualWaypoints.length - 1]
+      : undefined;
+
     if (routingMode === "straight") {
       const endpoints = calculateStraightEndpoints(
-        { position: source.position, size: source.size, side: source.side },
-        { position: target.position, size: target.size, side: target.side }
+        {
+          position: source.position,
+          size: source.size,
+          side: source.side,
+          portOffset: source.portOffset,
+          kind: source.kind ?? source.shape,
+          facingPoint: sourceFacing,
+        },
+        {
+          position: target.position,
+          size: target.size,
+          side: target.side,
+          portOffset: target.portOffset,
+          kind: target.kind ?? target.shape,
+          facingPoint: targetFacing,
+        }
       );
       const points = [endpoints.start, ...(options?.manualWaypoints ?? []), endpoints.end];
       return {
@@ -72,8 +95,22 @@ export class RoutingService {
 
     // Default fallback to straight
     const endpoints = calculateStraightEndpoints(
-      { position: source.position, size: source.size, side: source.side },
-      { position: target.position, size: target.size, side: target.side }
+      {
+        position: source.position,
+        size: source.size,
+        side: source.side,
+        portOffset: source.portOffset,
+        kind: source.kind ?? source.shape,
+        facingPoint: sourceFacing,
+      },
+      {
+        position: target.position,
+        size: target.size,
+        side: target.side,
+        portOffset: target.portOffset,
+        kind: target.kind ?? target.shape,
+        facingPoint: targetFacing,
+      }
     );
     const points = [endpoints.start, ...(options?.manualWaypoints ?? []), endpoints.end];
     return {
@@ -101,13 +138,15 @@ export class RoutingService {
       source.position,
       source.size,
       fromSide,
-      source.portOffset ?? 0.5
+      source.portOffset ?? 0.5,
+      source.kind ?? source.shape
     );
     const toPt = getSidePoint(
       target.position,
       target.size,
       toSide,
-      target.portOffset ?? 0.5
+      target.portOffset ?? 0.5,
+      target.kind ?? target.shape
     );
 
     // Stubs extending perpendicularly outward from source and target boundaries
@@ -204,13 +243,15 @@ export class RoutingService {
       source.position,
       source.size,
       fromSide,
-      source.portOffset ?? 0.5
+      source.portOffset ?? 0.5,
+      source.kind ?? source.shape
     );
     const toPt = getSidePoint(
       target.position,
       target.size,
       toSide,
-      target.portOffset ?? 0.5
+      target.portOffset ?? 0.5,
+      target.kind ?? target.shape
     );
 
     const manualWaypoints = options?.manualWaypoints;

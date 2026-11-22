@@ -264,6 +264,37 @@ describe("Right-Click Context Menu Grouping Tests", () => {
     expect(fontSizeItem).toBeDefined();
     expect(fontSizeItem.submenu).toBeDefined();
     expect(fontSizeItem.submenu.items.some((i: any) => i.title.includes("Reset font (12px, normal)"))).toBe(true);
+
+    // Verify Delete group item
+    const deleteItem = lastMenu.items.find((i: any) => i.title === "Delete group");
+    expect(deleteItem).toBeDefined();
+    deleteItem.onClickHandler();
+    expect(editor.diagram.groups.find((g) => g.id === group.id)).toBeUndefined();
+  });
+
+  it("should delete all selected groups when multiple groups are selected and context menu Delete is clicked", () => {
+    const g1 = editor.addGroup({ position: { x: 0, y: 0 }, size: { width: 100, height: 100 }, name: "G1" });
+    const g2 = editor.addGroup({ position: { x: 200, y: 0 }, size: { width: 100, height: 100 }, name: "G2" });
+
+    editor.selectGroup(g1.id, false);
+    editor.toggleGroupSelection(g2.id);
+    expect(editor.selectedGroupIds.length).toBe(2);
+
+    (view as any).showContextMenu(
+      { clientX: 50, clientY: 50 } as any,
+      { x: 50, y: 50 },
+      undefined,
+      undefined,
+      g1
+    );
+
+    const deleteItem = lastMenu.items.find((i: any) => i.title.includes("Delete"));
+    expect(deleteItem).toBeDefined();
+    expect(deleteItem.title).toBe("Delete 2 groups");
+    deleteItem.onClickHandler();
+
+    expect(editor.diagram.groups.find((g) => g.id === g1.id)).toBeUndefined();
+    expect(editor.diagram.groups.find((g) => g.id === g2.id)).toBeUndefined();
   });
 
   it("should fall back gracefully to adding items directly if setSubmenu is not available", () => {

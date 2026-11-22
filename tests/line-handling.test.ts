@@ -1481,6 +1481,222 @@ describe("Task #5: Line Handling & Manipulation Tests", () => {
       expect(svgOutput).toContain('stroke-dasharray="8 3 2 3"');
     });
   });
+
+  describe("7. Arrow Connection to Triangle Shapes (Touching Triangle Surface)", () => {
+    it("should make straight arrow from a box to a triangle touch the triangle properly and not limit to square bounding box", () => {
+      // Box on left: x: 50..150, y: 50..130 (center: 100, 90)
+      const boxNode = editor.addNode({
+        kind: "generic.rectangle",
+        position: { x: 50, y: 50 },
+        size: { width: 100, height: 80 },
+        title: "Box",
+      });
+
+      // Triangle on right: x: 300..400, y: 50..130 (center: 350, 90)
+      // Triangle vertices: (350, 50) top, (400, 130) bottom-right, (300, 130) bottom-left
+      // Left slant edge passes through (300, 130) to (350, 50). At y=90, x=325.
+      const triangleNode = editor.addNode({
+        kind: "generic.triangle",
+        position: { x: 300, y: 50 },
+        size: { width: 100, height: 80 },
+        title: "Triangle",
+      });
+
+      const edge = editor.addEdge(boxNode.id, triangleNode.id, {
+        kind: "uml.association",
+        routing: "straight",
+        style: { markerEnd: "arrow" },
+      });
+
+      renderer.render();
+
+      // Check routing result directly
+      const routingResult = defaultRoutingService.route(
+        {
+          id: boxNode.id,
+          position: boxNode.position,
+          size: boxNode.size,
+          kind: boxNode.kind,
+        },
+        {
+          id: triangleNode.id,
+          position: triangleNode.position,
+          size: triangleNode.size,
+          kind: triangleNode.kind,
+        },
+        { routing: "straight" }
+      );
+
+      const endPoint = routingResult.points[routingResult.points.length - 1];
+      // If it limited itself to the square bounding box, endPoint.x would be 300.
+      // Touching the triangle requires endPoint.x to reach the slanted edge at x=325!
+      expect(endPoint.x).toBeGreaterThan(300);
+      expect(endPoint.x).toBe(325);
+      expect(endPoint.y).toBe(90);
+
+      // Verify SVG rendered path
+      const edgeGroup = container.querySelector(`[data-edge-id="${edge.id}"]`);
+      expect(edgeGroup).not.toBeNull();
+      const pathEl = edgeGroup?.querySelector(".umlcanvas-edge-line");
+      const dAttr = pathEl?.getAttribute("d");
+      expect(dAttr).toBe("M 150 90 L 325 90");
+    });
+
+    it("should make straight arrow from a triangle to a box touch the triangle surface properly", () => {
+      // Triangle on left: x: 50..150, y: 50..130 (center: 100, 90)
+      // Right slant edge passes from (100, 50) to (150, 130). At y=90, x=125.
+      const triangleNode = editor.addNode({
+        kind: "generic.triangle",
+        position: { x: 50, y: 50 },
+        size: { width: 100, height: 80 },
+        title: "Triangle",
+      });
+
+      // Box on right: x: 300..400, y: 50..130 (center: 350, 90)
+      const boxNode = editor.addNode({
+        kind: "generic.rectangle",
+        position: { x: 300, y: 50 },
+        size: { width: 100, height: 80 },
+        title: "Box",
+      });
+
+      const edge = editor.addEdge(triangleNode.id, boxNode.id, {
+        kind: "uml.association",
+        routing: "straight",
+      });
+
+      renderer.render();
+
+      const routingResult = defaultRoutingService.route(
+        {
+          id: triangleNode.id,
+          position: triangleNode.position,
+          size: triangleNode.size,
+          kind: triangleNode.kind,
+        },
+        {
+          id: boxNode.id,
+          position: boxNode.position,
+          size: boxNode.size,
+          kind: boxNode.kind,
+        },
+        { routing: "straight" }
+      );
+
+      const startPoint = routingResult.points[0];
+      // Starts on right slanted edge of triangle at x=125, not square bounding box x=150
+      expect(startPoint.x).toBe(125);
+      expect(startPoint.y).toBe(90);
+
+      const endPoint = routingResult.points[routingResult.points.length - 1];
+      expect(endPoint.x).toBe(300);
+      expect(endPoint.y).toBe(90);
+    });
+
+    it("should touch the triangle on all 4 sides when connecting to triangle ports", () => {
+      const triangleNode = editor.addNode({
+        kind: "generic.triangle",
+        position: { x: 200, y: 100 },
+        size: { width: 120, height: 80 },
+      });
+
+      // Top apex: (200 + 60, 100) = (260, 100)
+      // Bottom base center: (200 + 60, 100 + 80) = (260, 180)
+      // Left slant midpoint: (200 + 30, 100 + 40) = (230, 140)
+      // Right slant midpoint: (200 + 90, 100 + 40) = (290, 140)
+      const boxLeft = editor.addNode({ position: { x: 50, y: 100 }, size: { width: 60, height: 80 } });
+      const boxRight = editor.addNode({ position: { x: 400, y: 100 }, size: { width: 60, height: 80 } });
+      const boxTop = editor.addNode({ position: { x: 230, y: 0 }, size: { width: 60, height: 40 } });
+      const boxBottom = editor.addNode({ position: { x: 230, y: 250 }, size: { width: 60, height: 40 } });
+
+      const edgeL = editor.addEdge(boxLeft.id, triangleNode.id, { toSide: "left" });
+      const edgeR = editor.addEdge(boxRight.id, triangleNode.id, { toSide: "right" });
+      const edgeT = editor.addEdge(boxTop.id, triangleNode.id, { toSide: "top" });
+      const edgeB = editor.addEdge(boxBottom.id, triangleNode.id, { toSide: "bottom" });
+
+      renderer.render();
+
+      const rL = defaultRoutingService.route(
+        { position: boxLeft.position, size: boxLeft.size },
+        { position: triangleNode.position, size: triangleNode.size, side: "left", kind: triangleNode.kind }
+      );
+      expect(rL.points[rL.points.length - 1]).toEqual({ x: 230, y: 140 });
+
+      const rR = defaultRoutingService.route(
+        { position: boxRight.position, size: boxRight.size },
+        { position: triangleNode.position, size: triangleNode.size, side: "right", kind: triangleNode.kind }
+      );
+      expect(rR.points[rR.points.length - 1]).toEqual({ x: 290, y: 140 });
+
+      const rT = defaultRoutingService.route(
+        { position: boxTop.position, size: boxTop.size },
+        { position: triangleNode.position, size: triangleNode.size, side: "top", kind: triangleNode.kind }
+      );
+      expect(rT.points[rT.points.length - 1]).toEqual({ x: 260, y: 100 });
+
+      const rB = defaultRoutingService.route(
+        { position: boxBottom.position, size: boxBottom.size },
+        { position: triangleNode.position, size: triangleNode.size, side: "bottom", kind: triangleNode.kind }
+      );
+      expect(rB.points[rB.points.length - 1]).toEqual({ x: 260, y: 180 });
+    });
+
+    it("should make orthogonal and curved arrows touch the triangle properly", () => {
+      const boxNode = editor.addNode({
+        kind: "generic.rectangle",
+        position: { x: 50, y: 50 },
+        size: { width: 100, height: 80 },
+      });
+      const triangleNode = editor.addNode({
+        kind: "generic.triangle",
+        position: { x: 300, y: 50 },
+        size: { width: 100, height: 80 },
+      });
+
+      // Orthogonal
+      const orthoResult = defaultRoutingService.route(
+        { position: boxNode.position, size: boxNode.size, kind: boxNode.kind },
+        { position: triangleNode.position, size: triangleNode.size, kind: triangleNode.kind },
+        { routing: "orthogonal" }
+      );
+      const orthoEnd = orthoResult.points[orthoResult.points.length - 1];
+      expect(orthoEnd.x).toBe(325);
+      expect(orthoEnd.y).toBe(90);
+
+      // Curved
+      const curvedResult = defaultRoutingService.route(
+        { position: boxNode.position, size: boxNode.size, kind: boxNode.kind },
+        { position: triangleNode.position, size: triangleNode.size, kind: triangleNode.kind },
+        { routing: "curved" }
+      );
+      const curvedEnd = curvedResult.points[curvedResult.points.length - 1];
+      expect(curvedEnd.x).toBe(325);
+      expect(curvedEnd.y).toBe(90);
+    });
+
+    it("should export arrow to triangle in standalone SVG touching the triangle", () => {
+      const boxNode = editor.addNode({
+        kind: "generic.rectangle",
+        position: { x: 50, y: 50 },
+        size: { width: 100, height: 80 },
+      });
+      const triangleNode = editor.addNode({
+        kind: "generic.triangle",
+        position: { x: 300, y: 50 },
+        size: { width: 100, height: 80 },
+      });
+      editor.addEdge(boxNode.id, triangleNode.id, {
+        kind: "uml.association",
+        routing: "straight",
+        style: { markerEnd: "arrow" },
+      });
+
+      const exporter = new SvgExporter();
+      const svg = exporter.exportToSvg(editor.diagram);
+
+      expect(svg).toContain('d="M 150 90 L 325 90"');
+    });
+  });
 });
 
 

@@ -4,38 +4,38 @@ import * as path from "path";
 describe("Plugin Version Consistency", () => {
   const rootDir = path.resolve(__dirname, "..");
 
-  it("should have version 2.1.1 in manifest.json", () => {
+  it("should have version 2.1.2 in manifest.json", () => {
     const manifestPath = path.join(rootDir, "manifest.json");
     const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
-    expect(manifest.version).toBe("2.1.1");
+    expect(manifest.version).toBe("2.1.2");
   });
 
-  it("should have version 2.1.1 in package.json", () => {
+  it("should have version 2.1.2 in package.json", () => {
     const pkgPath = path.join(rootDir, "package.json");
     const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
-    expect(pkg.version).toBe("2.1.1");
+    expect(pkg.version).toBe("2.1.2");
   });
 
-  it("should have version 2.1.1 in package-lock.json", () => {
+  it("should have version 2.1.2 in package-lock.json", () => {
     const lockPath = path.join(rootDir, "package-lock.json");
     const lock = JSON.parse(fs.readFileSync(lockPath, "utf-8"));
-    expect(lock.version).toBe("2.1.1");
-    expect(lock.packages[""].version).toBe("2.1.1");
+    expect(lock.version).toBe("2.1.2");
+    expect(lock.packages[""].version).toBe("2.1.2");
   });
 
-  it("should include 2.1.1 in versions.json mapped to minAppVersion", () => {
+  it("should include 2.1.2 in versions.json mapped to minAppVersion", () => {
     const manifestPath = path.join(rootDir, "manifest.json");
     const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
 
     const versionsPath = path.join(rootDir, "versions.json");
     const versions = JSON.parse(fs.readFileSync(versionsPath, "utf-8"));
-    expect(versions["2.1.1"]).toBe(manifest.minAppVersion);
+    expect(versions["2.1.2"]).toBe(manifest.minAppVersion);
   });
 
-  it("should reference v2.1.1 in README.md", () => {
+  it("should reference v2.1.2 in README.md", () => {
     const readmePath = path.join(rootDir, "README.md");
     const readme = fs.readFileSync(readmePath, "utf-8");
-    expect(readme).toContain("badge/version-v2.1.1-blue.svg");
-    expect(readme).toContain("**Version: `v2.1.1`**");
+    expect(readme).toContain("badge/version-v2.1.2-blue.svg");
+    expect(readme).toContain("**Version: `v2.1.2`**");
   });
 });

@@ -218,6 +218,7 @@ describe("Obsidian Left Sidebar Ribbon Icon Tests", () => {
 
       const fileExplorerView = {
         containerEl: {
+          findAll: () => [mockEl],
           querySelectorAll: () => [mockEl],
         },
       };

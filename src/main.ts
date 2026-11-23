@@ -493,13 +493,17 @@ export default class CanvasPlusPlusPlugin extends Plugin {
 
       // 1h. DOM container inspection
       if (view.containerEl) {
-        const activeEls: Element[] = typeof view.containerEl.findAll === "function"
-          ? view.containerEl.findAll(
+        const containerAny = view.containerEl as unknown as {
+          findAll?: (s: string) => Element[];
+          querySelectorAll?: (s: string) => Element[];
+        };
+        const activeEls: Element[] = typeof containerAny.findAll === "function"
+          ? containerAny.findAll(
               ".nav-folder.is-active, .nav-folder.is-selected, .nav-folder-title.is-active, .nav-folder-title.is-selected, .tree-item.is-selected, .tree-item-self.is-selected, .tree-item-self.is-active"
             )
-          : (typeof (view.containerEl as unknown as { querySelectorAll?: (s: string) => NodeListOf<Element> }).querySelectorAll === "function"
+          : (typeof containerAny["querySelectorAll"] === "function"
             ? Array.from(
-                (view.containerEl as unknown as { querySelectorAll: (s: string) => NodeListOf<Element> }).querySelectorAll(
+                containerAny["querySelectorAll"](
                   ".nav-folder.is-active, .nav-folder.is-selected, .nav-folder-title.is-active, .nav-folder-title.is-selected, .tree-item.is-selected, .tree-item-self.is-selected, .tree-item-self.is-active"
                 )
               )
@@ -635,7 +639,9 @@ export default class CanvasPlusPlusPlugin extends Plugin {
         for (const leaf of leaves) {
           const container = leaf.view?.containerEl;
           if (!container) continue;
-          const items = container.querySelectorAll<HTMLElement>(".nav-file-title, .tree-item-self");
+          const items = typeof container.findAll === "function"
+            ? container.findAll(".nav-file-title, .tree-item-self")
+            : [];
           items.forEach((titleEl) => {
             const path = (titleEl.getAttribute("data-path") || "").toLowerCase();
             if (

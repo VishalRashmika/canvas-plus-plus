@@ -7,6 +7,7 @@ import {
 import { DiagramEditor } from "../src/application/use-cases/DiagramEditor";
 import { createDiagram } from "../src/domain/entities/Diagram";
 import { SvgSceneRenderer } from "../src/presentation/renderer/SvgSceneRenderer";
+import { ShapeRecognizer } from "../src/domain/services/ShapeRecognizer";
 
 // Headless MockElement for testing renderer & DOM events
 class MockElement {
@@ -610,6 +611,75 @@ describe("FreehandSmoother & Smooth Drawing Tool", () => {
 
       (global as any).window.dispatch("mouseup", { clientX: 150, clientY: 110 });
       container.getBoundingClientRect = originalGetBoundingClientRect;
+    });
+
+    it("does not abort freehand drawing when mousemove reports buttons === 0 (e.g. Linux / Electron stylus / trackpad events)", () => {
+      const svgEl = container.querySelector(".umlcanvas-svg");
+      const bgRect = container.querySelector(".umlcanvas-bg");
+
+      svgEl?.dispatch("mousedown", { button: 0, target: bgRect, clientX: 50, clientY: 50 });
+
+      // First move with buttons === 0 (simulates driver reporting buttons: 0)
+      (global as any).window.dispatch("mousemove", { clientX: 70, clientY: 80, buttons: 0 });
+      // Subsequent moves along a curve
+      (global as any).window.dispatch("mousemove", { clientX: 100, clientY: 120, buttons: 1 });
+      (global as any).window.dispatch("mousemove", { clientX: 140, clientY: 150, buttons: 1 });
+      (global as any).window.dispatch("mousemove", { clientX: 180, clientY: 130, buttons: 1 });
+      (global as any).window.dispatch("mousemove", { clientX: 220, clientY: 90, buttons: 1 });
+
+      // Live preview should still be active and have captured all curve points
+      const previewEl = container.querySelector(".umlcanvas-freehand-stroke");
+      expect(previewEl).not.toBeNull();
+      const previewD = previewEl?.getAttribute("d");
+      expect(previewD).toContain("Q");
+
+      (global as any).window.dispatch("mouseup", { clientX: 220, clientY: 90 });
+
+      expect(editor.diagram.nodes.length).toBe(1);
+      const freehandNode = editor.diagram.nodes[0];
+      expect(freehandNode.kind).toBe("generic.freehand");
+      // Stroke did not collapse into a 2-point line
+      const points = freehandNode.customData?.points as any[];
+      expect(points.length).toBeGreaterThan(2);
+      expect(freehandNode.customData?.pathData).toContain("Q");
+    });
+
+    it("adds umlcanvas-drawing and umlcanvas-dragging-active classes to container during draw and cleans them up on mouseup", () => {
+      const svgEl = container.querySelector(".umlcanvas-svg");
+      const bgRect = container.querySelector(".umlcanvas-bg");
+
+      expect(container.classList.contains("umlcanvas-drawing")).toBe(false);
+      expect(container.classList.contains("umlcanvas-dragging-active")).toBe(false);
+
+      svgEl?.dispatch("mousedown", { button: 0, target: bgRect, clientX: 50, clientY: 50 });
+
+      expect(container.classList.contains("umlcanvas-drawing")).toBe(true);
+      expect(container.classList.contains("umlcanvas-dragging-active")).toBe(true);
+
+      (global as any).window.dispatch("mousemove", { clientX: 70, clientY: 80 });
+      expect(container.classList.contains("umlcanvas-drawing")).toBe(true);
+
+      (global as any).window.dispatch("mouseup", { clientX: 70, clientY: 80 });
+
+      expect(container.classList.contains("umlcanvas-drawing")).toBe(false);
+      expect(container.classList.contains("umlcanvas-dragging-active")).toBe(false);
+    });
+
+    it("does not classify curved strokes (e.g. semicircles/arcs) as straight lines in ShapeRecognizer", () => {
+      const recognizer = new ShapeRecognizer();
+      // Points along an arc / semicircle (radius 100, angles 0 to PI)
+      const arcPoints = [];
+      for (let i = 0; i <= 20; i++) {
+        const theta = (i / 20) * Math.PI;
+        arcPoints.push({
+          x: Math.round(100 + 100 * Math.cos(theta)),
+          y: Math.round(100 + 100 * Math.sin(theta)),
+        });
+      }
+
+      const stroke = { id: "test-arc", points: arcPoints };
+      const result = recognizer.recognize(stroke);
+      expect(result.shape).not.toBe("line");
     });
   });
 });

@@ -120,8 +120,8 @@ export class ShapeRecognizer {
       };
     }
 
-    // Straight line evaluation (support natural handdrawn lines with slight curves/wobble)
-    if (straightness >= 0.50) {
+    // Straight line evaluation (must be genuinely straight with high fidelity, curves must not be classified as lines)
+    if (straightness >= 0.88) {
       const confidence = Math.max(0.70, Math.min(1.0, straightness));
       return {
         shape: "line",

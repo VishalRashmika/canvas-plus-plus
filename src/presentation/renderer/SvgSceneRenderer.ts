@@ -3134,6 +3134,7 @@ export class SvgSceneRenderer {
     // Freehand / Hand-drawing mode: Start drawing stroke across canvas (F-070, F-071)
     if (this.isFreehandMode && this.isFreehandEnabled && !this.isSpacePressed) {
       e.preventDefault();
+      e.stopPropagation();
       if (!e.shiftKey && !e.metaKey && !e.ctrlKey && this.editor.hasSelection) {
         this.editor.clearSelection();
       }
@@ -3165,6 +3166,10 @@ export class SvgSceneRenderer {
         path.style.strokeOpacity = String(this.freehandBrushStrength);
       }
       this.freehandPathEl = path;
+
+      if (this.container && typeof this.container.classList?.add === "function") {
+        this.container.classList.add("umlcanvas-drawing", "umlcanvas-dragging-active");
+      }
 
       this.dragMode = { type: "freehand" };
       return;
@@ -3708,7 +3713,8 @@ export class SvgSceneRenderer {
     if (
       typeof e.buttons === "number" &&
       e.buttons === 0 &&
-      this.dragMode.type !== "none"
+      this.dragMode.type !== "none" &&
+      this.dragMode.type !== "freehand"
     ) {
       this.handleMouseUp(e);
       return;
@@ -3723,6 +3729,9 @@ export class SvgSceneRenderer {
       this.activeStroke &&
       this.freehandPathEl
     ) {
+      e.preventDefault();
+      e.stopPropagation();
+
       const pointerEvt = e as unknown as { getCoalescedEvents?: () => MouseEvent[] };
       const rawEvents: MouseEvent[] =
         typeof pointerEvt.getCoalescedEvents === "function"
@@ -4154,6 +4163,11 @@ export class SvgSceneRenderer {
     this.lastMouseCanvasPos = canvasPoint;
 
     if (this.dragMode.type === "freehand") {
+      e.preventDefault();
+      e.stopPropagation();
+      if (this.container && typeof this.container.classList?.remove === "function") {
+        this.container.classList.remove("umlcanvas-drawing", "umlcanvas-dragging-active");
+      }
       this.cachedContainerRect = null;
       if (this.freehandPathEl) {
         this.freehandPathEl.remove();

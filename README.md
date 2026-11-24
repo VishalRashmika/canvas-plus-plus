@@ -1,7 +1,7 @@
 # Canvas++
 
 <p align="center">
-  <a href="https://github.com/VishalRashmika/canvas-plus-plus/releases"><img src="https://img.shields.io/badge/version-v2.2.1-blue.svg?style=flat-square" alt="Version"></a>
+  <a href="https://github.com/VishalRashmika/canvas-plus-plus/releases"><img src="https://img.shields.io/badge/version-v2.2.2-blue.svg?style=flat-square" alt="Version"></a>
   <a href="https://obsidian.md"><img src="https://img.shields.io/badge/Obsidian-v1.5.0+-7C3AED.svg?style=flat-square&logo=obsidian&logoColor=white" alt="Obsidian"></a>
   <a href="https://raw.githubusercontent.com/obsidianmd/obsidian-releases/master/community-plugin-stats.json"><img src="https://img.shields.io/badge/dynamic/json?logo=obsidian&color=7C3AED&label=downloads&query=%24%5B%27canvas-plus-plus%27%5D.downloads&url=https%3A%2F%2Fraw.githubusercontent.com%2Fobsidianmd%2Fobsidian-releases%2Fmaster%2Fcommunity-plugin-stats.json&style=flat-square" alt="Obsidian Downloads"></a>
   <a href="https://github.com/VishalRashmika/canvas-plus-plus/stargazers"><img src="https://img.shields.io/github/stars/VishalRashmika/canvas-plus-plus?style=flat-square&color=brightgreen" alt="Stars"></a>
@@ -11,13 +11,13 @@
 </p>
 
 > [!NOTE]
-> **Version: `v2.2.1`**  
+> **Version: `v2.2.2`**  
 > An extensible, supercharged visual diagramming canvas for Obsidian. Sketch freehand, auto-detect geometric shapes, insert interactive tables, embed notes, PDFs, & images, create collapsible groups, and build flowcharts or formal UML architecture with native JSON Canvas compatibility.
 
 ---
 
 <p align="center">
-  <img src="https://scrapbook.vishalrashmika.com/canvas-plus-plus/shapes-enhance.webp" alt="Shape Enhancement Showcase" width="100%" />
+  <img src="https://raw.githubusercontent.com/VishalRashmika/canvas-plus-plus/assets/shapes-enhance.webp" alt="Shape Enhancement Showcase" width="100%" />
 </p>
 
 ## Overview
@@ -28,13 +28,13 @@ Whether you are sketching a quick mental model, structuring complex research wit
 
 ---
 
-## 🌟 Interactive Demos & Features
+## Interactive Demos & Features
 
 ### 1. Instant Shape Enhancement & Auto-Detection
 Sketch rough shapes with your mouse or stylus, and Canvas++ instantly enhances them into clean geometric shapes (rectangles, diamonds, ellipses, actors, circles, cylinders). An instant escape-hatch toast allows you to undo the conversion with one click if you prefer the raw hand-drawn stroke.
 
 <p align="center">
-  <img src="https://scrapbook.vishalrashmika.com/canvas-plus-plus/shapes-enhance.webp" alt="Instant Shape Enhancement" width="100%" />
+  <img src="https://raw.githubusercontent.com/VishalRashmika/canvas-plus-plus/assets/shapes-enhance.webp" alt="Instant Shape Enhancement" width="100%" />
 </p>
 
 ---
@@ -43,7 +43,7 @@ Sketch rough shapes with your mouse or stylus, and Canvas++ instantly enhances t
 Draw smooth, responsive freehand sketches, quick annotations, and curvy lines without lag or jitter. Features sub-pixel smoothing, customizable brush widths, and adjustable stroke opacities for a natural whiteboard feel.
 
 <p align="center">
-  <img src="https://scrapbook.vishalrashmika.com/canvas-plus-plus/freehand-draw.webp" alt="Natural Freehand Whiteboard Drawing" width="100%" />
+  <img src="https://raw.githubusercontent.com/VishalRashmika/canvas-plus-plus/assets/freehand-draw.webp" alt="Natural Freehand Whiteboard Drawing" width="100%" />
 </p>
 
 ---
@@ -52,7 +52,7 @@ Draw smooth, responsive freehand sketches, quick annotations, and curvy lines wi
 Choose from an extensive library of geometric shapes, sticky notes, decision diamonds, and connectors. Connect any node with dynamic orthogonal, curved, or straight lines that feature automatic obstacle avoidance, waypoint editing, and customizable markers.
 
 <p align="center">
-  <img src="https://scrapbook.vishalrashmika.com/canvas-plus-plus/shapes-and-lines.webp" alt="Rich Shapes, Smart Connectors & Flowcharts" width="100%" />
+  <img src="https://raw.githubusercontent.com/VishalRashmika/canvas-plus-plus/assets/shapes-and-lines.webp" alt="Rich Shapes, Smart Connectors & Flowcharts" width="100%" />
 </p>
 
 ---
@@ -61,7 +61,7 @@ Choose from an extensive library of geometric shapes, sticky notes, decision dia
 Create and edit spreadsheet-style tables directly inside the canvas. Add or delete rows and columns with quick inline buttons, edit cell values directly, and organize data in structured formats right on your canvas.
 
 <p align="center">
-  <img src="https://scrapbook.vishalrashmika.com/canvas-plus-plus/tables.webp" alt="Interactive Structured Tables" width="100%" />
+  <img src="https://raw.githubusercontent.com/VishalRashmika/canvas-plus-plus/assets/tables.webp" alt="Interactive Structured Tables" width="100%" />
 </p>
 
 ---
@@ -70,7 +70,7 @@ Create and edit spreadsheet-style tables directly inside the canvas. Add or dele
 Organize complex diagrams into logical clusters. Group multiple cards and shapes together, collapse them into compact cards when you want to reduce visual noise, and expand them whenever you need to dive into details.
 
 <p align="center">
-  <img src="https://scrapbook.vishalrashmika.com/canvas-plus-plus/Groups.webp" alt="Collapsible Groups & Visual Organization" width="100%" />
+  <img src="https://raw.githubusercontent.com/VishalRashmika/canvas-plus-plus/assets/Groups.webp" alt="Collapsible Groups & Visual Organization" width="100%" />
 </p>
 
 ---
@@ -79,7 +79,7 @@ Organize complex diagrams into logical clusters. Group multiple cards and shapes
 Embed full multi-page PDF documents right onto the infinite canvas. Flip through pages, zoom into sections, and connect reference literature, slides, and datasheets side-by-side with your thoughts.
 
 <p align="center">
-  <img src="https://scrapbook.vishalrashmika.com/canvas-plus-plus/inserting-pdfs.webp" alt="Embedded PDF Documents & Multi-Page Viewer" width="100%" />
+  <img src="https://raw.githubusercontent.com/VishalRashmika/canvas-plus-plus/assets/inserting-pdfs.webp" alt="Embedded PDF Documents & Multi-Page Viewer" width="100%" />
 </p>
 
 ---
@@ -88,7 +88,7 @@ Embed full multi-page PDF documents right onto the infinite canvas. Flip through
 Drag and drop images from your vault or search for assets directly from the canvas modal. Resize, position, and connect visual reference images, diagrams, and UI mockups.
 
 <p align="center">
-  <img src="https://scrapbook.vishalrashmika.com/canvas-plus-plus/inserting-images.webp" alt="Vault Images & Visual Media Cards" width="100%" />
+  <img src="https://raw.githubusercontent.com/VishalRashmika/canvas-plus-plus/assets/inserting-images.webp" alt="Vault Images & Visual Media Cards" width="100%" />
 </p>
 
 ---
@@ -97,7 +97,7 @@ Drag and drop images from your vault or search for assets directly from the canv
 Personalize your workspace with curated color themes, pastel palettes, dark/light mode synchronization, customizable accent colors, and custom typography styling.
 
 <p align="center">
-  <img src="https://scrapbook.vishalrashmika.com/canvas-plus-plus/color-themes.webp" alt="Color Themes & Visual Customization" width="100%" />
+  <img src="https://raw.githubusercontent.com/VishalRashmika/canvas-plus-plus/assets/color-themes.webp" alt="Color Themes & Visual Customization" width="100%" />
 </p>
 
 ---
@@ -109,12 +109,12 @@ When you need formal technical specifications, Canvas++ provides comprehensive U
 - **Hardware Schematics**: Digital IC chips with directional I/O pins, multi-bit buses, and hierarchical sub-circuit drilldown.
 
 <p align="center">
-  <img src="https://scrapbook.vishalrashmika.com/canvas-plus-plus/UML.webp" alt="Software Engineering & UML Architecture Modeling" width="100%" />
+  <img src="https://raw.githubusercontent.com/VishalRashmika/canvas-plus-plus/assets/UML.webp" alt="Software Engineering & UML Architecture Modeling" width="100%" />
 </p>
 
 ---
 
-## 🚀 Core Advantages
+## Core Advantages
 
 - **JSON Canvas 1.0 Native**: Saved as `.canvuspp` files (with backward-compatible `.umlcanvas` support). Compatible with standard JSON Canvas viewers while storing rich visual and structural diagram data.
 - **Infinite Canvas Performance**: Smooth pan and zoom (10% – 400%), smart alignment guides, viewport culling, and interactive minimap navigation.
@@ -124,7 +124,7 @@ When you need formal technical specifications, Canvas++ provides comprehensive U
 
 ---
 
-## 📦 Installation
+## Installation
 
 ### From Obsidian Community Plugins
 1. In Obsidian, open **Settings** > **Community plugins**.
@@ -146,7 +146,7 @@ When you need formal technical specifications, Canvas++ provides comprehensive U
 
 ---
 
-## ⌨️ Keyboard & Mouse Controls
+## Keyboard & Mouse Controls
 
 | Action | Shortcut |
 | :--- | :--- |
@@ -166,7 +166,7 @@ When you need formal technical specifications, Canvas++ provides comprehensive U
 
 ---
 
-## ☕ Support
+## Support
 
 If Canvas++ helps your visual thinking, note-taking, and diagramming in Obsidian, consider supporting its maintenance and development:
 
@@ -176,6 +176,6 @@ If Canvas++ helps your visual thinking, note-taking, and diagramming in Obsidian
 
 ---
 
-## 📄 License
+## License
 
 This project is licensed under the [GNU General Public License v3.0 (GPLv3)](LICENSE).

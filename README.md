@@ -28,7 +28,7 @@ Whether you are sketching a quick mental model, structuring complex research wit
 
 ---
 
-## 🌟 Interactive Demos & Features
+## Interactive Demos & Features
 
 ### 1. Instant Shape Enhancement & Auto-Detection
 Sketch rough shapes with your mouse or stylus, and Canvas++ instantly enhances them into clean geometric shapes (rectangles, diamonds, ellipses, actors, circles, cylinders). An instant escape-hatch toast allows you to undo the conversion with one click if you prefer the raw hand-drawn stroke.
@@ -114,7 +114,7 @@ When you need formal technical specifications, Canvas++ provides comprehensive U
 
 ---
 
-## 🚀 Core Advantages
+## Core Advantages
 
 - **JSON Canvas 1.0 Native**: Saved as `.canvuspp` files (with backward-compatible `.umlcanvas` support). Compatible with standard JSON Canvas viewers while storing rich visual and structural diagram data.
 - **Infinite Canvas Performance**: Smooth pan and zoom (10% – 400%), smart alignment guides, viewport culling, and interactive minimap navigation.
@@ -124,7 +124,7 @@ When you need formal technical specifications, Canvas++ provides comprehensive U
 
 ---
 
-## 📦 Installation
+## Installation
 
 ### From Obsidian Community Plugins
 1. In Obsidian, open **Settings** > **Community plugins**.
@@ -146,7 +146,7 @@ When you need formal technical specifications, Canvas++ provides comprehensive U
 
 ---
 
-## ⌨️ Keyboard & Mouse Controls
+## Keyboard & Mouse Controls
 
 | Action | Shortcut |
 | :--- | :--- |
@@ -166,7 +166,7 @@ When you need formal technical specifications, Canvas++ provides comprehensive U
 
 ---
 
-## ☕ Support
+## Support
 
 If Canvas++ helps your visual thinking, note-taking, and diagramming in Obsidian, consider supporting its maintenance and development:
 
@@ -176,6 +176,6 @@ If Canvas++ helps your visual thinking, note-taking, and diagramming in Obsidian
 
 ---
 
-## 📄 License
+## License
 
 This project is licensed under the [GNU General Public License v3.0 (GPLv3)](LICENSE).

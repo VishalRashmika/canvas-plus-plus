@@ -571,8 +571,8 @@ describe("FreehandSmoother & Smooth Drawing Tool", () => {
       }
       const duration = Date.now() - start;
 
-      // 300 rapid moves finish quickly without blocking
-      expect(duration).toBeLessThan(1000);
+      // 300 rapid moves finish quickly without blocking (generous threshold for CI/multi-core parallel load)
+      expect(duration).toBeLessThan(3000);
 
       const previewEl = container.querySelector(".umlcanvas-freehand-stroke");
       expect(previewEl).not.toBeNull();

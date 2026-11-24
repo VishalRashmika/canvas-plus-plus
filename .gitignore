@@ -25,6 +25,7 @@ lerna-debug.log*
 .npm/
 
 # --- Testing & Coverage ---
+tests/
 coverage/
 .nyc_output/
 *.lcov
